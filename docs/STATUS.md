@@ -1,17 +1,31 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #1 (scaffold) done → #29 next
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #29 done → #2 (sidecars) next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
-- **#1 is done.** The Tauri v2 + React/TS/Tailwind app opens an empty "Queue" window.
+- **#1 is done** (commit 9bd2762, pushed; issue closed). The Tauri v2 + React/TS/Tailwind app opens an empty "Queue" window.
   - Toolchains are installed on the owner's Mac (`brew install mise rustup`) and pinned in the repo (D-010): Node 24.21.0 in `mise.toml`, Rust 1.99.0 in `rust-toolchain.toml`.
   - Exact pins: Tauri CLI 2.12.1 / API 2.12.2, `tauri` =2.12.2, `tauri-build` =2.7.1, React 19.3.0, Vite 8.3.4, Tailwind 4.3.3 (Vite plugin), TypeScript 6.0.3. `package-lock.json` and `Cargo.lock` are committed.
   - Generated from create-tauri-app 4.7.5 (react-ts). Removed: the greet demo, `tauri-plugin-opener`, serde, and the template SVGs. The app identifier is `dev.mcclease.queue`.
   - The icons are the Tauri template defaults; real icons come in #18.
   - README has a Development section with setup steps.
+- **#29 is done.** It was squash-merged from PR #34 after a green 4-OS hosted run. `.github/workflows/build.yml` (D-011):
+  - The `check` job runs on ubuntu-24.04 for every PR and every push to `main`: `npm ci`, build, `npm test`, `cargo fmt`, clippy, `cargo test`.
+  - The `bundle` matrix runs tauri-action v1.0.0 for macOS arm64, macOS x64 (cross-compiled on macos-26), Windows x64, and Linux x64, and uploads unsigned workflow artifacts. It runs on pushes to `main` and on PRs labelled `ci:bundle`.
+  - Actions are SHA-pinned and runner images are pinned.
+  - The sidecar fetch step is deferred to #2, which doesn't exist yet. BACKLOG has been updated.
+  - New `npm test` script (`node --test "qa/tests/*.test.mjs"`). The directory form `node --test qa/tests/` fails, which is why the glob is used.
 
 ## Checks performed (2026-10-10, macOS arm64 only)
+- #29: actionlint 1.7.12 is clean and `npm test` passes 6/6 locally. The workflow hasn't run on GitHub yet; the first run will be on the draft PR.
+- #29 first hosted run (PR #34): checks and the macOS arm64/x64 and Linux bundles passed, and all 9 artifacts uploaded (Windows msi/nsis included). The Windows job then failed in `npm test`: git's CRLF checkout broke the line-based config tests. Fixed with `.gitattributes` (`eol=lf`) plus CRLF normalization in the tests. The failure was reproduced locally on a CRLF copy (2 fail), and the fix passes it (14/14).
+- #29 second hosted run (0c928b5): **all green**. check 80s; bundles: macos-arm64 114s, macos-x64 124s, linux-x64 219s, windows-x64 729s; 9 artifacts uploaded. That's about 80 billed minutes warm and about 110 cold; D-011 is updated to match.
+- #29 final `codex-qa review --base main`: **PASS WITH NOTES**, no findings (`qa/reports/20261010-113126-review-WrJi.md`). Separately confirmed: `.gitattributes` leaves the icons alone (git classifies them as `-text`), and the downloaded macOS artifacts are `x86_64` and `arm64` Mach-O respectively. Nobody has installed or launched the Windows, Linux, or Intel builds yet.
+- #29 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-103737-test-1s65.md`). P2: D-011's wording ("every push and PR") didn't match the triggers (main pushes and PRs). Resolved by fixing the wording rather than the trigger, which avoids running PR checks twice; the owner confirmed this policy. Codex's local checks passed, including a debug arm64 `tauri build`. The owner approved its 8 CI tests, which are merged as `qa/tests/ci.test.mjs`. The trigger test was rewritten for the confirmed policy, and a concurrency-group assertion was added. `npm test` passes 14/14.
+- #29 `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261010-104349-review-vCfW.md`). P2: a shared concurrency group let GitHub drop a pending push-to-main run and its artifacts. Fixed: every non-PR run now gets its own group (`github.run_id`). P3: the narrowed trigger was marked Confirmed while still pending. The owner has since confirmed it. Codex's `npm test` saw 2 tests blocked by sandbox EPERM; locally all 6 pass. The re-review was **PASS WITH NOTES** (`qa/reports/20261010-104621-review-Jfl3.md`); its only note, the decision status, is resolved.
+
+### #1
 - `npm run build` (tsc + vite): OK.
 - `cargo fmt --check`: OK. `cargo clippy --all-targets -- -D warnings`: OK.
 - `npm run tauri dev`: the app builds and opens a 900×640 window titled "Queue". Confirmed through the window server, System Events, and a screenshot showing "Queue is empty." in dark mode.
@@ -24,4 +38,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-#1 is committed. Next, do **#29** (cross-platform CI with tauri-action) before #2, so Windows and Linux build problems show up early. CI should read `rust-toolchain.toml` and the Node version in `mise.toml`, and run the scaffold tests after the frontend build.
+Confirm the push-to-main CI run for the #29 merge is green. Then start **#2**: a `scripts/fetch-sidecars` script that downloads pinned yt-dlp and LGPL ffmpeg for the 4 target triples into `src-tauri/binaries/` (git-ignored), checks their checksums, and wires them up as Tauri sidecars, plus the per-target fetch step in `build.yml`. Consult the `ytdlp-expert` agent on yt-dlp build choice and pinning. After #2, do #3 and #4 to finish M1, then run the M1 `codex-qa audit`.

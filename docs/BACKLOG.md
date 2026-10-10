@@ -8,10 +8,10 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | Issue | Req | Pri | Area | Item |
 |---|---|---|---|---|
 | #1 | — | P0 | infra | **Scaffold Tauri v2 + React/TS/Tailwind app** — Create the app skeleton with pinned toolchain versions. `npm run tauri dev` opens an empty window. |
-| #2 | D6 | P0 | infra | **Bundle yt-dlp + ffmpeg sidecars** — Script to fetch pinned yt-dlp and LGPL ffmpeg builds for each target triple (macOS arm64/x64, Windows x64, Linux x64) into src-tauri/binaries (git-ignored), wired up as Tauri sidecars. |
+| #2 | D6 | P0 | infra | **Bundle yt-dlp + ffmpeg sidecars** — Script to fetch pinned yt-dlp and LGPL ffmpeg builds for each target triple (macOS arm64/x64, Windows x64, Linux x64) into src-tauri/binaries (git-ignored), wired up as Tauri sidecars. Also adds the per-target fetch step to CI (`build.yml`). |
 | #3 | Q1 | P0 | queue | **URL bar with + button and basic queue list** — Single-line input; Enter or + adds a row showing the raw URL. |
 | #4 | D2 | P0 | download | **Download one item to a fixed folder named {title}** — Run the yt-dlp sidecar with an argv array and -o '%(title)s.%(ext)s'. No -f, so yt-dlp picks the format. Item shows done/failed. |
-| #29 | NFR | P0 | infra | **Cross-platform CI builds (macOS, Windows, Linux)** — GitHub Actions matrix using tauri-action, with sidecars fetched per platform. Unsigned artifacts are uploaded on every push to main. |
+| #29 | NFR | P0 | infra | **Cross-platform CI builds (macOS, Windows, Linux)** — GitHub Actions matrix using tauri-action. Unsigned artifacts are uploaded on every push to main (D-011). The sidecar fetch step comes with #2. |
 
 ## M2 – Real queue
 
