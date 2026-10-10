@@ -42,7 +42,7 @@ A non-Claude model does QA so the code isn't only checked by the model that wrot
 
 ## D-011 CI: checks on every change, OS bundles on main — Confirmed (2026-10-10)
 - `.github/workflows/build.yml` runs the checks (`npm test`, `cargo fmt`, clippy, `cargo test`) once on Linux for every PR and every push to `main`. Pushes to other branches without a PR don't run CI, which avoids running every PR twice (owner confirmed 2026-10-10).
-- All 4 bundles build on every push to `main` and upload unsigned workflow artifacts: macOS arm64, macOS x64 (cross-compiled on the arm64 runner), Windows x64, and Linux x64. A PR only bundles when it has the `ci:bundle` label. The repo is private and macOS minutes bill at 10×, at roughly 250 billed minutes per full run.
+- All 4 bundles build on every push to `main` and upload unsigned workflow artifacts: macOS arm64, macOS x64 (cross-compiled on the arm64 runner), Windows x64, and Linux x64. A PR only bundles when it has the `ci:bundle` label. The repo is private, and macOS minutes bill at 10× and Windows at 2×. The first hosted runs cost about 80 billed minutes per full run with a warm cache and about 110 cold, measured on PR #34.
 - Runner images are pinned (`macos-26`, `windows-2025`, `ubuntu-24.04`), not `-latest`. Actions are pinned to commit SHAs. Node comes from `package.json` `engines` and Rust from `rust-toolchain.toml`.
 - CI changes are tested on a branch with a draft PR before they go to `main`.
 - Each push to `main` gets its own concurrency group, so queued runs (and their artifacts) are never dropped. A new push to a PR cancels that PR's older run.
