@@ -1,0 +1,28 @@
+{
+  "$comment": "Pinned sidecars (#2, D-012). Change versions only in a dedicated commit; update every sha256 from the upstream checksum files.",
+  "ytdlp": {
+    "version": "2026.08.19",
+    "url": "https://github.com/yt-dlp/yt-dlp/releases/download/{version}/{asset}",
+    "assets": {
+      "aarch64-apple-darwin": { "asset": "yt-dlp_macos", "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202" },
+      "x86_64-apple-darwin": { "asset": "yt-dlp_macos", "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202" },
+      "x86_64-pc-windows-msvc": { "asset": "yt-dlp.exe", "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a" },
+      "x86_64-unknown-linux-gnu": { "asset": "yt-dlp_linux", "sha256": "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a" }
+    }
+  },
+  "deno": {
+    "version": "v2.9.7",
+    "url": "https://github.com/denoland/deno/releases/download/{version}/{asset}",
+    "assets": {
+      "aarch64-apple-darwin": { "asset": "deno-aarch64-apple-darwin.zip", "sha256": "5cd46d6268f6f78f5d88bdc7159d20bd44cdaa4b3303474839f87ec6fe7ae25c" },
+      "x86_64-apple-darwin": { "asset": "deno-x86_64-apple-darwin.zip", "sha256": "95daaff11c116a52ad54785e7914c8e9c9cdcaba793c5ed929c74ca2d8e6259a" },
+      "x86_64-pc-windows-msvc": { "asset": "deno-x86_64-pc-windows-msvc.zip", "sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238" },
+      "x86_64-unknown-linux-gnu": { "asset": "deno-x86_64-unknown-linux-gnu.zip", "sha256": "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490" }
+    }
+  },
+  "ffmpeg": {
+    "version": "9.0.2",
+    "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+    "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+  }
+}

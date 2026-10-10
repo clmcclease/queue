@@ -1,6 +1,6 @@
 # PRD: "Queue" — a desktop GUI for yt-dlp with smart file naming
 
-**Status:** Draft v2 · **Owner:** Chris McClease · **Created:** 2026-10-10 · **Updated:** 2026-10-10 · **Milestones:** see [BACKLOG](../BACKLOG.md)
+**Status:** Draft v2 · **Owner:** Chris McClease · **Created:** 2026-10-10 · **Updated:** 2026-10-10 (size budget, D-013) · **Milestones:** see [BACKLOG](../BACKLOG.md)
 
 ## Context
 Today the workflow is: copy a YouTube link → run `yt-dlp` in the terminal → file lands in a folder → rename it by hand. When several videos get downloaded in a row, the renaming gets skipped, files end up with useless names, and they get lost. The goal is a lightweight, polished, **cross-platform** desktop app that queues links, downloads them with yt-dlp into a folder you choose, and gives each file a clean, human-readable name. The name comes from the video's metadata and is tidied up by an AI model that runs **locally by default**.
@@ -112,7 +112,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 
 ## 7. Non-functional requirements
 - **Cross-platform:** macOS (Apple Silicon and Intel), Windows 10/11 (x64), and Linux (x64; AppImage and .deb) from M1 on. CI builds all three on every push.
-- **Lightweight:** installer under ~80 MB including yt-dlp, ffmpeg, and the llama.cpp runtime. The AI model (~1–2 GB) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
+- **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~1–2 GB) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
 - **Polished UI:** a single window with a dark/light theme that follows the system, smooth animations, thumbnails, and keyboard-first use (⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item). It follows each OS's conventions for window controls and menus.
 - **Resilient:** one item failing never stops the queue. yt-dlp self-updates (`yt-dlp -U`) at launch, at most once a day.
 - **Private:** no telemetry. With the default settings, the only network calls are yt-dlp itself, update checks, and the one-time model download. Item metadata is only sent to a third party if the user picks the API provider.
