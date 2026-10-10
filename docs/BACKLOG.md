@@ -23,6 +23,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #8 | D4 | P0 | download | **Live progress (percent, speed, ETA)** — Parse --newline JSON progress-template output and stream events to the UI. |
 | #9 | Q6 | P0 | queue | **Remove and retry items with readable failure reasons** — A failed item shows a short reason (last stderr line) and Retry; the queue continues. |
 | #10 | D1 | P0 | download | **Output folder picker, remembered** — Native folder dialog; persisted in settings. |
+| #36 | 6.4 | P0 | ui | **Settings screen** — One screen for all settings, persisted in app-data and built with #10 (its first control). #11, #17, #25/#31/#32, #20, #21, and #37 add their controls here. |
 | #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Default preset is Default. |
 | #12 | Q7 | P1 | queue | **Persist queue and settings across restarts** — JSON or SQLite in the app-data directory; in-flight items resume as Ready. |
 | #13 | Q8 | P1 | queue | **Paste multiple URLs at once** — Newline-separated paste creates one row per URL. |
@@ -65,3 +66,4 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #26 | N5 | P2 | naming | **Optional subfolders by channel/artist** — Template support for {channel}/{title}. Off by default; v1 keeps one flat folder. |
 | #27 | Q9 | P2 | queue | **Expand playlist URLs into items** — Confirm before adding more than 20 items. |
 | #28 | Q4,Q10 | P2 | queue | **Auto-start and concurrency setting (1–3)** — Begin automatically when items are added; allow parallel downloads. |
+| #37 | D1 | P2 | download | **Separate in-progress and completed folders** — Optional temp and completed folders with editable defaults; one folder by default (D-003, D-008). A temp folder maps to yt-dlp `-P temp:<dir>`. |

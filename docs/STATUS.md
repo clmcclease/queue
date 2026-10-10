@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #2 done → #3 (URL bar + queue list) next
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #3 done → #4 (first real download) next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
@@ -26,7 +26,24 @@
   - `THIRD_PARTY_NOTICES.md`; the AGENTS.md wording is updated per D-012.
   - New `qa/tests/sidecars.test.mjs` (4 tests).
 
+- **#3 is done** (Q1). It was squash-merged from PR #38 after green checks.
+  - The Rust `queue` module holds the queue (`Queue::add` trims and rejects blank input; no validation until #5). It's exposed through the `queue_add` and `queue_list` commands held in Tauri state.
+  - `src/queue.ts` is the client. `UrlBar` uses a text input with `inputMode=url` (not `type=url`, which would trigger webview validation) and a **+** that's disabled while the field is empty; focus returns to the field after each add. `QueueList` shows the raw URL per row.
+  - Tailwind is limited to scanning `src/` (`source("../src")`): it had been scanning the test files, so the CSS test passed by itself. The scaffold render test now uses Vite SSR.
+- Backlog additions at the owner's request (2026-10-10): **#36** Settings screen (M2, with #10) and **#37** separate in-progress/completed folders (Later; one folder by default).
+
 ## Checks performed (2026-10-10, macOS arm64 only)
+- #3 (macOS arm64): `cargo test` 8/8 (3 new queue tests), clippy and fmt clean, `npm run build`, `npm test` 33/33. In the real app (`tauri dev`, driven with System Events and checked by screenshots): Enter adds a row and clears the field; **+** adds trimmed input; **+** is disabled when the field is empty; Enter on an empty field does nothing; typing right after **+** lands in the field.
+- #3 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-173134-test-MZBN.md`). Two UI races, both reproduced with real React DOM and delayed mock IPC:
+  1. A slow `queue_add` reply cleared a link typed meanwhile. The field now clears only if it still holds the submitted text.
+  2. A late initial `queue_list` snapshot replaced a row added before it arrived. Rows are now merged by id.
+  Codex's tests are merged with the owner's approval: `qa/tests/queue-ui.test.mjs` (7 jsdom interaction tests) and `src-tauri/tests/queue_q1.rs` (6). **jsdom 30.1.2** is a new, exact-pinned devDependency (test-only, never shipped; owner approved). `npm test` 40/40, `cargo test` 14/14.
+- #3 `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261010-174447-review-cdVo.md`). Same class of race:
+  - P2: a pending add reply could duplicate a row already in the snapshot.
+  - P2: out-of-order replies rendered out of order.
+  - P3: focus waited on IPC.
+  Fixed by a single pure `mergeItems` (`src/queue.ts`) used for every reply (one row per id, ascending id), and by focus returning before the await. Three regression tests were added. Mutation-checked on a scratch copy: each fails against the old code. They also resolve their pending fake replies, so a failure can't hang. `npm test` now has `--test-timeout=30000`, after two hung runs during the mutation check had to be killed (no leftovers).
+- #3 `codex-qa` re-review: **PASS WITH NOTES** (`qa/reports/20261010-175901-review-Tz8C.md`), with no actionable findings. It didn't explicitly cover a failed add racing a successful one, so I added a test for that case: the good row stays, the error shows, newer text survives, and later adds work and clear the error. `npm test` 44/44, `cargo test` 14/14, clippy and fmt clean.
 - #2 (macOS arm64 host):
   - `build-ffmpeg.sh` for aarch64 (30 s) and x86_64 (cross-compiled): LGPL, about 3.5–3.9 MB per binary, linking only system libraries (libz, CoreFoundation/Video/Media). The tarball SHA-256 was verified.
   - `fetch-sidecars.mjs --check` passes for both macOS targets (x64 via Rosetta): `yt-dlp stable@2026.08.19`, `ffmpeg 9.0.2, ffprobe 9.0.2`, `deno-2.9.7`.
@@ -61,4 +78,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-Start **#3** (Q1): a single-line URL input with a **+** button (Enter also adds) and a basic queue list showing the raw URL per row. Keep queue state out of the UI components (AGENTS.md). Then **#4** (D2): download one item to a fixed folder named `{title}`, using `sidecar::ytdlp_base_args` and an argv array. This is the first real merge/`-x` through our ffmpeg. Then run the M1 `codex-qa audit`.
+Start **#4** (D2): a "Download" action that runs the yt-dlp sidecar for one item into a fixed folder with `-o '%(title)s.%(ext)s'`. Use `sidecar::ytdlp_base_args` plus an argv array, with no `-f` (D-007); the row shows done/failed. This is the first real merge/`-x` through our minimal ffmpeg, so test with a real YouTube video (DASH merge) and confirm the output plays. Pick the fixed folder per OS without hard-coded paths (e.g. the user's Downloads dir via Tauri's path API). Then run the M1 `codex-qa audit` to close M1.

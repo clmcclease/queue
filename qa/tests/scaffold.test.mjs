@@ -7,8 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ts from "typescript";
-import { resolveConfig } from "vite";
+import { createServer, resolveConfig } from "vite";
 
 const root = new URL("../../", import.meta.url);
 // Normalize CRLF so a Windows checkout made without .gitattributes still parses.
@@ -16,32 +15,29 @@ const read = async (path) => (await readFile(new URL(path, root), "utf8")).repla
 const json = async (path) => JSON.parse(await read(path));
 const exactVersion = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 
+// Render through Vite's SSR loader so TSX and component imports resolve like the real build.
+// Effects (the initial queue_list call) don't run during SSR, so no Tauri runtime is needed.
 async function renderApp() {
-  const { outputText } = ts.transpileModule(await read("src/App.tsx"), {
-    compilerOptions: {
-      jsx: ts.JsxEmit.ReactJSX,
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2020,
-    },
+  const server = await createServer({
+    root: fileURLToPath(root), configFile: false, logLevel: "silent",
+    server: { middlewareMode: true, hmr: false, watch: null }, appType: "custom",
   });
-  // Resolve the JSX runtime from the project, since data URLs lack a base path.
-  const code = outputText.replaceAll(
-    '"react/jsx-runtime"',
-    JSON.stringify(import.meta.resolve("react/jsx-runtime")),
-  );
-  const { default: App } = await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
-  );
-  return renderToStaticMarkup(
-    React.createElement(React.StrictMode, null, React.createElement(App)),
-  );
+  try {
+    const { default: App } = await server.ssrLoadModule("/src/App.tsx");
+    return renderToStaticMarkup(React.createElement(React.StrictMode, null, React.createElement(App)));
+  } finally {
+    await server.close();
+  }
 }
 
-test("the initial React screen renders a readable empty state", async () => {
+test("the initial screen has a focused link field, a + button, and the empty state", async () => {
   const html = await renderApp();
   assert.match(html, /^<main\b/);
+  assert.match(html, /<input\b(?=[^>]*\btype="text")(?=[^>]*\binputMode="url")(?=[^>]*aria-label="Link to download")[^>]*>/);
+  assert.match(html, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bdisabled="")(?=[^>]*aria-label="Add to queue")[^>]*>\+<\/button>/,
+    "+ starts disabled until there's text");
   assert.match(html, /<p\b[^>]*>Queue is empty\.<\/p>/);
-  assert.doesNotMatch(html, /<(?:input|button|a|form)\b/);
+  assert.doesNotMatch(html, /<ul\b/);
 });
 
 test("production Tailwind output contains the empty screen and system dark theme styles", async () => {
@@ -49,7 +45,8 @@ test("production Tailwind output contains the empty screen and system dark theme
   const cssFiles = files.filter((file) => file.endsWith(".css"));
   assert.ok(cssFiles.length > 0, "run npm run build before this suite");
   const css = (await Promise.all(cssFiles.map((file) => read(`dist/assets/${file}`)))).join("\n");
-  for (const selector of [".h-screen", ".items-center", ".justify-center", ".bg-white", ".dark\\:bg-neutral-900"]) {
+  // Tailwind only scans src/ (index.css), so these come from real component classes, not this file.
+  for (const selector of [".h-screen", ".flex-1", ".truncate", ".bg-white", ".dark\\:bg-neutral-900"]) {
     assert.ok(css.includes(selector), `missing compiled style ${selector}`);
   }
   assert.match(css, /prefers-color-scheme:\s*dark/);
