@@ -18,7 +18,9 @@ Read `README.md`, `docs/STATUS.md`, and the active PRD (`docs/prds/PRD-001-queue
 - Pass subprocess arguments as an argument array, never through a shell string. URLs and titles are untrusted input.
 - Keep queue and naming logic separate from UI. The naming engine is a pure function: metadata + template → filename. It must have unit tests.
 - The filename is computed before the download starts and passed to yt-dlp's `-o`. Never overwrite an existing file.
-- No telemetry and no accounts. The only network traffic is yt-dlp itself, update checks, and the opt-in LLM naming call. API keys go in the macOS Keychain, never in files or logs.
+- Cross-platform: macOS, Windows, and Linux are all first-class. Don't use OS-specific paths, shortcuts, or wording ("Finder") without per-OS handling. Use the Windows filename rules everywhere.
+- AI naming defaults to the local model. Item metadata only leaves the machine when the user picks the API provider. Tier 1 rules always sanitize AI output and act as the fallback.
+- No telemetry and no accounts. API keys go in the OS credential store (the keyring crate), never in files or logs.
 - Prefer small, understandable code over speculative abstractions or plugin systems.
 - Never report a check as passed if you didn't run it. Say which platforms you actually tested.
 

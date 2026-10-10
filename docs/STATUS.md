@@ -4,16 +4,19 @@
 
 ## Current state
 - Repo scaffolded with the PRD, backlog, architecture notes, decision log, agent working agreement, and GitHub labels, milestones, and issues.
+- PRD v2 (2026-10-10) settles the original open questions:
+  - cross-platform with Tauri v2 (D-002)
+  - AI naming in v1, Local by default with API/Off options (D-006)
+  - yt-dlp chooses formats (D-007)
+  - no subfolders in v1 (D-008)
 - No application code yet.
 
 ## Checks performed
-- None needed beyond confirming the repo, issues, and milestones exist on GitHub.
+- Docs only. No code checks apply.
 
-## Open questions (from PRD §12)
-1. Mac-only (SwiftUI could make sense) or cross-platform later (Tauri)? Affects D-002.
-2. AI naming in v1, or start with metadata-based naming only? (Currently planned for M5.)
-3. Default format: video, audio, or a mix?
-4. Subfolders per channel/show, or one flat folder?
+## Open questions (PRD §13)
+1. Which default local model? To be decided by the N9 eval.
+2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-Answer open question 1, then start **M1 / #1**: scaffold the Tauri v2 + React/TS app.
+Start **M1 / #1**: scaffold the Tauri v2 + React/TS app, followed by the cross-platform CI build so problems on any OS show up from day one.
