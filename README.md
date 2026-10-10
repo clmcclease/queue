@@ -13,6 +13,7 @@ A lightweight desktop app for queuing video and audio downloads. Paste links, pr
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | Stack, components, data flow |
 | [DECISIONS](docs/DECISIONS.md) | Decision log |
 | [STATUS](docs/STATUS.md) | Where things stand and what's next |
+| [QA](docs/QA.md) | Independent QA with Codex (GPT-6.1-Sol) |
 | [AGENTS](AGENTS.md) | Working agreement for AI agents and contributors |
 
 ## Planned stack
@@ -23,7 +24,9 @@ Tauri v2 (Rust) · React + TypeScript + Tailwind · bundled `yt-dlp`, `ffmpeg`, 
 
 ```
 assets/        icons, design mockups (see assets/README.md)
-docs/          PRD, backlog, architecture, decisions, status
+docs/          PRD, backlog, architecture, decisions, status, QA
+qa/           Codex QA prompts; reports (git-ignored)
+scripts/      codex-qa and (later) build helpers
 .claude/       project subagents
 .github/       issue and PR templates
 ```

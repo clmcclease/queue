@@ -1,0 +1,38 @@
+# QA
+
+QA comes from an independent, non-Claude model, **Codex CLI with `gpt-6.1-sol` at high reasoning effort**, so code isn't only checked by the model that wrote it. Codex reads `AGENTS.md` itself, so it follows the same working agreement.
+
+There are two ways to run it.
+
+## A. From Claude Code: the `codex-qa` agent
+
+Claude delegates to `.claude/agents/codex-qa.md`, which runs `scripts/codex-qa` and relays the report verbatim.
+
+| Mode | Command | Sandbox | When |
+|---|---|---|---|
+| `review` | `scripts/codex-qa review [--base main \| --commit <sha>]` | read-only (`codex exec`; `codex review` can't take a custom checklist) | **Required** before asking for commit approval on any backlog item |
+| `test` | `scripts/codex-qa test "#14"` | snapshot worktree (HEAD + uncommitted + untracked), workspace-write + network | After implementing an item: runs the checks, verifies acceptance criteria, writes the missing unit tests |
+| `audit` | `scripts/codex-qa audit` | read-only | At the end of each milestone, or when "is everything set up right?" comes up |
+
+- Reports are saved in `qa/reports/` (git-ignored).
+- Tests that Codex writes are exported to `qa/reports/<run>.tests.patch`, and the worktree is kept for inspection (the script prints its path and the remove command). The owner decides whether to `git apply` the patch. Claude never applies it automatically.
+- If Codex fails (auth, model, timeout), the script exits non-zero and prints the log path plus the last log lines.
+- To override the model, effort, or timeout: `CODEX_QA_MODEL=… CODEX_QA_EFFORT=… CODEX_QA_TIMEOUT=<seconds> scripts/codex-qa …` (the default timeout is 1500s).
+- Prompts are in `qa/prompts/` and can be edited to tune what QA checks.
+
+## B. Interactive Codex in a second terminal
+
+Use this for investigations that need back-and-forth:
+
+```sh
+cd ~/Developer/queue
+codex -m gpt-6.1-sol -c model_reasoning_effort='"high"' -s read-only
+```
+
+Use `-s workspace-write --worktree` if you want it to write tests without touching the main checkout. Any findings worth keeping go into a GitHub issue or `docs/STATUS.md`, so they aren't lost between terminals.
+
+## Rules
+
+- QA never commits, pushes, or edits the main checkout.
+- A QA verdict of FAIL blocks the commit request until the problem is fixed or the owner explicitly accepts it.
+- The PR or commit summary says which QA modes were run and what their verdicts were. Never claim a QA run that didn't happen.

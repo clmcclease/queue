@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Run Codex (GPT-6.1-Sol, high effort) as an independent QA agent. See docs/QA.md.
+#
+#   scripts/codex-qa review [--base <branch> | --commit <sha>]   default: uncommitted changes, read-only
+#   scripts/codex-qa test "<scope>"    e.g. "#14" or "N-T1 naming engine"; runs in a snapshot worktree
+#   scripts/codex-qa audit             read-only health check of the whole repo
+#
+# Reports go to qa/reports/<timestamp>-<mode>-<id>.md (git-ignored). Paths are printed on the last lines.
+set -euo pipefail
+
+MODEL="${CODEX_QA_MODEL:-gpt-6.1-sol}"
+EFFORT="${CODEX_QA_EFFORT:-high}"
+TIMEOUT="${CODEX_QA_TIMEOUT:-1500}"   # seconds; a hung Codex is killed and reported, not left running
+ROOT="$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
+PROMPTS="$ROOT/qa/prompts"
+REPORTS="$ROOT/qa/reports"
+
+usage() { sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+mode="${1:-}"; [[ -n $mode ]] || usage; shift
+
+# Validate arguments before invoking Codex.
+case "$mode" in
+  review)
+    case "$#:${1:-}" in
+      0:)            scope='Uncommitted changes: `git status --short`, `git diff HEAD`, and read any untracked files.' ;;
+      2:--base)      scope="Changes on this branch vs $2: \`git diff $2...HEAD\`." ;;
+      2:--commit)    scope="The commit $2: \`git show $2\`." ;;
+      *) usage ;;
+    esac ;;
+  test)  [[ $# -ge 1 && -n $* ]] || usage ;;
+  audit) [[ $# -eq 0 ]] || usage ;;
+  *) usage ;;
+esac
+
+mkdir -p "$REPORTS"
+out="$(mktemp "$REPORTS/$(date +%Y%m%d-%H%M%S)-$mode-XXXX")"; mv "$out" "$out.md"; out="$out.md"
+log="${out%.md}.log"
+common=(-c "model=\"$MODEL\"" -c "model_reasoning_effort=\"$EFFORT\"")
+
+status=0
+# Run Codex with a watchdog so a hang still ends in diagnostics instead of a silent kill.
+# set -m gives Codex its own process group, so the whole tree (including tool subprocesses) is killed.
+run_codex() {
+  set -m
+  codex "$@" >"$log" 2>&1 &
+  local pid=$! dog
+  set +m
+  ( sleep "$TIMEOUT"; kill -TERM -- "-$pid" 2>/dev/null && echo "codex-qa: timed out after ${TIMEOUT}s" >>"$log" ) &
+  dog=$!
+  wait "$pid" || status=$?
+  kill "$dog" 2>/dev/null || true; wait "$dog" 2>/dev/null || true
+}
+
+case "$mode" in
+  review)
+    # `codex review` rejects a custom prompt with its target flags, so use exec + scope text instead.
+    prompt="$(cat "$PROMPTS/review.md")"$'\n\n'"## Review scope"$'\n'"$scope"
+    run_codex exec "${common[@]}" -s read-only -C "$ROOT" -o "$out" "$prompt"
+    ;;
+  test)
+    # Snapshot HEAD + uncommitted + untracked work into a separate worktree (AGENTS.md: one writer per
+    # checkout). The baseline is recorded as a tree object, not a commit, so QA never commits; QA's
+    # additions are exported as a patch against that tree.
+    wt="$(mktemp -d "${TMPDIR:-/tmp}/queue-qa-XXXX")"
+    die() { echo "codex-qa: $1 (worktree left at $wt)" >&2; exit 1; }
+    git -C "$ROOT" worktree add -q --detach "$wt" HEAD || die "worktree add failed"
+    git -C "$ROOT" diff HEAD --binary | git -C "$wt" apply --allow-empty || die "applying uncommitted changes failed"
+    # tar keeps symlinks and modes.
+    git -C "$ROOT" ls-files -z --others --exclude-standard \
+      | tar -C "$ROOT" --null -T - -cf - | tar -C "$wt" -xpf - || die "copying untracked files failed"
+    git -C "$wt" add -A || die "staging snapshot failed"
+    base="$(git -C "$wt" write-tree)" || die "recording baseline tree failed"
+    patch="${out%.md}.tests.patch"
+    prompt="$(cat "$PROMPTS/test.md")"$'\n\n'"## Scope"$'\n'"$*"
+    # Network is on so it can install dependencies in the fresh worktree.
+    run_codex exec "${common[@]}" -s workspace-write -c 'sandbox_workspace_write.network_access=true' \
+      -C "$wt" -o "$out" "$prompt"
+    git -C "$wt" add -A || die "staging QA changes failed"
+    git -C "$wt" diff --cached "$base" --binary >"$patch" || die "exporting tests patch failed"
+    echo "codex-qa worktree: $wt   (remove with: git worktree remove --force $wt)"
+    echo "codex-qa tests patch: $patch   ($(grep -c '^diff --git' "$patch" || true) files; apply with: git apply $patch)"
+    ;;
+  audit)
+    run_codex exec "${common[@]}" -s read-only -C "$ROOT" -o "$out" "$(cat "$PROMPTS/audit.md")"
+    ;;
+esac
+
+echo "codex-qa log: $log"
+if [[ $status -eq 0 && ! -s $out ]]; then
+  echo "codex-qa: Codex exited 0 but wrote no report; treating the run as failed." >&2
+  status=3
+fi
+if [[ $status -ne 0 ]]; then
+  echo "codex-qa FAILED (codex exit $status). Last lines of log:" >&2
+  tail -20 "$log" >&2
+fi
+echo "codex-qa report: $out"
+exit "$status"

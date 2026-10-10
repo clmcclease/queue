@@ -12,3 +12,5 @@ src-tauri/gen/
 !.vscode/extensions.json
 .idea/
 .claude/settings.local.json
+qa/reports/*
+!qa/reports/.gitkeep

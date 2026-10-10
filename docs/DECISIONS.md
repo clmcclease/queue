@@ -29,3 +29,6 @@ The default preset passes no `-f` and forces no container. Audio only uses `-x` 
 
 ## D-008 No subfolders in v1 — Confirmed (2026-10-10)
 One flat output folder. Subfolders by channel/artist (N5) are in the Later backlog.
+
+## D-009 Independent QA with Codex (GPT-6.1-Sol, high effort) — Confirmed (2026-10-10)
+A non-Claude model does QA so the code isn't only checked by the model that wrote it. It's wired in two ways: a `codex-qa` Claude Code agent that runs `scripts/codex-qa` (review, test, or audit), and interactive Codex in a second terminal. See docs/QA.md.

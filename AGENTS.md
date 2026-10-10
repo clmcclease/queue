@@ -24,6 +24,15 @@ Read `README.md`, `docs/STATUS.md`, and the active PRD (`docs/prds/PRD-001-queue
 - Prefer small, understandable code over speculative abstractions or plugin systems.
 - Never report a check as passed if you didn't run it. Say which platforms you actually tested.
 
+## QA
+
+Independent QA runs through Codex (`scripts/codex-qa`, documented in `docs/QA.md`):
+- `review` is required before any commit request.
+- `test "#<issue>"` is required after implementing a backlog item.
+- `audit` runs at the end of each milestone.
+
+When acting as QA, never edit the main checkout. Tests are written only in a separate worktree.
+
 ## Handoff after every work session
 
 Update `docs/STATUS.md` with:
