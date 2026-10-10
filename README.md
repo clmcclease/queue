@@ -28,6 +28,8 @@ eval "$(mise activate zsh)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 mise install                       # installs the pinned Node; rustup reads rust-toolchain.toml on first cargo run
 npm ci
+scripts/build-ffmpeg.sh aarch64-apple-darwin   # minimal LGPL ffmpeg/ffprobe from source (~30 s; use your target triple)
+node scripts/fetch-sidecars.mjs --check         # pinned yt-dlp + deno, checks yt-dlp sees all of them
 
 npm run tauri dev                  # opens the app window
 npm run build && npm test          # frontend build + scaffold tests
@@ -35,7 +37,9 @@ npm run build && npm test          # frontend build + scaffold tests
 
 CI (`.github/workflows/build.yml`) runs the checks on every PR and every push to `main`, and builds unsigned bundles for all four targets on every push to `main` (D-011).
 
-Linux also needs the [Tauri system dependencies](https://tauri.app/start/prerequisites/) (WebKitGTK and friends). Windows needs WebView2 and the MSVC build tools.
+Linux also needs the [Tauri system dependencies](https://tauri.app/start/prerequisites/) (WebKitGTK and friends). Windows needs WebView2 and the MSVC build tools. `build-ffmpeg.sh` runs on macOS and Linux only; it cross-compiles the Windows build with mingw-w64. On Windows, copy the `ffmpeg-*` artifact from a CI run into `src-tauri/binaries/` instead.
+
+Bundled third-party programs and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Planned stack
 

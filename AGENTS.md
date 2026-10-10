@@ -13,7 +13,7 @@ Read `README.md`, `docs/STATUS.md`, and the active PRD (`docs/prds/PRD-001-queue
 
 ## Engineering
 
-- **Wrap yt-dlp, never fork it.** Bundle the official `yt-dlp` and `ffmpeg` binaries as Tauri sidecars and run them as subprocesses. Don't vendor or patch yt-dlp source.
+- **Wrap yt-dlp, never fork it.** Bundle the official `yt-dlp` binary, `ffmpeg`/`ffprobe` built unmodified from the official signed source, and the official `deno` binary as Tauri sidecars (D-012). Run them as subprocesses. Don't vendor or patch yt-dlp or ffmpeg source.
 - Stack: Tauri v2 (Rust) with React, TypeScript, and Tailwind. Pin exact versions and don't silently upgrade toolchains.
 - Pass subprocess arguments as an argument array, never through a shell string. URLs and titles are untrusted input.
 - Keep queue and naming logic separate from UI. The naming engine is a pure function: metadata + template → filename. It must have unit tests.

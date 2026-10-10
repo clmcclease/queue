@@ -49,6 +49,10 @@
 
 ## Sidecars
 
-- A `scripts/fetch-sidecars` step downloads pinned `yt-dlp`, `ffmpeg` (LGPL), and `llama-server` (llama.cpp release) builds for each target triple (aarch64/x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu) into `src-tauri/binaries/`. These binaries are git-ignored.
+- Sidecars are pinned in `scripts/sidecars.json` for each target triple (aarch64/x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu) and land in `src-tauri/binaries/` (git-ignored) as `queue-<name>-<triple>[.exe]` (D-012):
+  - `scripts/fetch-sidecars.mjs` downloads and checksum-verifies the official `yt-dlp` onefile build and `deno` (yt-dlp's JS runtime for YouTube). `--check` confirms yt-dlp sees all its tools.
+  - `scripts/build-ffmpeg.sh` builds a minimal LGPL `ffmpeg` + `ffprobe` from the signed upstream tarball, with no network protocols.
+  - `llama-server` (llama.cpp release) is added in #30.
+- Tauri copies them next to the app binary and strips the triple. `src-tauri/src/sidecar.rs` resolves them there and builds the base yt-dlp argv (`--ignore-config --no-update --ffmpeg-location … --js-runtimes deno:…`).
 - Models are never bundled. They're downloaded at runtime into the app-data directory.
 - At runtime, `yt-dlp -U` runs at most once a day (configurable).

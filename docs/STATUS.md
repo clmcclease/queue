@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #29 done → #2 (sidecars) next
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #2 done → #3 (URL bar + queue list) next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
@@ -17,7 +17,30 @@
   - The sidecar fetch step is deferred to #2, which doesn't exist yet. BACKLOG has been updated.
   - New `npm test` script (`node --test "qa/tests/*.test.mjs"`). The directory form `node --test qa/tests/` fails, which is why the glob is used.
 
+- **#2 is done** (D-012). It was squash-merged from PR #35 after a green 4-OS hosted run.
+  - `scripts/sidecars.json` pins yt-dlp 2026.08.19 (onefile), deno v2.9.7, and the ffmpeg 9.0.2 source, each with a SHA-256.
+  - `scripts/fetch-sidecars.mjs` (Node, no dependencies, with a built-in zip reader) downloads and verifies yt-dlp and deno. `--check` confirms that yt-dlp reports our ffmpeg, ffprobe, and deno.
+  - `scripts/build-ffmpeg.sh` builds a minimal LGPL ffmpeg/ffprobe with no networking: native on macOS (x64 cross-compiled) and Linux, and Windows via mingw on Linux.
+  - Tauri `externalBin` uses the `queue-` names. `src-tauri/src/sidecar.rs` resolves the paths and builds the base yt-dlp argv.
+  - CI: a new `ffmpeg` job (cached) feeds `check` and `bundle`, which install the sidecars and run `--check` on each OS.
+  - `THIRD_PARTY_NOTICES.md`; the AGENTS.md wording is updated per D-012.
+  - New `qa/tests/sidecars.test.mjs` (4 tests).
+
 ## Checks performed (2026-10-10, macOS arm64 only)
+- #2 (macOS arm64 host):
+  - `build-ffmpeg.sh` for aarch64 (30 s) and x86_64 (cross-compiled): LGPL, about 3.5–3.9 MB per binary, linking only system libraries (libz, CoreFoundation/Video/Media). The tarball SHA-256 was verified.
+  - `fetch-sidecars.mjs --check` passes for both macOS targets (x64 via Rosetta): `yt-dlp stable@2026.08.19`, `ffmpeg 9.0.2, ffprobe 9.0.2`, `deno-2.9.7`.
+  - `cargo clippy -D warnings` clean; `cargo test` 2/2; `npm test` 18/18; actionlint clean.
+  - Release `tauri build --bundles app,dmg`: all 4 sidecars are in `Contents/MacOS` and pass the check from there. The `.dmg` is 80.8 MB and the app 123 MB installed (deno 81 MB), well within the new 256 MB budget (D-013).
+  - Not verified: a real download, merge, `-x`, or thumbnail run with this ffmpeg (that's #4).
+- #2 hosted run on PR #35 (38087616380): **all green on the first run**.
+  - ffmpeg 9.0.2 LGPL built for all 4 targets, including Windows via mingw. `--check` passed in the check job and in every bundle job: macOS arm64, macOS x64 (Rosetta), Windows x64, Linux x64.
+  - Installer sizes, all under the 256 MB budget (D-013): dmg 77 MB (arm64) / 81 MB (x64), NSIS 49 MB, MSI 62 MB, deb/rpm 84 MB, **AppImage 155 MB** (bundles WebKitGTK; the least headroom for llama-server in #30).
+- #2 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-152603-test-GeC9.md`). Two bugs:
+  1. `build-ffmpeg.sh` put the manifest path inside JS source, so a checkout path containing an apostrophe broke it. The path is now passed as an argument.
+  2. `fetch-sidecars --check` ignored a timeout or spawn error when the header had already printed. It now requires yt-dlp's no-URL exit status 2, with no error or signal.
+  Codex's tests (12 behavior tests with stubbed network and spawn, 2 path tests, 3 Rust path tests) reproduce both bugs and pass with the fixes. They're in the working tree pending the owner's decision. `npm test` 32/32, `cargo test` 5/5, real `--check` still OK.
+- #2 `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261010-153213-review-dROg.md`). P1: `build-ffmpeg.sh` ran `rm -rf` on the build dir before validating the target, so `aarch64-apple-darwin/../../../..` would have deleted the checkout. The target allowlist now runs first, and a regression test with marker files covers it. `npm test` 33/33; a real arm64 build and `--check` still pass. The re-review was **PASS WITH NOTES** (`qa/reports/20261010-153638-review-6yFv.md`); its only finding, a trailing blank line in STATUS, is fixed.
 - #29: actionlint 1.7.12 is clean and `npm test` passes 6/6 locally. The workflow hasn't run on GitHub yet; the first run will be on the draft PR.
 - #29 first hosted run (PR #34): checks and the macOS arm64/x64 and Linux bundles passed, and all 9 artifacts uploaded (Windows msi/nsis included). The Windows job then failed in `npm test`: git's CRLF checkout broke the line-based config tests. Fixed with `.gitattributes` (`eol=lf`) plus CRLF normalization in the tests. The failure was reproduced locally on a CRLF copy (2 fail), and the fix passes it (14/14).
 - #29 second hosted run (0c928b5): **all green**. check 80s; bundles: macos-arm64 114s, macos-x64 124s, linux-x64 219s, windows-x64 729s; 9 artifacts uploaded. That's about 80 billed minutes warm and about 110 cold; D-011 is updated to match.
@@ -38,4 +61,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-Confirm the push-to-main CI run for the #29 merge is green. Then start **#2**: a `scripts/fetch-sidecars` script that downloads pinned yt-dlp and LGPL ffmpeg for the 4 target triples into `src-tauri/binaries/` (git-ignored), checks their checksums, and wires them up as Tauri sidecars, plus the per-target fetch step in `build.yml`. Consult the `ytdlp-expert` agent on yt-dlp build choice and pinning. After #2, do #3 and #4 to finish M1, then run the M1 `codex-qa audit`.
+Start **#3** (Q1): a single-line URL input with a **+** button (Enter also adds) and a basic queue list showing the raw URL per row. Keep queue state out of the UI components (AGENTS.md). Then **#4** (D2): download one item to a fixed folder named `{title}`, using `sidecar::ytdlp_base_args` and an argv array. This is the first real merge/`-x` through our ffmpeg. Then run the M1 `codex-qa audit`.
