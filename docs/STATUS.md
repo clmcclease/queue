@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #2 (sidecars), uncommitted
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #2 done → #3 (URL bar + queue list) next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
@@ -17,7 +17,7 @@
   - The sidecar fetch step is deferred to #2, which doesn't exist yet. BACKLOG has been updated.
   - New `npm test` script (`node --test "qa/tests/*.test.mjs"`). The directory form `node --test qa/tests/` fails, which is why the glob is used.
 
-- **#2 is implemented and uncommitted** (D-012):
+- **#2 is done** (D-012). It was squash-merged from PR #35 after a green 4-OS hosted run.
   - `scripts/sidecars.json` pins yt-dlp 2026.08.19 (onefile), deno v2.9.7, and the ffmpeg 9.0.2 source, each with a SHA-256.
   - `scripts/fetch-sidecars.mjs` (Node, no dependencies, with a built-in zip reader) downloads and verifies yt-dlp and deno. `--check` confirms that yt-dlp reports our ffmpeg, ffprobe, and deno.
   - `scripts/build-ffmpeg.sh` builds a minimal LGPL ffmpeg/ffprobe with no networking: native on macOS (x64 cross-compiled) and Linux, and Windows via mingw on Linux.
@@ -32,7 +32,10 @@
   - `fetch-sidecars.mjs --check` passes for both macOS targets (x64 via Rosetta): `yt-dlp stable@2026.08.19`, `ffmpeg 9.0.2, ffprobe 9.0.2`, `deno-2.9.7`.
   - `cargo clippy -D warnings` clean; `cargo test` 2/2; `npm test` 18/18; actionlint clean.
   - Release `tauri build --bundles app,dmg`: all 4 sidecars are in `Contents/MacOS` and pass the check from there. The `.dmg` is 80.8 MB and the app 123 MB installed (deno 81 MB), well within the new 256 MB budget (D-013).
-  - Not verified: the Linux and Windows ffmpeg builds (CI will be their first run), and a real download, merge, `-x`, or thumbnail run with this ffmpeg (that's #4).
+  - Not verified: a real download, merge, `-x`, or thumbnail run with this ffmpeg (that's #4).
+- #2 hosted run on PR #35 (38087616380): **all green on the first run**.
+  - ffmpeg 9.0.2 LGPL built for all 4 targets, including Windows via mingw. `--check` passed in the check job and in every bundle job: macOS arm64, macOS x64 (Rosetta), Windows x64, Linux x64.
+  - Installer sizes, all under the 256 MB budget (D-013): dmg 77 MB (arm64) / 81 MB (x64), NSIS 49 MB, MSI 62 MB, deb/rpm 84 MB, **AppImage 155 MB** (bundles WebKitGTK; the least headroom for llama-server in #30).
 - #2 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-152603-test-GeC9.md`). Two bugs:
   1. `build-ffmpeg.sh` put the manifest path inside JS source, so a checkout path containing an apostrophe broke it. The path is now passed as an argument.
   2. `fetch-sidecars --check` ignored a timeout or spawn error when the header had already printed. It now requires yt-dlp's no-URL exit status 2, with no error or signal.
@@ -58,4 +61,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-#2: run the QA gates. Then, with owner approval, commit on a branch and open a draft PR labelled `ci:bundle`; that run is the first build of the Linux and Windows ffmpeg. Iterate until green, then ask to merge. After that, #3 (URL bar + list) and #4 (first real download, which exercises the merge and `-x` with our ffmpeg), then the M1 audit.
+Start **#3** (Q1): a single-line URL input with a **+** button (Enter also adds) and a basic queue list showing the raw URL per row. Keep queue state out of the UI components (AGENTS.md). Then **#4** (D2): download one item to a fixed folder named `{title}`, using `sidecar::ytdlp_base_args` and an argv array. This is the first real merge/`-x` through our ffmpeg. Then run the M1 `codex-qa audit`.
