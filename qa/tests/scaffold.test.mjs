@@ -11,7 +11,8 @@ import ts from "typescript";
 import { resolveConfig } from "vite";
 
 const root = new URL("../../", import.meta.url);
-const read = (path) => readFile(new URL(path, root), "utf8");
+// Normalize CRLF so a Windows checkout made without .gitattributes still parses.
+const read = async (path) => (await readFile(new URL(path, root), "utf8")).replaceAll("\r\n", "\n");
 const json = async (path) => JSON.parse(await read(path));
 const exactVersion = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 

@@ -8,7 +8,8 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 const root = new URL("../../", import.meta.url);
-const read = (path) => readFileSync(new URL(path, root), "utf8");
+// Normalize CRLF so a Windows checkout made without .gitattributes still parses.
+const read = (path) => readFileSync(new URL(path, root), "utf8").replaceAll("\r\n", "\n");
 const workflow = read(".github/workflows/build.yml");
 const lines = workflow.split("\n");
 
