@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #3 (URL bar + queue list), uncommitted
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #3 done → #4 (first real download) next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
@@ -26,7 +26,7 @@
   - `THIRD_PARTY_NOTICES.md`; the AGENTS.md wording is updated per D-012.
   - New `qa/tests/sidecars.test.mjs` (4 tests).
 
-- **#3 is implemented and uncommitted** (Q1):
+- **#3 is done** (Q1). It was squash-merged from PR #38 after green checks.
   - The Rust `queue` module holds the queue (`Queue::add` trims and rejects blank input; no validation until #5). It's exposed through the `queue_add` and `queue_list` commands held in Tauri state.
   - `src/queue.ts` is the client. `UrlBar` uses a text input with `inputMode=url` (not `type=url`, which would trigger webview validation) and a **+** that's disabled while the field is empty; focus returns to the field after each add. `QueueList` shows the raw URL per row.
   - Tailwind is limited to scanning `src/` (`source("../src")`): it had been scanning the test files, so the CSS test passed by itself. The scaffold render test now uses Vite SSR.
@@ -78,4 +78,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-#3: QA passed; ask to commit. Simple UI-only change, so a branch and PR without `ci:bundle` is enough. Then **#4** (D2): download one item to a fixed folder named `{title}` via `sidecar::ytdlp_base_args`, which is the first real merge/`-x` through our ffmpeg. Then the M1 `codex-qa audit`.
+Start **#4** (D2): a "Download" action that runs the yt-dlp sidecar for one item into a fixed folder with `-o '%(title)s.%(ext)s'`. Use `sidecar::ytdlp_base_args` plus an argv array, with no `-f` (D-007); the row shows done/failed. This is the first real merge/`-x` through our minimal ffmpeg, so test with a real YouTube video (DASH merge) and confirm the output plays. Pick the fixed folder per OS without hard-coded paths (e.g. the user's Downloads dir via Tauri's path API). Then run the M1 `codex-qa audit` to close M1.
