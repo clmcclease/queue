@@ -32,3 +32,10 @@ One flat output folder. Subfolders by channel/artist (N5) are in the Later backl
 
 ## D-009 Independent QA with Codex (GPT-6.1-Sol, high effort) — Confirmed (2026-10-10)
 A non-Claude model does QA so the code isn't only checked by the model that wrote it. It's wired in two ways: a `codex-qa` Claude Code agent that runs `scripts/codex-qa` (review, test, or audit), and interactive Codex in a second terminal. See docs/QA.md.
+
+## D-010 Toolchain pinning: mise for Node, rustup for Rust — Confirmed (2026-10-10)
+- Node 24.21.0 (Active LTS), pinned in `mise.toml` and `package.json` `engines`. `.npmrc` sets `save-exact` and `engine-strict`.
+- Rust 1.99.0, pinned in `rust-toolchain.toml`, which rustup and CI both read.
+- npm packages are pinned to exact versions, with `package-lock.json` committed. Direct crates are pinned with `=` in `Cargo.toml`, with `Cargo.lock` committed.
+- TypeScript stays on 6.0.3, the line create-tauri-app ships, rather than the new native 7.x compiler. Moving to 7.x is a deliberate later upgrade.
+- Upgrades are explicit changes with their own commit, never silent.

@@ -11,5 +11,7 @@
   2. Before asking for commit approval, run `codex-qa` in `review` mode. A FAIL blocks the request until it's fixed or the owner accepts it.
   3. At the end of each milestone, run `codex-qa` in `audit` mode.
   - Include the QA verdicts and report paths in the commit-approval request. QA runs take minutes, so run them once per stable diff, not after every edit.
+  - If Codex itself fails (auth, model access, sandbox, timeout), retry at most once. Then stop and give the owner the exact error and the log path (`qa/reports/*.log`). The owner keeps Codex open in a second terminal and fixes problems there. Never skip the gate or work around it silently.
+- **Starting a session:** read `docs/STATUS.md` first. Its "Next bounded action" is where work resumes.
 - Use `gh` for issues, labels, and milestones. Issue titles start with their requirement ID, e.g. `[Q3] Fetch metadata on add`.
 - Git attribution follows the session's system instructions.
