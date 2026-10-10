@@ -30,7 +30,10 @@ mise install                       # installs the pinned Node; rustup reads rust
 npm ci
 
 npm run tauri dev                  # opens the app window
+npm run build && npm test          # frontend build + scaffold tests
 ```
+
+CI (`.github/workflows/build.yml`) runs the checks on every PR and every push to `main`, and builds unsigned bundles for all four targets on every push to `main` (D-011).
 
 Linux also needs the [Tauri system dependencies](https://tauri.app/start/prerequisites/) (WebKitGTK and friends). Windows needs WebView2 and the MSVC build tools.
 

@@ -1,17 +1,28 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #1 (scaffold) done → #29 next
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #29 (cross-platform CI), draft PR
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
-- **#1 is done.** The Tauri v2 + React/TS/Tailwind app opens an empty "Queue" window.
+- **#1 is done** (commit 9bd2762, pushed; issue closed). The Tauri v2 + React/TS/Tailwind app opens an empty "Queue" window.
   - Toolchains are installed on the owner's Mac (`brew install mise rustup`) and pinned in the repo (D-010): Node 24.21.0 in `mise.toml`, Rust 1.99.0 in `rust-toolchain.toml`.
   - Exact pins: Tauri CLI 2.12.1 / API 2.12.2, `tauri` =2.12.2, `tauri-build` =2.7.1, React 19.3.0, Vite 8.3.4, Tailwind 4.3.3 (Vite plugin), TypeScript 6.0.3. `package-lock.json` and `Cargo.lock` are committed.
   - Generated from create-tauri-app 4.7.5 (react-ts). Removed: the greet demo, `tauri-plugin-opener`, serde, and the template SVGs. The app identifier is `dev.mcclease.queue`.
   - The icons are the Tauri template defaults; real icons come in #18.
   - README has a Development section with setup steps.
+- **#29 is implemented** and committed on branch `ci/29-cross-platform`, with a draft PR labelled `ci:bundle`; it hasn't merged yet. `.github/workflows/build.yml` (D-011):
+  - The `check` job runs on ubuntu-24.04 for every PR and every push to `main`: `npm ci`, build, `npm test`, `cargo fmt`, clippy, `cargo test`.
+  - The `bundle` matrix runs tauri-action v1.0.0 for macOS arm64, macOS x64 (cross-compiled on macos-26), Windows x64, and Linux x64, and uploads unsigned workflow artifacts. It runs on pushes to `main` and on PRs labelled `ci:bundle`.
+  - Actions are SHA-pinned and runner images are pinned.
+  - The sidecar fetch step is deferred to #2, which doesn't exist yet. BACKLOG has been updated.
+  - New `npm test` script (`node --test "qa/tests/*.test.mjs"`). The directory form `node --test qa/tests/` fails, which is why the glob is used.
 
 ## Checks performed (2026-10-10, macOS arm64 only)
+- #29: actionlint 1.7.12 is clean and `npm test` passes 6/6 locally. The workflow hasn't run on GitHub yet; the first run will be on the draft PR.
+- #29 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-103737-test-1s65.md`). P2: D-011's wording ("every push and PR") didn't match the triggers (main pushes and PRs). Resolved by fixing the wording rather than the trigger, which avoids running PR checks twice; the owner confirmed this policy. Codex's local checks passed, including a debug arm64 `tauri build`. The owner approved its 8 CI tests, which are merged as `qa/tests/ci.test.mjs`. The trigger test was rewritten for the confirmed policy, and a concurrency-group assertion was added. `npm test` passes 14/14.
+- #29 `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261010-104349-review-vCfW.md`). P2: a shared concurrency group let GitHub drop a pending push-to-main run and its artifacts. Fixed: every non-PR run now gets its own group (`github.run_id`). P3: the narrowed trigger was marked Confirmed while still pending. The owner has since confirmed it. Codex's `npm test` saw 2 tests blocked by sandbox EPERM; locally all 6 pass. The re-review was **PASS WITH NOTES** (`qa/reports/20261010-104621-review-Jfl3.md`); its only note, the decision status, is resolved.
+
+### #1
 - `npm run build` (tsc + vite): OK.
 - `cargo fmt --check`: OK. `cargo clippy --all-targets -- -D warnings`: OK.
 - `npm run tauri dev`: the app builds and opens a 900×640 window titled "Queue". Confirmed through the window server, System Events, and a screenshot showing "Queue is empty." in dark mode.
@@ -24,4 +35,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-#1 is committed. Next, do **#29** (cross-platform CI with tauri-action) before #2, so Windows and Linux build problems show up early. CI should read `rust-toolchain.toml` and the Node version in `mise.toml`, and run the scaffold tests after the frontend build.
+For #29: watch the draft PR's CI and fix failures on the branch until checks and all 4 bundles are green, then ask the owner to approve the merge. After that, #2 (sidecars), including the CI fetch step.
