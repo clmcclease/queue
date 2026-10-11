@@ -649,3 +649,62 @@ test("Q3 QA: duration formatting covers rounding boundaries and invalid inputs",
     [3599.5, "1:00:00"], [3600, "1:00:00"], [3723, "1:02:03"], [86400, "24:00:00"],
   ]) assert.equal(formatDuration(value), expected, `duration ${value}`);
 });
+
+// #48 (D-017): a 403 retry shows its attempt; the row returns to the normal flow afterwards.
+test("D-017: a retrying download says which attempt it is on", async () => {
+  const base = { id: 1, url: "https://example.test/v", meta: null };
+  await mount((command) => (command === "queue_list" ? [{ ...base, status: { state: "downloading" }, rev: 3, attempt: 1 }] : null));
+  assert.deepEqual(statusText(), ["Downloading…"]);
+  await act(async () => emit("queue://item", { ...base, status: { state: "downloading" }, rev: 4, attempt: 2 }));
+  assert.deepEqual(statusText(), ["Retrying (2/3)…"]);
+  await act(async () => emit("queue://item", { ...base, status: { state: "done", path: "/d/V.webm" }, rev: 5, attempt: 0 }));
+  assert.deepEqual(statusText(), ["✓ V.webm"]);
+});
+
+test("D-017 QA #48: both backoffs keep the next item disabled; final failure unlocks it", async () => {
+  const base = { id: 1, url: "https://example.test/v", meta: null };
+  const next = { id: 2, url: "https://example.test/next", meta: null, attempt: 0, ...QUEUED };
+  await mount((command) => command === "queue_list" ? [
+    { ...base, status: { state: "downloading" }, rev: 3, attempt: 1 }, next,
+  ] : null);
+  for (const attempt of [2, 3]) {
+    await act(async () => emit("queue://item", {
+      ...base, status: { state: "downloading" }, rev: attempt + 2, attempt,
+    }));
+    assert.equal(statusText()[0], `Retrying (${attempt}/3)…`);
+    assert.equal(downloadButtons().length, 1);
+    assert.equal(downloadButtons()[0].disabled, true);
+  }
+  await act(async () => emit("queue://item", {
+    ...base, status: { state: "failed", reason: "HTTP Error 403: Forbidden" }, rev: 6, attempt: 0,
+  }));
+  assert.equal(statusText()[0], "Failed: HTTP Error 403: Forbidden");
+  assert.equal(downloadButtons()[0].disabled, false);
+});
+
+test("D-017 QA #48: late replies and retry events cannot regress the attempt or terminal state", async (t) => {
+  const reply = deferred();
+  t.after(() => reply.resolve(null));
+  const base = { id: 1, url: "https://example.test/v", meta: null };
+  await mount((command) => command === "queue_list"
+    ? [{ ...base, status: { state: "queued" }, rev: 2, attempt: 0 }]
+    : reply.promise);
+  await act(async () => downloadButtons()[0].click());
+  await act(async () => emit("queue://item", {
+    ...base, status: { state: "downloading" }, rev: 5, attempt: 3,
+  }));
+  await act(async () => reply.resolve({
+    ...base, status: { state: "downloading" }, rev: 3, attempt: 1,
+  }));
+  await act(async () => emit("queue://item", {
+    ...base, status: { state: "downloading" }, rev: 4, attempt: 2,
+  }));
+  assert.equal(statusText()[0], "Retrying (3/3)…");
+  await act(async () => emit("queue://item", {
+    ...base, status: { state: "done", path: "/d/日本語 é.webm" }, rev: 6, attempt: 0,
+  }));
+  await act(async () => emit("queue://item", {
+    ...base, status: { state: "downloading" }, rev: 5, attempt: 3,
+  }));
+  assert.deepEqual(statusText(), ["✓ 日本語 é.webm"]);
+});

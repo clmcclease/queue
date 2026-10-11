@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #6 done → #48 (403 retry) next
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #48 (403 retry, D-017), PR open
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,6 +61,29 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
+## In progress: #48 (D-017) auto-retry 403s and reuse fetched info (committed; PR open)
+- The metadata worker saves the raw `-J` to `<app cache>/info/session-<pid>-<nanos>/item-<id>.json` (`meta::fetch_raw` + `save_info`, per-run namespace, `create_new`), and the queue records it with its fetch time (`set_info`/`fresh_info`/`take_info`, internal only).
+- `download::run_with_retries`:
+  - attempt 1 uses `--load-info-json <file>` when the saved info is under **5 h** old (`INFO_FRESH_FOR`), and `-- <url>` otherwise;
+  - on a yt-dlp-reported `HTTP Error 403` it waits 10 s, then 30 s, and retries with a **fresh URL extraction**, up to 3 attempts in total;
+  - all attempts share **one** fresh per-download work dir, so finished streams are reused (D-014 still holds); other errors aren't retried.
+- `Item.attempt` (1, then 2–3; 0 when idle) is emitted on each retry, and the row shows "Retrying (2/3)…". The info file is deleted when the item finishes.
+- Tests:
+  - unit tests for freshness and expiry (including a clock going backwards and a missing file), attempt reset, the `--load-info-json` argv, and 403 detection;
+  - `tests/retry_d2.rs`, 5 fake-yt-dlp tests: 403 then success, 3×403 giving up, no retry for other errors, info first then URL on retry, and an existing target not retried or overwritten;
+  - an opt-in **real download from saved info** (6 s).
+  `npm test` 69/69.
+- `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261011-153801-test-XLyJ.md`):
+  1. A local collision on a file named "HTTP Error 403.webm" triggered retries. Only a 403 **reported by yt-dlp** is retryable now (an internal `Failure { reason, retryable }`).
+  2. Finished parts were thrown away between retries. All attempts now share **one** fresh work dir (still per download, removed at the end).
+
+  Sharing a dir means leftovers can't be allowed to confuse the result: yt-dlp now writes the final path with `--print-to-file after_move:filepath queue-result.txt` (UTF-8, in the work dir; confirmed in the pinned source), and Queue uses it only if it's a regular file inside the work dir. Otherwise it applies the strict rule, which now ignores `.part`/`.ytdl`/`.part-Frag*`. The 5 h wording is reconciled in BACKLOG and the issue. Codex's tests are merged (`retry_d2_qa.rs` 14, a real saved-info test in `download_real_d2.rs`, 2 UI tests). All cargo tests pass, plus **all 8 opt-in real-sidecar tests**; `npm test` 71/71.
+- `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261011-154757-review-Pkpr.md`):
+  - P2: two app runs (e.g. dev + installed, which share the app identifier and cache) both wrote `info/item-1.json`, so one could download the other's video. The saved info now lives in a **per-run session dir** (`meta::session_dir`: `info/session-<pid>-<nanos>/`), written with `create_new` (`meta::save_info`), with a test. Stale session dirs are cleaned by #45.
+  - P3: a stale STATUS bullet was fixed.
+  All cargo tests pass (42 lib).
+- `codex-qa review` round 2: **PASS WITH NOTES** (`qa/reports/20261011-161726-review-n6m6.md`). Its one P3 (saved info attached in a separate lock *after* the row became Queued, so a Download could start without it) is fixed after the review: `run_fetch_job` now attaches the info and marks the row Queued under one lock, with a test. All cargo tests pass (43 lib); `npm test` 71/71.
+
 ## Done: #6 (Q3) fetch metadata on add (squash-merged from PR #49; Windows `proc_tree` passed in CI)
 - New rows start as **Fetching** (`Status::Fetching`). One worker thread (`fetch_worker`, started in Tauri's setup hook and fed through a channel) runs `yt-dlp <base args> --no-playlist -J -- <url>` per row, in order, with a 90 s limit (the process is killed when it's hit). It then emits `queue://item`.
 - `meta.rs`:
@@ -114,4 +137,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-Start **#48** (D-017): auto-retry an item that fails with `HTTP Error 403` up to 2× with backoff (~10 s, 30 s), and download from the saved `-J` result via `--load-info-json` when it's under ~6 h old (fall back to a fresh extraction). Keep the info JSON from #6's fetch (persist it in the app cache per item). Then #7 (sequential runner + Download all).
+#48: PR checks, then the owner approves the squash-merge. Then #7 (sequential runner + Download all).
