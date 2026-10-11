@@ -2,6 +2,7 @@
 //! Unix-only executable fixtures exercise the actual subprocess adapter. Pure checks run everywhere.
 use queue_lib::{
     download,
+    meta::Meta,
     queue::{Queue, Status},
 };
 use std::ffi::OsString;
@@ -58,6 +59,9 @@ fn d2_failed_item_does_not_change_another_items_state_or_revision() {
     let mut q = Queue::default();
     let a = q.add("https://example.test/a").unwrap();
     let b = q.add("https://example.test/b").unwrap();
+    // #6: rows fetch their info before they can download.
+    let a = q.fetched(a.id, Ok(Meta::default())).unwrap();
+    let b = q.fetched(b.id, Ok(Meta::default())).unwrap();
     q.start(a.id).unwrap();
     q.finish(a.id, Err("Video unavailable".into())).unwrap();
     assert_eq!(q.items()[1], b);
@@ -65,12 +69,12 @@ fn d2_failed_item_does_not_change_another_items_state_or_revision() {
     let done = q
         .finish(b.id, Ok("C:\\Downloads\\日本語 🎵.webm".into()))
         .unwrap();
-    assert_eq!(done.rev, 3);
+    assert_eq!(done.rev, 4);
     assert!(matches!(done.status, Status::Done { .. }));
     assert!(matches!(q.items()[0].status, Status::Failed { .. }));
     assert_eq!(q.finish(a.id, Ok("late.webm".into())), None);
     assert!(q.start(a.id).is_err());
-    assert_eq!(q.items()[0].rev, 3);
+    assert_eq!(q.items()[0].rev, 4);
 }
 
 #[cfg(unix)]

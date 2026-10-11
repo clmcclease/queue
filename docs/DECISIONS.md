@@ -82,3 +82,10 @@ Research of current small GGUF models (sources in the #33 issue). The owner acce
   - Metadata is passed as data, never as instructions.
   - Pin by HF repo commit plus the file's LFS sha256.
 - **Consequence:** PRD §7's "~1–2 GB" model download becomes ~2.5 GB for the default (1.3 GB for the small option).
+
+## D-017 YouTube 403s: retry and reuse fetched info; stay on stable yt-dlp — Confirmed (2026-10-11)
+The owner hit intermittent `HTTP Error 403: Forbidden` on downloads. ytdlp-expert reproduced it on 2026.08.19: YouTube sometimes rejects a `visionos`-client https link, and yt-dlp never retries 4xx errors. It isn't PO tokens (default clients don't need them; the "GVS PO Token experiment" log line concerns the unused `web` client) and isn't rate limiting (9 extractions in 10 min were fine). The nightly's new `tv_samsung` client fixed the case, but there's no newer stable release yet.
+- **Chosen:** retry a 403 item up to 2 times with backoff (about 10 s, then 30 s), and download from the saved `-J` via `--load-info-json` within its ~6 h link lifetime, falling back to a fresh extraction (#48). Stay on stable; adopt the next stable that includes `tv_samsung` (via the pin bump process, #21/#44).
+- **Rejected for now:** pinning a nightly (less tested, changes daily); bundling a PO-token provider (bgutil: GPL-3.0, needs a server and native deps, and doesn't address this failure); hard-coding player clients (yt-dlp's defaults change per release).
+- **Metadata fetches stay one at a time** (owner's choice): gentlest on YouTube.
+- **Process-tree stop (#6):** SIGTERM the group first, then SIGKILL after 3 s. A SIGKILL alone leaks the onefile launcher's ~70 MB `_MEI*` unpack dir every time. Windows uses a Job Object.

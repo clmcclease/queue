@@ -552,3 +552,100 @@ test("Q2: a duplicate rejected before the startup snapshot highlights the row wh
   assert.deepEqual(rows(), [existing.url]);
   assert.equal(container.querySelector("li[data-highlight] [data-role=url]").textContent, existing.url);
 });
+
+// #6 (Q3): rows fetch metadata first; the queue://item event fills in title, channel, duration, thumbnail.
+const FETCHING = { status: { state: "fetching" }, rev: 1, meta: null };
+const text = (sel) => container.querySelector(sel)?.textContent ?? null;
+
+test("Q3: a new row says Fetching info without a Download button, then fills in from the event", async () => {
+  const row = { id: 1, url: "https://www.youtube.com/watch?v=jNQXAC9IVRw", ...FETCHING };
+  await mount((command) => (command === "queue_list" ? [row] : null));
+  assert.deepEqual(statusText(), ["Fetching info…"]);
+  assert.equal(downloadButtons().length, 0, "no download before the info is in");
+  const meta = { title: "Me at the zoo", channel: "jawed", duration: 19, thumbnail: "https://i.ytimg.com/vi/x/hq.jpg", site: "Youtube" };
+  await act(async () => emit("queue://item", { ...row, status: { state: "queued" }, meta, rev: 2 }));
+  assert.equal(text('[data-role="title"]'), "Me at the zoo");
+  assert.equal(text('[data-role="byline"]'), "jawed · 0:19");
+  const img = container.querySelector("li img");
+  assert.equal(img.getAttribute("src"), meta.thumbnail);
+  assert.equal(img.getAttribute("referrerpolicy"), "no-referrer");
+  assert.equal(img.getAttribute("alt"), "");
+  assert.equal(downloadButtons().length, 1);
+  assert.deepEqual(rows(), [row.url], "the URL stays visible under the title");
+});
+
+test("Q3: a failed fetch shows yt-dlp's reason and offers no download", async () => {
+  const row = { id: 1, url: "https://example.test/private", ...FETCHING };
+  await mount((command) => (command === "queue_list" ? [row] : null));
+  await act(async () => emit("queue://item", { ...row, status: { state: "failed", reason: "Private video" }, rev: 2 }));
+  assert.deepEqual(statusText(), ["Failed: Private video"]);
+  assert.equal(downloadButtons().length, 0);
+});
+
+test("Q3: untrusted metadata renders as text; long durations use h:mm:ss; missing fields are omitted", async () => {
+  const meta = { title: '<img src=x onerror="alert(1)">', channel: null, duration: 3723, thumbnail: null, site: null };
+  const rowsIn = [
+    { id: 1, url: "https://example.test/a", status: { state: "queued" }, rev: 2, meta },
+    { id: 2, url: "https://example.test/b", status: { state: "queued" }, rev: 2, meta: { title: null, channel: "C", duration: null, thumbnail: null, site: null } },
+  ];
+  await mount((command) => (command === "queue_list" ? rowsIn : null));
+  assert.equal(container.querySelectorAll("li img").length, 0, "no element created from the title");
+  assert.equal(container.querySelector('[data-role="title"]').textContent, meta.title);
+  const bylines = [...container.querySelectorAll('[data-role="byline"]')].map((b) => b.textContent);
+  assert.deepEqual(bylines, ["1:02:03", "C"]);
+  assert.equal(container.querySelectorAll('[data-role="title"]').length, 1, "no title row when there is no title");
+});
+
+// Independent QA for #6 / Q3: metadata races and display boundaries.
+test("Q3 QA: metadata event survives the later Fetching add reply", async (t) => {
+  const reply = deferred();
+  t.after(() => reply.resolve(null));
+  const row = { id: 1, url: "https://example.test/a", ...FETCHING };
+  await mount((command) => command === "queue_list" ? [] : reply.promise);
+  await type(row.url);
+  await submit();
+  const meta = { title: "日本語 🎵 e\u{301} – CON", channel: "作者", duration: 0, thumbnail: null, site: null };
+  await act(async () => emit("queue://item", { ...row, status: { state: "queued" }, meta, rev: 2 }));
+  await act(async () => reply.resolve(row));
+  assert.deepEqual(rows(), [row.url]);
+  assert.equal(text('[data-role="title"]'), meta.title);
+  assert.equal(text('[data-role="byline"]'), "作者 · 0:00");
+  assert.equal(downloadButtons().length, 1);
+});
+
+test("Q3 QA: stale startup snapshot and old events cannot erase fetched metadata", async (t) => {
+  const list = deferred();
+  t.after(() => list.resolve([]));
+  const row = { id: 1, url: "https://example.test/a", ...FETCHING };
+  await mount((command) => command === "queue_list" ? list.promise : null);
+  const meta = { title: "Ready", channel: null, duration: 59.6, thumbnail: "https://cdn.example.test/a.jpg", site: null };
+  await act(async () => emit("queue://item", { ...row, status: { state: "queued" }, meta, rev: 2 }));
+  await act(async () => list.resolve([row]));
+  await act(async () => emit("queue://item", row));
+  assert.equal(text('[data-role="title"]'), "Ready");
+  assert.equal(text('[data-role="byline"]'), "1:00");
+  assert.equal(container.querySelector("li img").getAttribute("loading"), "lazy");
+  assert.equal(downloadButtons().length, 1);
+});
+
+test("Q3 QA: fetch failure stays literal and another metadata row can complete", async () => {
+  const pending = [1, 2].map((id) => ({ id, url: `https://example.test/${id}`, ...FETCHING }));
+  await mount((command) => command === "queue_list" ? pending : null);
+  const reason = '<script>bad()</script> 日本語 unavailable';
+  await act(async () => emit("queue://item", { ...pending[0], status: { state: "failed", reason }, rev: 2 }));
+  const meta = { title: "CON", channel: '<img onerror="bad()"> 作者', duration: null, thumbnail: null, site: null };
+  await act(async () => emit("queue://item", { ...pending[1], status: { state: "queued" }, meta, rev: 2 }));
+  assert.deepEqual(statusText(), [`Failed: ${reason}`, ""]);
+  assert.equal(text('[data-role="byline"]'), meta.channel);
+  assert.equal(container.querySelectorAll("script,img").length, 0);
+  assert.equal(downloadButtons().length, 1);
+});
+
+test("Q3 QA: duration formatting covers rounding boundaries and invalid inputs", async () => {
+  const { formatDuration } = await server.ssrLoadModule("/src/queue.ts");
+  for (const [value, expected] of [
+    [null, ""], [undefined, ""], [NaN, ""], [Infinity, ""], [-1, ""],
+    [0, "0:00"], [0.49, "0:00"], [0.5, "0:01"], [59.5, "1:00"],
+    [3599.5, "1:00:00"], [3600, "1:00:00"], [3723, "1:02:03"], [86400, "24:00:00"],
+  ]) assert.equal(formatDuration(value), expected, `duration ${value}`);
+});

@@ -1,4 +1,4 @@
-import type { QueueItem } from "../queue";
+import { formatDuration, type QueueItem } from "../queue";
 
 interface Props {
   items: QueueItem[];
@@ -16,6 +16,8 @@ function fileName(path: string) {
 function StatusLabel({ item }: { item: QueueItem }) {
   const { status } = item;
   switch (status.state) {
+    case "fetching":
+      return <span className="text-neutral-500 dark:text-neutral-400">Fetching info…</span>;
     case "queued":
       return null;
     case "downloading":
@@ -35,6 +37,15 @@ function StatusLabel({ item }: { item: QueueItem }) {
   }
 }
 
+/** 16:9 thumbnail from the site's CDN; a neutral box while fetching or when there is none. */
+function Thumbnail({ src }: { src: string | null }) {
+  return (
+    <div className="h-9 w-16 shrink-0 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-800">
+      {src && <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />}
+    </div>
+  );
+}
+
 export default function QueueList({ items, onDownload, busy, highlight }: Props) {
   if (items.length === 0) {
     return <p className="mt-16 text-center text-sm text-neutral-500 dark:text-neutral-400">Queue is empty.</p>;
@@ -48,8 +59,23 @@ export default function QueueList({ items, onDownload, busy, highlight }: Props)
           data-highlight={item.id === highlight ? "" : undefined}
           className={`flex items-center gap-3 rounded py-2 text-sm transition-colors ${item.id === highlight ? "bg-amber-100 dark:bg-amber-900/40" : ""}`}
         >
+          <Thumbnail src={item.meta?.thumbnail ?? null} />
           <div className="min-w-0 flex-1">
-            <div data-role="url" className="truncate font-mono text-neutral-800 dark:text-neutral-200" title={item.url}>
+            {item.meta?.title && (
+              <div data-role="title" className="truncate font-medium text-neutral-900 dark:text-neutral-100" title={item.meta.title}>
+                {item.meta.title}
+              </div>
+            )}
+            {(item.meta?.channel || item.meta?.duration != null) && (
+              <div data-role="byline" className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                {[item.meta?.channel, formatDuration(item.meta?.duration)].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            <div
+              data-role="url"
+              className={`truncate font-mono text-neutral-800 dark:text-neutral-200 ${item.meta?.title ? "text-xs opacity-60" : ""}`}
+              title={item.url}
+            >
               {item.url}
             </div>
             <div className="truncate text-xs">

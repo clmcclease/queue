@@ -155,6 +155,11 @@ jobs:
           cp ffmpeg-out/${{ matrix.target }}/* src-tauri/binaries/
           chmod +x src-tauri/binaries/queue-*
           node scripts/fetch-sidecars.mjs --target ${{ matrix.target }} --check
+      # proc.rs's Windows Job Object path (suspended spawn, tree kill) only runs here.
+      - name: Process-tree tests (Windows)
+        if: runner.os == 'Windows'
+        working-directory: src-tauri
+        run: cargo test --locked --test proc_tree
       - run: npm ci
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         with:

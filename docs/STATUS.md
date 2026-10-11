@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #5 done → #6 (Q3) next
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #6 (Q3), PR open (ci:bundle)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,6 +61,40 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
+## In progress: #6 (Q3) fetch metadata on add (committed; PR open)
+- New rows start as **Fetching** (`Status::Fetching`). One worker thread (`fetch_worker`, started in Tauri's setup hook and fed through a channel) runs `yt-dlp <base args> --no-playlist -J -- <url>` per row, in order, with a 90 s limit (the process is killed when it's hit). It then emits `queue://item`.
+- `meta.rs`:
+  - pure `parse` → `Meta { title, channel (else uploader), duration, thumbnail (http(s) only), site }`; text is control-char-filtered and capped at 500 chars;
+  - playlists are refused until #27;
+  - `fetch` drains both pipes on threads, so large `-J` output can't deadlock.
+- `Queue::fetched`: Fetching → Queued (with meta) or Failed (with the reason). Downloads still require Queued.
+- UI: "Fetching info…", then a 16:9 thumbnail (lazy, `no-referrer`, loaded from the site's CDN), the title, channel · `h:mm:ss`, and the URL small underneath.
+- `serde_json` moved from a dev-dependency to a dependency (same pin).
+- Checks:
+  - `cargo test` all pass: 31 lib, `meta_q3` 5 fake-yt-dlp tests (success, error reason, timeout kill, 1.5 MB output, playlist), and the opt-in **real YouTube `-J`** (title, channel, duration, thumbnail OK in 4.4 s);
+  - Codex's earlier tests updated for the fetch step;
+  - `npm test` 64/64 (+3 Q3 UI tests).
+- `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261011-102131-test-JLZ4.md`):
+  1. Thumbnail URLs were truncated at 500 chars, breaking signed CDN links. URLs are now never truncated, only dropped if over 8 KB or containing control characters or whitespace.
+  2. The 90 s limit didn't cover reading the pipes, so a descendant holding them could stall the worker.
+
+  Fix for 2: yt-dlp now runs in its own **process group** (Unix). The pipes are read under the same deadline (via channels), and a timeout kills the whole group with `libc::kill(-pgid)`, since the onefile launcher spawns the real Python process. On Windows only the direct child is killed; tree cleanup goes with #22. `libc` =0.2.190 is pinned (Unix only; already locked via Tauri).
+  Codex's tests are merged: `src-tauri/tests/meta_q3_qa.rs` (18) and 4 UI tests. A new test proves a descendant dies with the group. All cargo tests pass (the real YouTube `-J` too); `npm test` 68/68.
+- `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261011-102855-review-LofR.md`):
+  - P1: unbounded pipe reads could exhaust memory. Now stdout is capped at 32 MB (overflow stops the tree early with a readable error), and stderr keeps a 64 KB tail.
+  - P2: the Windows timeout only killed the direct child. New `src-tauri/src/proc.rs`: `spawn_tree` uses a Unix process group, or a **Windows Job Object** (KILL_ON_JOB_CLOSE); `terminate` is SIGTERM to the group, then SIGKILL after 3 s (no `_MEI*` leak), or `TerminateJobObject`.
+  - P2: a dead worker left rows Fetching forever. A dispatch failure now fails the row; each job runs under `catch_unwind`; reader threads use `thread::Builder` (recoverable).
+  Pinned: `windows-sys` =0.61.2 (Windows only; already locked via Tauri). New tests: overflow, stderr tail, recovery after a bad fetch, and an opt-in **real onefile timeout leaving no processes or `_MEI` dir**. The Windows Job Object code compiles only in CI (this PR uses `ci:bundle`).
+- `codex-qa` re-review: **FAIL**, then fixed (`qa/reports/20261011-121202-review-KOJY.md`):
+  - P2: on Windows the child ran before being put in the Job Object, so its children could escape. It's now spawned **CREATE_SUSPENDED**, assigned to the job, then resumed via a Toolhelp thread snapshot (`proc::windows::resume`).
+  - P2: `catch_unwind` was a no-op under the template's release `panic = "abort"`. The release profile is now **`panic = "unwind"`**.
+  - The worker logic was extracted into `run_fetch_job` / `dispatch_fetch`, with tests: a panicking job fails its row and the next works; a closed channel fails the row.
+  - New `tests/proc_tree.rs` (cross-platform: the tree runs, and terminate closes the pipe only if descendants died). It runs locally on macOS and **in CI on the Windows runner** (a new bundle-job step).
+  All cargo tests pass; `npm test` 68/68; actionlint clean.
+- `codex-qa` review round 3: **FAIL** (one P2), then fixed (`qa/reports/20261011-121639-review-AjFX.md`): after the leader exited, a stdout overflow returned without stopping the group, and could wait on stderr first. Every post-exit error now terminates the tree, and the overflow is handled before stderr. A regression test covers a descendant flooding stdout after the parent exits (overflow reason in under 20 s, no survivor). All cargo tests pass.
+- **Review gate:** the owner accepted it after round 3's fix (2026-10-11), with Windows verified in CI (PR labelled `ci:bundle`, which runs `proc_tree` on the Windows runner).
+- Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
+
 ## Checks (latest)
 - **macOS arm64 locally, at the #4 merge:**
   - `cargo test` 41, plus 4 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS=src-tauri/binaries [QUEUE_QA_NETWORK=1] cargo test --test download_real_d2 -- --ignored`), including a real YouTube DASH merge;
@@ -80,4 +114,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-Start **#6** (Q3): fetch metadata on add with `yt-dlp -J --no-playlist` (async, staged like downloads, argv after `--`). The row fills in thumbnail, title, channel, and duration before any download. Watch the CSP (#43) for thumbnail hosts. #36 (Settings screen), #10 (folder picker) and #39 (Open folder) follow later in M2.
+#6: re-review, then commit (PR with `ci:bundle` to compile the Windows Job Object code). Then **#48** (403 retry), then #7. Note for #43 (CSP): thumbnails load from site CDNs (`img-src https:`). #36 (Settings screen), #10 (folder picker) and #39 (Open folder) follow later in M2.

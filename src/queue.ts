@@ -3,15 +3,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Status =
+  | { state: "fetching" }
   | { state: "queued" }
   | { state: "downloading" }
   | { state: "done"; path: string }
   | { state: "failed"; reason: string };
 
+/** From `yt-dlp -J` (src-tauri/src/meta.rs). Untrusted text: display only. */
+export interface Meta {
+  title: string | null;
+  channel: string | null;
+  /** Seconds. */
+  duration: number | null;
+  thumbnail: string | null;
+  site: string | null;
+}
+
 export interface QueueItem {
   id: number;
   url: string;
   status: Status;
+  meta: Meta | null;
   /** Bumped by the backend on every change; higher wins when replies arrive out of order. */
   rev: number;
 }
@@ -44,4 +56,14 @@ export function mergeItems(shown: QueueItem[], incoming: QueueItem[]): QueueItem
     if (!current || item.rev >= current.rev) byId.set(item.id, item);
   }
   return [...byId.values()].sort((a, b) => a.id - b.id);
+}
+
+/** `1:02:03` / `4:05`; empty when unknown. */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }

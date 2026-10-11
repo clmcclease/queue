@@ -3,21 +3,30 @@
 use serde::Serialize;
 
 use crate::link;
+use crate::meta::Meta;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum Status {
+    /// Metadata (`yt-dlp -J`) is being fetched (Q3).
+    Fetching,
     Queued,
     Downloading,
-    Done { path: String },
-    Failed { reason: String },
+    Done {
+        path: String,
+    },
+    Failed {
+        reason: String,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Item {
     pub id: u64,
     pub url: String,
     pub status: Status,
+    /// From `yt-dlp -J`, once fetched.
+    pub meta: Option<Meta>,
     /// Bumped on every change, so the UI can drop replies and events that arrive out of order.
     pub rev: u64,
     /// Duplicate identity from [`link::parse`]; internal only.
@@ -65,7 +74,8 @@ impl Queue {
         let item = Item {
             id: self.next_id,
             url: link.text,
-            status: Status::Queued,
+            status: Status::Fetching,
+            meta: None,
             rev: 1,
             key: link.key,
         };
@@ -75,6 +85,24 @@ impl Queue {
 
     pub fn items(&self) -> &[Item] {
         &self.items
+    }
+
+    /// Records the outcome of fetching an item's metadata: `Fetching` becomes `Queued` (with
+    /// the metadata) or `Failed` (with yt-dlp's reason). Ignored for any other state.
+    pub fn fetched(&mut self, id: u64, outcome: Result<Meta, String>) -> Option<Item> {
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if item.status != Status::Fetching {
+            return None;
+        }
+        match outcome {
+            Ok(meta) => {
+                item.meta = Some(meta);
+                item.status = Status::Queued;
+            }
+            Err(reason) => item.status = Status::Failed { reason },
+        }
+        item.rev += 1;
+        Some(item.clone())
     }
 
     /// Marks a queued item as downloading. One download at a time (Q4 default): concurrent runs
@@ -116,6 +144,13 @@ impl Queue {
 mod tests {
     use super::*;
 
+    /// Adds a link and completes its metadata fetch, so it can be downloaded.
+    fn ready(q: &mut Queue, url: &str) -> u64 {
+        let id = q.add(url).unwrap().id;
+        q.fetched(id, Ok(Meta::default())).unwrap();
+        id
+    }
+
     #[test]
     fn adds_rows_in_order_with_unique_ids() {
         let mut q = Queue::default();
@@ -133,7 +168,7 @@ mod tests {
         }
         let item = q.add("  https://example.com/v?x=1  ").unwrap();
         assert_eq!(item.url, "https://example.com/v?x=1");
-        assert_eq!(item.status, Status::Queued);
+        assert_eq!(item.status, Status::Fetching);
         assert_eq!(q.items().len(), 1);
     }
 
@@ -174,7 +209,7 @@ mod tests {
     #[test]
     fn a_failed_row_does_not_block_adding_its_link_again() {
         let mut q = Queue::default();
-        let id = q.add("https://example.com/v").unwrap().id;
+        let id = ready(&mut q, "https://example.com/v");
         q.start(id).unwrap();
         assert!(
             matches!(
@@ -205,11 +240,11 @@ mod tests {
     #[test]
     fn download_moves_queued_to_downloading_to_done_bumping_rev() {
         let mut q = Queue::default();
-        let id = q.add("https://example.com/v").unwrap().id;
+        let id = ready(&mut q, "https://example.com/v");
         let started = q.start(id).unwrap();
         assert_eq!(
             (started.status.clone(), started.rev),
-            (Status::Downloading, 2)
+            (Status::Downloading, 3)
         );
         let done = q.finish(id, Ok("/d/Title.mp4".into())).unwrap();
         assert_eq!(
@@ -218,20 +253,20 @@ mod tests {
                 path: "/d/Title.mp4".into()
             }
         );
-        assert_eq!(done.rev, 3);
+        assert_eq!(done.rev, 4);
         assert_eq!(q.items()[0], done);
     }
 
     #[test]
     fn only_one_download_runs_at_a_time() {
         let mut q = Queue::default();
-        let a = q.add("https://example.com/a").unwrap().id;
-        let b = q.add("https://example.com/b").unwrap().id;
+        let a = ready(&mut q, "https://example.com/a");
+        let b = ready(&mut q, "https://example.com/b");
         q.start(a).unwrap();
         assert!(q.start(b).unwrap_err().contains("in progress"));
         assert_eq!(
             (q.items()[1].status.clone(), q.items()[1].rev),
-            (Status::Queued, 1),
+            (Status::Queued, 2),
             "b untouched"
         );
         q.finish(a, Err("x".into())).unwrap();
@@ -241,7 +276,7 @@ mod tests {
     #[test]
     fn failed_download_keeps_the_reason() {
         let mut q = Queue::default();
-        let id = q.add("https://example.com/v").unwrap().id;
+        let id = ready(&mut q, "https://example.com/v");
         q.start(id).unwrap();
         let failed = q.finish(id, Err("Video unavailable".into())).unwrap();
         assert_eq!(
@@ -256,12 +291,39 @@ mod tests {
     fn start_rejects_unknown_and_non_queued_items_and_finish_ignores_them() {
         let mut q = Queue::default();
         assert!(q.start(42).is_err());
-        let id = q.add("https://example.com/v").unwrap().id;
+        let id = ready(&mut q, "https://example.com/v");
         assert_eq!(q.finish(id, Ok("x".into())), None, "not started");
         q.start(id).unwrap();
         assert!(q.start(id).is_err(), "already downloading");
         q.finish(id, Ok("x".into())).unwrap();
         assert!(q.start(id).is_err(), "done");
         assert_eq!(q.finish(id, Err("late".into())), None, "already finished");
+    }
+
+    #[test]
+    fn new_rows_fetch_info_then_become_queued_or_failed() {
+        let mut q = Queue::default();
+        let a = q.add("https://example.com/a").unwrap();
+        assert_eq!(
+            (a.status.clone(), a.meta.clone(), a.rev),
+            (Status::Fetching, None, 1)
+        );
+        assert!(q.start(a.id).is_err(), "no download before the info is in");
+        let meta = Meta {
+            title: Some("A".into()),
+            ..Meta::default()
+        };
+        let a = q.fetched(a.id, Ok(meta.clone())).unwrap();
+        assert_eq!((a.status, a.meta, a.rev), (Status::Queued, Some(meta), 2));
+        assert_eq!(q.fetched(a.id, Ok(Meta::default())), None, "only once");
+        let b = q.add("https://example.com/b").unwrap().id;
+        let b = q.fetched(b, Err("Unsupported URL".into())).unwrap();
+        assert_eq!(
+            b.status,
+            Status::Failed {
+                reason: "Unsupported URL".into()
+            }
+        );
+        assert_eq!(q.fetched(99, Ok(Meta::default())), None);
     }
 }
