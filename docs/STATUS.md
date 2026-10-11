@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #4 (download one item), uncommitted
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** M1 items all done (#1, #29, #2, #3, #4) → M1 audit next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
@@ -30,9 +30,10 @@
   - The Rust `queue` module holds the queue (`Queue::add` trims and rejects blank input; no validation until #5). It's exposed through the `queue_add` and `queue_list` commands held in Tauri state.
   - `src/queue.ts` is the client. `UrlBar` uses a text input with `inputMode=url` (not `type=url`, which would trigger webview validation) and a **+** that's disabled while the field is empty; focus returns to the field after each add. `QueueList` shows the raw URL per row.
   - Tailwind is limited to scanning `src/` (`source("../src")`): it had been scanning the test files, so the CSS test passed by itself. The scaffold render test now uses Vite SSR.
+- New requirement **D7** (owner, 2026-10-10): an Open folder button plus per-row Show in folder → **#39** (M2, P0). PRD §6.2 and BACKLOG updated; #20 reuses it.
 - Backlog additions at the owner's request (2026-10-10): **#36** Settings screen (M2, with #10) and **#37** separate in-progress/completed folders (Later; one folder by default).
 
-- **#4 is implemented and uncommitted** (D2):
+- **#4 is done** (D2). It was squash-merged from PR #40 after green checks and the owner's in-app test.
   - Items carry `status` (queued, downloading, done with a path, failed with a reason) and a `rev` the UI uses to drop stale replies and events (`mergeItems`: highest rev wins).
   - The `queue_download` command marks the item Downloading and runs `download::run` on a thread. The outcome arrives as a `queue://item` event.
   - **Staged download (redesign after review round 2):** yt-dlp runs with `-P <fresh work dir>` under the app cache (`downloads/item-<id>-<nanos>`), so its partial, merge-temp, and `.fNNN` files never sit next to the user's files. Then `download::finished_file` requires exactly one regular file there, and `download::place` moves it into the output folder **without ever replacing anything**: a hard link (atomic, no-clobber), falling back to a `create_new` copy across volumes. The filesystem itself rejects an existing name, including case- and Unicode-equivalent names on APFS. The work dir is always removed. No stdout path parsing, so Windows console encoding can't break it.
@@ -111,4 +112,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-#4: QA passed and the owner's in-app test passed; commit once approved (normal PR, no `ci:bundle`). After the merge, run the M1 `codex-qa audit` to close M1. Owner question pending: whether to add an optional "most compatible (MP4/H.264)" preset later, since D-007's default often yields `.webm` (AV1/VP9 + Opus), which QuickTime and Finder preview can't play.
+Run the M1 `codex-qa audit` (CLAUDE.md gate 3) to close M1, then fix or log its findings. After that, start M2, beginning with #36 (Settings screen) + #10 (folder picker) + #39 (D7: Open folder / Show in folder). Open owner question: an optional "most compatible (MP4/H.264)" preset (possibly with #11), since D-007's default often yields `.webm`, which QuickTime and Finder preview can't play.
