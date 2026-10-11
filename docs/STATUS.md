@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #6 (Q3), PR open (ci:bundle)
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #6 done → #48 (403 retry) next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #6 (Q3) fetch metadata on add (committed; PR open)
+## Done: #6 (Q3) fetch metadata on add (squash-merged from PR #49; Windows `proc_tree` passed in CI)
 - New rows start as **Fetching** (`Status::Fetching`). One worker thread (`fetch_worker`, started in Tauri's setup hook and fed through a channel) runs `yt-dlp <base args> --no-playlist -J -- <url>` per row, in order, with a 90 s limit (the process is killed when it's hit). It then emits `queue://item`.
 - `meta.rs`:
   - pure `parse` → `Meta { title, channel (else uploader), duration, thumbnail (http(s) only), site }`; text is control-char-filtered and capped at 500 chars;
@@ -114,4 +114,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-#6: re-review, then commit (PR with `ci:bundle` to compile the Windows Job Object code). Then **#48** (403 retry), then #7. Note for #43 (CSP): thumbnails load from site CDNs (`img-src https:`). #36 (Settings screen), #10 (folder picker) and #39 (Open folder) follow later in M2.
+Start **#48** (D-017): auto-retry an item that fails with `HTTP Error 403` up to 2× with backoff (~10 s, 30 s), and download from the saved `-J` result via `--load-info-json` when it's under ~6 h old (fall back to a fresh extraction). Keep the info JSON from #6's fetch (persist it in the app cache per item). Then #7 (sequential runner + Download all).
