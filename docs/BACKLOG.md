@@ -28,6 +28,9 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Default preset is Default. |
 | #12 | Q7 | P1 | queue | **Persist queue and settings across restarts** — JSON or SQLite in the app-data directory; in-flight items resume as Ready. |
 | #13 | Q8 | P1 | queue | **Paste multiple URLs at once** — Newline-separated paste creates one row per URL. |
+| #41 | NFR | P1 | infra | **Native macOS/Windows download tests in CI** — Run the download tests (and opt-in real-sidecar loopback tests) in the per-OS bundle jobs, and add a Windows executable fixture. M1 audit. |
+| #42 | D2 | P2 | download | **Download failure-path regression tests** — Forced cross-volume `place`, mid-copy and sync failures, and StrictMode listener cleanup. M1 audit. |
+| #45 | D2 | P2 | download | **Clean up staging folders left by an interrupted download** — Remove stale `item-*` work dirs on startup (D-014). |
 
 ## M3 – Smart naming (rules)
 
@@ -59,6 +62,8 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #22 | Q6 | P1 | queue | **Drag to reorder and cancel in-progress item** — Cancel kills the subprocess and cleans up partial files. |
 | #23 | D3,D5 | P1 | download | **Per-item format override; embed thumbnail + metadata** — Per-row Default/Audio toggle; --embed-thumbnail --embed-metadata where supported. |
 | #24 | NFR | P1 | infra | **Signed installers for all platforms** — macOS notarized .dmg, Windows signed MSI/NSIS (certificate decision pending), Linux AppImage + .deb. |
+| #43 | NFR | P1 | infra | **Content Security Policy for the webview** — `app.security.csp` is null; set a strict CSP and verify it on all three webviews. |
+| #44 | NFR | P2 | infra | **Verify yt-dlp release GPG signatures** — Check `SHA2-256SUMS.sig` against upstream's key when pins change (and the ffmpeg `.asc`). |
 
 ## Later
 

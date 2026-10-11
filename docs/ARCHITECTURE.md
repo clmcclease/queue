@@ -28,15 +28,16 @@
 `Queued → FetchingInfo → Naming → Ready → Downloading → Processing → Done | Failed`
 
 1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, store the metadata, then compute the proposed filename with the active naming provider. Tier 1 runs first, so a name is always available instantly.
-2. **Start:** the runner takes the next `Ready` item and runs `yt-dlp [-x] -o <dir>/<name>.%(ext)s --newline --progress-template <json> <url>`. No `-f` by default (D-007).
+2. **Start:** the runner takes the next `Ready` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
 3. **Progress:** parse each stdout line and emit `{id, percent, speed, eta}` to the UI.
-4. **Finish:** check that the file exists and record it in history. If the item failed, keep stderr's last line as the reason and move on.
+4. **Finish:** take the one finished file from the work dir and place it in the output folder with a no-clobber move (hard link, falling back to a `create_new` copy; never `rename`). The filesystem itself refuses an existing name. Record it in history and remove the work dir. If the item failed, keep stderr's last `ERROR:` line as the reason and move on.
 
 ## Naming engine (Tier 1)
 
 - Input: yt-dlp metadata (`title`, `channel`, `upload_date`, `artist`, `track`, `series`, `episode_number`, …) and a template string.
-- Steps: pick the structured fields if present → apply the template → strip noise patterns → strip emoji → replace characters that aren't allowed in filenames → collapse whitespace → cap the length → resolve collisions by adding ` (n)`.
-- Pure and deterministic, covered by table-driven unit tests built from real titles.
+- Steps: pick the structured fields if present → apply the template → strip noise patterns → strip emoji → replace characters that aren't allowed in filenames → collapse whitespace → cap the length.
+- Pure and deterministic (metadata + template → name, no filesystem access), covered by table-driven unit tests built from real titles.
+- Collisions (N2, #16) aren't part of the engine. The download layer picks a free ` (n)` variant and relies on the no-clobber placement (D-014), because only the filesystem knows which names exist (including case- and Unicode-equivalent ones).
 - The filename rules are the strictest across OSes (Windows reserved names, trailing dots and spaces, `<>:"/\|?*`).
 
 ## AI naming (Tier 2)
