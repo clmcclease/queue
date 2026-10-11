@@ -1,6 +1,7 @@
 //! Independent QA for #5 / Q2: validation and duplicate identity, without network or Tauri IPC.
 use queue_lib::{
     link,
+    meta::Meta,
     queue::{AddError, Queue},
 };
 
@@ -194,11 +195,13 @@ fn done_rows_still_block_duplicates_and_failed_rows_do_not_mask_a_new_row() {
     let mut queue = Queue::default();
     let url = "https://example.test/video";
     let first = queue.add(url).unwrap();
+    queue.fetched(first.id, Ok(Meta::default())).unwrap(); // #6
     queue.start(first.id).unwrap();
     assert_duplicate(&mut queue, url, first.id);
     queue.finish(first.id, Err("unavailable".into())).unwrap();
     let second = queue.add(url).unwrap();
     assert_duplicate(&mut queue, url, second.id);
+    queue.fetched(second.id, Ok(Meta::default())).unwrap();
     queue.start(second.id).unwrap();
     queue
         .finish(second.id, Ok("C:\\Downloads\\CON.webm".into()))

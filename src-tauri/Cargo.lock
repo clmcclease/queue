@@ -2350,11 +2350,13 @@ dependencies = [
 name = "queue"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

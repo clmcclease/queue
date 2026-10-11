@@ -24,14 +24,19 @@ tauri-build = { version = "=2.7.1", features = [] }
 tauri = { version = "=2.12.2", features = [] }
 serde = { version = "=1.0.229", features = ["derive"] }
 url = "=2.5.8"
-
-[dev-dependencies]
 serde_json = "=1.0.151"
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Unwind (not the template's "abort"): the metadata worker recovers from a panic in one job.
+panic = "unwind"
 strip = true
