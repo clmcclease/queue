@@ -61,7 +61,7 @@ A single power user (the owner) on any desktop OS who downloads podcasts, music,
 | ID | Requirement | Priority |
 |---|---|---|
 | D1 | User-selectable output folder, remembered between sessions | P0 |
-| D2 | Format presets: **Default**, which lets yt-dlp choose the best format and container itself (no `-f` override, nothing forced to mp4), and **Audio only** (`-x`, keeping yt-dlp's best native audio format with no re-encode). Default is **Default**. | P0 |
+| D2 | Format presets: **Default**, which lets yt-dlp choose the best format and container itself (no `-f` override, nothing forced to mp4), and **Audio only** (`-x`, keeping yt-dlp's best native audio format with no re-encode). Plus an optional **Most compatible (MP4)** that prefers H.264 + AAC so files play in QuickTime and on TVs, with no re-encode and an honest notice when a site has none (D-015). Default is **Default**. | P0 |
 | D3 | Per-item format override (e.g., this one audio-only) | P1 |
 | D4 | Live progress: %, speed, ETA (parsed from yt-dlp progress output) | P0 |
 | D5 | Embed thumbnail + metadata into file where supported | P1 |
@@ -113,7 +113,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 
 ## 7. Non-functional requirements
 - **Cross-platform:** macOS (Apple Silicon and Intel), Windows 10/11 (x64), and Linux (x64; AppImage and .deb) from M1 on. CI builds all three for every push to `main` (and for PRs labelled `ci:bundle`), and runs the checks on every PR (D-011).
-- **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~1–2 GB) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
+- **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~2.5 GB default, ~1.3 GB small option; D-016) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
 - **Polished UI:** a single window with a dark/light theme that follows the system, smooth animations, thumbnails, and keyboard-first use (⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item). It follows each OS's conventions for window controls and menus.
 - **Resilient:** one item failing never stops the queue. yt-dlp self-updates (`yt-dlp -U`) at launch, at most once a day.
 - **Private:** no telemetry. With the default settings, the only network calls are yt-dlp itself, update checks, and the one-time model download. Item metadata is only sent to a third party if the user picks the API provider.
@@ -166,7 +166,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 4. **Subfolders:** not in v1. Moved to the Later backlog (N5).
 
 ## 13. Open questions
-1. Default local model: chosen by the N9 eval. Candidates are small instruct GGUFs (e.g. Qwen 2.5/3 1.5–3B, Llama 3.2 3B, Gemma 3 1B/4B).
+1. Default local model: **provisionally Qwen3-4B-Instruct-2507** (Q4_K_M, 2.5 GB), with Qwen3.5-2B (1.3 GB) as the small option (D-016). To be confirmed by the N9 eval.
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings for personal use?
 
 ## 14. Future

@@ -61,3 +61,24 @@ The owner raised PRD §7's installer budget from about 80 MB to **under 256 MB p
 
 ## D-014 Staged downloads with no-clobber placement — Confirmed (2026-10-10)
 Codex QA on #4 showed that letting yt-dlp write straight into the user's folder can't be made safe: merge-temp names like `Foo.temp.webm` can clobber real files, the printed path breaks on non-UTF-8 Windows consoles, and name checks miss case- and Unicode-equivalent names. So each download runs with `-P <fresh dir under the app cache>`. The one finished file is then placed in the output folder with `fs::hard_link` (atomic, fails if the name exists), falling back to a `create_new` copy across volumes; `rename` is never used because it replaces files. The work dir is always removed. The owner approved this with #4 and tested it in the app. Consequences: no `.part` files appear in the user's folder; the naming engine stays pure, and collision choice (#16) belongs to the download layer. Open follow-up: clean up work dirs left behind when the app is killed mid-download.
+
+## D-015 Optional "Most compatible (MP4)" preset — Confirmed (2026-10-11)
+D-007's default (yt-dlp decides) often yields `.webm` (AV1/VP9 + Opus), which QuickTime and Finder preview can't play. #11 adds an optional preset (the default stays "yt-dlp decides"). The flags come from ytdlp-expert, verified against yt-dlp 2026.08.19 with our minimal ffmpeg on macOS; AVFoundation reported every output playable:
+- **Video:** `-S vcodec:h264,vext:mp4,lang,quality,res,fps,hdr:12,acodec:aac,aext:m4a --merge-output-format mp4/webm/mkv`. A format sort rather than an `-f` filter, so something always downloads. It's **strict H.264** (owner's choice): H.264 wins even at low resolution, and on YouTube H.264 usually tops out at 1080p. Without H.264 it falls back to VP9/AV1 in `.webm` or `.mkv`, so the extension stays honest.
+- **Audio-only:** `-f ba/b -S acodec:aac,aext:m4a,vext:mp4 -x`. AAC is stream-copied to `.m4a`; Opus sources stay `.opus`.
+- **Never** use `-t mp4`, `--remux-video mp4`, a forced `--merge-output-format mp4`, `--audio-format m4a`, or `-t aac`. Our ffmpeg has no VP9 decoder, so VP9 remuxed into MP4 is **silently corrupt** (empty `vpcC`, yet yt-dlp exits 0), and an audio conversion needs an encoder we don't ship.
+- **No H.264 available (owner's choice):** keep the honest `.webm`/`.mkv` and show a row notice such as "Not QuickTime-compatible (VP9/Opus)". No re-encoding, which keeps D-012's minimal LGPL build.
+- **ffmpeg additions (owner's choice), both LGPL:** `--enable-decoder=vp9`, defense in depth against the corrupt-MP4 trap, and `--enable-demuxer=avi`, for sites like archive.org that serve `.avi`, which today's default can fail on. Done with #11; measure the size change.
+
+## D-016 Default local naming model: Qwen3-4B-Instruct-2507 — Provisional (2026-10-11)
+Research of current small GGUF models (sources in the #33 issue). The owner accepted the size; the N9 eval (#33) confirms the choice on the pinned files.
+- **Default:** Qwen3-4B-Instruct-2507 Q4_K_M (2.50 GB, Apache-2.0; reputable GGUFs from bartowski, unsloth, and lmstudio-community; no official Qwen GGUF). It has the best instruction following without a thinking mode in this size range (IFEval 83.4) and strong multilingual scores. About 2.5 s per item on a base M1 (estimate), but 5–6 s on CPU-only machines.
+- **Small option:** Qwen3.5-2B Q4_K_M (1.28 GB, Apache-2.0). Suggested automatically when there's no GPU backend or under 8 GB of RAM; the user can switch either way (#31).
+- **Rejected:** Llama 3.2 (branding and AUP pass-through), Gemma 3 (restrictive terms; Gemma 4 E2B is 3.1 GB), Qwen2.5-3B (non-commercial `qwen-research` license), and weaker multilingual options.
+- **Runtime notes for #30/#33:**
+  - llama-server on `127.0.0.1` with a random port and a per-launch `--api-key`; `-c 2048 --parallel 1`, `-ngl 99` on GPU, and `--sleep-idle-seconds 120` (N6).
+  - Reasoning off (`--reasoning off` plus `chat_template_kwargs.enable_thinking=false`).
+  - JSON-schema `response_format` (`filename`, 1–150 chars); temperature 0–0.2, `max_tokens` ~128.
+  - Metadata is passed as data, never as instructions.
+  - Pin by HF repo commit plus the file's LFS sha256.
+- **Consequence:** PRD §7's "~1–2 GB" model download becomes ~2.5 GB for the default (1.3 GB for the small option).

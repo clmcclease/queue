@@ -16,6 +16,16 @@ export interface QueueItem {
   rev: number;
 }
 
+/** Why `addItem` rejected a link (src-tauri/src/queue.rs `AddError`). */
+export type AddError =
+  | { kind: "invalid"; message: string }
+  | { kind: "duplicate"; message: string; id: number };
+
+export function isAddError(e: unknown): e is AddError {
+  return typeof e === "object" && e !== null && "kind" in e && "message" in e;
+}
+
+/** Rejects with an {@link AddError} for invalid or duplicate links. */
 export const addItem = (url: string) => invoke<QueueItem>("queue_add", { url });
 export const listItems = () => invoke<QueueItem[]>("queue_list");
 export const downloadItem = (id: number) => invoke<QueueItem>("queue_download", { id });

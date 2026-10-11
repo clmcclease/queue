@@ -1,6 +1,8 @@
-//! The download queue (Q1 #3, D2 #4). Plain data with no Tauri types, so it's unit-testable and
-//! the UI only sees it through commands and events. URL validation and duplicates come in #5.
+//! The download queue (Q1 #3, Q2 #5, D2 #4). Plain data with no Tauri types, so it's
+//! unit-testable and the UI only sees it through commands and events.
 use serde::Serialize;
+
+use crate::link;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -18,6 +20,19 @@ pub struct Item {
     pub status: Status,
     /// Bumped on every change, so the UI can drop replies and events that arrive out of order.
     pub rev: u64,
+    /// Duplicate identity from [`link::parse`]; internal only.
+    #[serde(skip)]
+    key: String,
+}
+
+/// Why a link wasn't added. Serialized for the UI as `{ kind, message, id? }`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AddError {
+    /// Shown inline under the field; the text stays so it can be fixed.
+    Invalid { message: String },
+    /// Shown as a toast; `id` is the row that already has this link.
+    Duplicate { message: String, id: u64 },
 }
 
 #[derive(Debug, Default)]
@@ -27,21 +42,35 @@ pub struct Queue {
 }
 
 impl Queue {
-    /// Appends a row for `url`. Returns `None` for blank input; the text is otherwise kept raw.
-    pub fn add(&mut self, url: &str) -> Option<Item> {
-        let url = url.trim();
-        if url.is_empty() {
-            return None;
+    /// Appends a row for a valid, new link (Q2). A link matching a row that hasn't failed is a
+    /// duplicate; a failed row doesn't block adding its link again (retry proper is #9).
+    pub fn add(&mut self, input: &str) -> Result<Item, AddError> {
+        if input.trim().is_empty() {
+            return Err(AddError::Invalid {
+                message: "Enter a link to add.".into(),
+            });
+        }
+        let link = link::parse(input).map_err(|message| AddError::Invalid { message })?;
+        if let Some(existing) = self
+            .items
+            .iter()
+            .find(|i| i.key == link.key && !matches!(i.status, Status::Failed { .. }))
+        {
+            return Err(AddError::Duplicate {
+                message: "That link is already in the queue.".into(),
+                id: existing.id,
+            });
         }
         self.next_id += 1;
         let item = Item {
             id: self.next_id,
-            url: url.to_owned(),
+            url: link.text,
             status: Status::Queued,
             rev: 1,
+            key: link.key,
         };
         self.items.push(item.clone());
-        Some(item)
+        Ok(item)
     }
 
     pub fn items(&self) -> &[Item] {
@@ -97,10 +126,11 @@ mod tests {
     }
 
     #[test]
-    fn trims_whitespace_and_ignores_blank_input() {
+    fn trims_whitespace_and_rejects_blank_input() {
         let mut q = Queue::default();
-        assert_eq!(q.add("   \t\n"), None);
-        assert_eq!(q.add(""), None);
+        for blank in ["   \t\n", ""] {
+            assert!(matches!(q.add(blank), Err(AddError::Invalid { .. })));
+        }
         let item = q.add("  https://example.com/v?x=1  ").unwrap();
         assert_eq!(item.url, "https://example.com/v?x=1");
         assert_eq!(item.status, Status::Queued);
@@ -108,12 +138,67 @@ mod tests {
     }
 
     #[test]
-    fn keeps_raw_text_until_validation_lands() {
+    fn rejects_invalid_links_without_adding_a_row() {
         let mut q = Queue::default();
-        assert_eq!(q.add("not a url").unwrap().url, "not a url");
+        assert!(matches!(q.add("not a url"), Err(AddError::Invalid { .. })));
+        assert!(matches!(
+            q.add("javascript:alert(1)"),
+            Err(AddError::Invalid { .. })
+        ));
+        assert!(q.items().is_empty());
         assert_eq!(
             q.add("https://例え.jp/🎵").unwrap().url,
             "https://例え.jp/🎵"
+        );
+    }
+
+    #[test]
+    fn duplicates_point_at_the_existing_row_and_add_nothing() {
+        let mut q = Queue::default();
+        let first = q
+            .add("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            .unwrap();
+        let dup = q.add("https://youtu.be/dQw4w9WgXcQ?si=x").unwrap_err();
+        assert_eq!(
+            dup,
+            AddError::Duplicate {
+                message: "That link is already in the queue.".into(),
+                id: first.id
+            }
+        );
+        assert_eq!(q.items().len(), 1);
+        q.add("https://youtu.be/aaaaaaaaaaa").unwrap();
+        assert_eq!(q.items().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_row_does_not_block_adding_its_link_again() {
+        let mut q = Queue::default();
+        let id = q.add("https://example.com/v").unwrap().id;
+        q.start(id).unwrap();
+        assert!(
+            matches!(
+                q.add("https://example.com/v"),
+                Err(AddError::Duplicate { .. })
+            ),
+            "downloading"
+        );
+        q.finish(id, Err("network".into())).unwrap();
+        assert_ne!(q.add("https://example.com/v").unwrap().id, id);
+    }
+
+    #[test]
+    fn add_errors_serialize_with_a_kind_for_the_ui() {
+        let json = serde_json::to_string(&AddError::Duplicate {
+            message: "m".into(),
+            id: 3,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"kind":"duplicate","message":"m","id":3}"#);
+        let item = Queue::default().add("https://example.com").unwrap();
+        assert!(
+            !serde_json::to_string(&item).unwrap().contains("key"),
+            "key stays internal"
         );
     }
 
