@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #5 (Q2), PR open
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #5 done → #6 (Q3) next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -33,7 +33,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the M1 `codex-qa audit` was **YELLOW**, with no M2 blocker (`qa/reports/20261010-220217-audit-fBu7.md`). Its doc findings are fixed in this change; its test/CI findings are filed as #41–#45. The M1 milestone is closed on GitHub.
 - **Backlog added this session at the owner's request:** #36 Settings screen (M2), #37 separate in-progress/completed folders (Later), and #39 D7 Open folder / Show in folder (M2).
 
-## In progress: #5 (Q2) validate URLs, reject duplicates (committed; PR open)
+## Done: #5 (Q2) validate URLs, reject duplicates (squash-merged from PR #47)
 - `src-tauri/src/link.rs` (pure) — **validation:**
   - only `http`/`https` with a host, starting with a literal `http(s)://`, so the text yt-dlp gets is exactly what was validated;
   - a bare `example.com/…` gets `https://` added;
@@ -80,4 +80,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-#5: the PR's checks, then the owner approves the squash-merge. Then #6 (fetch metadata on add). #36 (Settings screen), #10 (folder picker) and #39 (Open folder) follow later in M2.
+Start **#6** (Q3): fetch metadata on add with `yt-dlp -J --no-playlist` (async, staged like downloads, argv after `--`). The row fills in thumbnail, title, channel, and duration before any download. Watch the CSP (#43) for thumbnail hosts. #36 (Settings screen), #10 (folder picker) and #39 (Open folder) follow later in M2.
