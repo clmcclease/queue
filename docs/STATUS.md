@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** #3 done → #4 (first real download) next
+**Updated:** 2026-10-10 · **Milestone:** M1 (walking skeleton) in progress · **Active:** M1 items all done (#1, #29, #2, #3, #4) → M1 audit next
 
 ## Current state
 - M0 is complete: PRD v2, backlog, decisions D-001–D-009, and Codex QA (see docs/QA.md).
@@ -30,9 +30,43 @@
   - The Rust `queue` module holds the queue (`Queue::add` trims and rejects blank input; no validation until #5). It's exposed through the `queue_add` and `queue_list` commands held in Tauri state.
   - `src/queue.ts` is the client. `UrlBar` uses a text input with `inputMode=url` (not `type=url`, which would trigger webview validation) and a **+** that's disabled while the field is empty; focus returns to the field after each add. `QueueList` shows the raw URL per row.
   - Tailwind is limited to scanning `src/` (`source("../src")`): it had been scanning the test files, so the CSS test passed by itself. The scaffold render test now uses Vite SSR.
+- New requirement **D7** (owner, 2026-10-10): an Open folder button plus per-row Show in folder → **#39** (M2, P0). PRD §6.2 and BACKLOG updated; #20 reuses it.
 - Backlog additions at the owner's request (2026-10-10): **#36** Settings screen (M2, with #10) and **#37** separate in-progress/completed folders (Later; one folder by default).
 
+- **#4 is done** (D2). It was squash-merged from PR #40 after green checks and the owner's in-app test.
+  - Items carry `status` (queued, downloading, done with a path, failed with a reason) and a `rev` the UI uses to drop stale replies and events (`mergeItems`: highest rev wins).
+  - The `queue_download` command marks the item Downloading and runs `download::run` on a thread. The outcome arrives as a `queue://item` event.
+  - **Staged download (redesign after review round 2):** yt-dlp runs with `-P <fresh work dir>` under the app cache (`downloads/item-<id>-<nanos>`), so its partial, merge-temp, and `.fNNN` files never sit next to the user's files. Then `download::finished_file` requires exactly one regular file there, and `download::place` moves it into the output folder **without ever replacing anything**: a hard link (atomic, no-clobber), falling back to a `create_new` copy across volumes. The filesystem itself rejects an existing name, including case- and Unicode-equivalent names on APFS. The work dir is always removed. No stdout path parsing, so Windows console encoding can't break it.
+  - `download::args`: base sidecar args + `--no-playlist --no-overwrites --windows-filenames --no-mtime --no-progress -P <work> -o '%(title)s.%(ext)s' -- <url>`. No `-f` (D-007); the untrusted URL goes after `--`. On Windows the process is spawned with `CREATE_NO_WINDOW`.
+  - Failure reason = the last `ERROR:` line. An existing target shows "Not saved: a file named … already exists (not overwritten)". #16 will pick a free name instead.
+  - One download at a time (`Queue::start`); the UI disables the other Download buttons.
+  - The UI registers the event listener before taking the snapshot; a registration failure shows an alert.
+  - The fixed folder is the OS Downloads dir (Tauri path API) until #10.
+
 ## Checks performed (2026-10-10, macOS arm64 only)
+- #4 (macOS arm64):
+  - `cargo test` 21/21, clippy and fmt clean, `npm test` 47/47 (3 new D2 UI tests with mocked events: progress → file name, a stale reply can't revert a finished row, Windows path display plus error).
+  - Real YouTube download ("Me at the zoo", jNQXAC9IVRw) with the exact argv: AV1 video + Opus audio merged into `.webm` by our minimal ffmpeg, 19.02 s. deno handled YouTube's JS.
+  - In the app: ✓ with the file name in `~/Downloads`; `not a url` → "Failed: [generic] 'not a url' is not a valid URL"; re-downloading an existing file → "Not downloaded … already exists", and the file stayed untouched.
+  - Fresh-file mtime confirmed via CLI (the run started 18:35:00, file 18:35:03). Test files were removed from `~/Downloads`.
+  - Incident: one automated keystroke sequence ran while the Queue window wasn't frontmost and may have typed a URL + Enter into another app. UI automation is stopped; the owner was told.
+- #4 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-183537-test-VXzc.md`). Two bugs:
+  1. A file created just before the run was reported as done: the mtime heuristic's 2 s slack.
+  2. A directory at the reported path counted as a download.
+  The mtime heuristic is replaced by a pre-run name snapshot plus an `is_file` check. Codex's tests are merged: `src-tauri/tests/download_d2.rs` (14 tests, using a fixture executable), `download_real_d2.rs` (3 opt-in tests against the real sidecars over loopback HTTP; run them with `QUEUE_QA_REAL_SIDECARS=src-tauri/binaries cargo test --test download_real_d2 -- --ignored`), and 2 UI tests. All pass locally, including the 3 real-sidecar tests that Codex's sandbox blocked. `cargo test` 35/35 (+3 opt-in), `npm test` 49/49.
+- #4 `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261010-184319-review-pWmI.md`):
+  - P1: two concurrent same-title downloads could merge onto one path. `Queue::start` now allows **one download at a time**, and the other Download buttons are disabled while one runs; parallel downloads (#28) will need reserved names.
+  - P2: a finish event could be lost between the snapshot and listener registration. The app now registers the listener first, then takes the snapshot; a registration failure shows an alert.
+  - P2: an unlistable folder became an empty snapshot, so a skipped file could show as a false Done. Snapshot errors now fail the item; a missing folder is still fine.
+  Regression tests: 1 queue test, 1 snapshot test, 3 UI tests (the listener-order test was mutation-checked). `cargo test` 37/37 (+3 real-sidecar opt-in tests passing), `npm test` 52/52.
+- #4 `codex-qa` re-review: **FAIL** (`qa/reports/20261010-184857-review-McuG.md`):
+  - P1: yt-dlp's merge temp files in the user's folder could clobber `Foo.temp.webm`.
+  - P2: a Windows non-UTF-8 stdout path could break success detection.
+  - P2: NFC/NFD-equivalent names slipped past the name snapshot.
+  All three came from yt-dlp writing straight into the user's folder, so the design changed to the staged download above; the name snapshot and stdout parsing are gone. Fake-yt-dlp tests were rewritten for the staged flow (14, including lookalike `Foo.temp.webm`/`Foo.f251.webm` untouched, a macOS case/NFD collision refused by the OS, a missing out dir, and a stale work dir refused). New opt-in real YouTube test (`QUEUE_QA_NETWORK=1`). `cargo test` all pass (+4 real-sidecar opt-in tests, including the YouTube merge leaving only the finished file), `npm test` 52/52.
+- #4 `codex-qa` re-review on the staged design: **FAIL**, then fixed (`qa/reports/20261010-185524-review-bqWF.md`). P2: a failed listener registration left downloads enabled, so a result could never arrive and the row stayed Downloading, blocking the rest. Download now stays disabled until the listener is up, and a registration failure shows a persistent "Restart Queue" warning that a later successful add doesn't clear. The copy fallback is split into `copy_no_clobber`, with direct tests (copy, refuse existing, no partial file on failure). +2 UI tests; `npm test` 54/54, `cargo test` 41 (+4 opt-in).
+- #4 owner test (2026-10-10): the owner downloaded a real video link in the dev app on macOS; it worked.
+- #4 final `codex-qa` re-review: **PASS WITH NOTES**, with no actionable findings (`qa/reports/20261010-185811-review-IzBd.md`). Suggested follow-up tests (not blocking): Windows executable fixtures, a forced cross-volume `place`, injected copy/sync failures, StrictMode listener cleanup. Codex's sandbox blocked its Rust and 17 Node tests; the full suites ran locally.
 - #3 (macOS arm64): `cargo test` 8/8 (3 new queue tests), clippy and fmt clean, `npm run build`, `npm test` 33/33. In the real app (`tauri dev`, driven with System Events and checked by screenshots): Enter adds a row and clears the field; **+** adds trimmed input; **+** is disabled when the field is empty; Enter on an empty field does nothing; typing right after **+** lands in the field.
 - #3 `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261010-173134-test-MZBN.md`). Two UI races, both reproduced with real React DOM and delayed mock IPC:
   1. A slow `queue_add` reply cleared a link typed meanwhile. The field now clears only if it still holds the submitted text.
@@ -78,4 +112,4 @@
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings? (#24)
 
 ## Next bounded action
-Start **#4** (D2): a "Download" action that runs the yt-dlp sidecar for one item into a fixed folder with `-o '%(title)s.%(ext)s'`. Use `sidecar::ytdlp_base_args` plus an argv array, with no `-f` (D-007); the row shows done/failed. This is the first real merge/`-x` through our minimal ffmpeg, so test with a real YouTube video (DASH merge) and confirm the output plays. Pick the fixed folder per OS without hard-coded paths (e.g. the user's Downloads dir via Tauri's path API). Then run the M1 `codex-qa audit` to close M1.
+Run the M1 `codex-qa audit` (CLAUDE.md gate 3) to close M1, then fix or log its findings. After that, start M2, beginning with #36 (Settings screen) + #10 (folder picker) + #39 (D7: Open folder / Show in folder). Open owner question: an optional "most compatible (MP4/H.264)" preset (possibly with #11), since D-007's default often yields `.webm`, which QuickTime and Finder preview can't play.

@@ -24,6 +24,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #9 | Q6 | P0 | queue | **Remove and retry items with readable failure reasons** — A failed item shows a short reason (last stderr line) and Retry; the queue continues. |
 | #10 | D1 | P0 | download | **Output folder picker, remembered** — Native folder dialog; persisted in settings. |
 | #36 | 6.4 | P0 | ui | **Settings screen** — One screen for all settings, persisted in app-data and built with #10 (its first control). #11, #17, #25/#31/#32, #20, #21, and #37 add their controls here. |
+| #39 | D7 | P0 | ui | **Open downloads folder and Show in folder** — An Open folder button (Finder / File Explorer / file manager, per OS) and Show in folder on finished rows, via Tauri's opener plugin scoped to the download folder. |
 | #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Default preset is Default. |
 | #12 | Q7 | P1 | queue | **Persist queue and settings across restarts** — JSON or SQLite in the app-data directory; in-flight items resume as Ready. |
 | #13 | Q8 | P1 | queue | **Paste multiple URLs at once** — Newline-separated paste creates one row per URL. |
@@ -53,7 +54,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 |---|---|---|---|---|
 | #18 | — | P0 | ui | **Visual design pass, light/dark theme** — Sleek, modern single-window UI that follows the system theme; thumbnails, polished states, empty state. Checked on all three OSes. |
 | #19 | — | P1 | ui | **Keyboard shortcuts** — ⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item; focus starts in the URL bar. |
-| #20 | 6.5 | P1 | ui | **Completion notifications and history section** — OS notification on finish; Completed list with Show in folder, Copy URL, and Clear. |
+| #20 | 6.5 | P1 | ui | **Completion notifications and history section** — OS notification on finish; Completed list with Show in folder (reuses #39), Copy URL, and Clear. |
 | #21 | — | P1 | infra | **yt-dlp auto-update (at most daily)** — Run yt-dlp -U at launch if the last check was over 24h ago; setting to disable. |
 | #22 | Q6 | P1 | queue | **Drag to reorder and cancel in-progress item** — Cancel kills the subprocess and cleans up partial files. |
 | #23 | D3,D5 | P1 | download | **Per-item format override; embed thumbnail + metadata** — Per-row Default/Audio toggle; --embed-thumbnail --embed-metadata where supported. |

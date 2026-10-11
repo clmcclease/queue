@@ -66,6 +66,7 @@ A single power user (the owner) on any desktop OS who downloads podcasts, music,
 | D4 | Live progress: %, speed, ETA (parsed from yt-dlp progress output) | P0 |
 | D5 | Embed thumbnail + metadata into file where supported | P1 |
 | D6 | Any site yt-dlp supports works, not just YouTube | P0 (inherent) |
+| D7 | **Open folder** button in the main window that opens the download folder (the completed folder once #37 exists) in the OS file manager: Finder on macOS, File Explorer on Windows, the default file manager on Linux. Each finished row has **Show in folder**, which reveals and selects its file. Added 2026-10-10. | P0 |
 
 ### 6.3 Smart naming (the core feature)
 The proposed name is computed as soon as metadata arrives, shown in the row, and passed to yt-dlp when the download starts.
