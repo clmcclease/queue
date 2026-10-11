@@ -422,3 +422,133 @@ test("D2: while one item downloads, the other Download buttons are disabled", as
   await act(async () => emit("queue://item", at(items[0], { state: "done", path: "/d/a.webm" }, 3)));
   assert.equal(downloadButtons()[0].disabled, false, "enabled again once the download finishes");
 });
+
+// #5 (Q2): invalid links are inline errors; duplicates are a toast plus a row highlight.
+test("Q2: an invalid link shows the reason inline and keeps the text for fixing", async () => {
+  await mount((command) => {
+    if (command === "queue_list") return [];
+    throw { kind: "invalid", message: "That isn't a link. Paste a full address like https://…" };
+  });
+  await type("not a url");
+  await submit();
+  assert.equal(container.querySelector('[role="alert"]')?.textContent, "That isn't a link. Paste a full address like https://…");
+  assert.equal(field().value, "not a url");
+  assert.deepEqual(rows(), []);
+});
+
+test("Q2: a duplicate shows a toast, highlights the existing row, adds nothing, and clears the field", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const existing = { id: 7, url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", ...QUEUED };
+  await mount((command) => {
+    if (command === "queue_list") return [existing];
+    throw { kind: "duplicate", message: "That link is already in the queue.", id: 7 };
+  });
+  await type("https://youtu.be/dQw4w9WgXcQ");
+  await submit();
+  assert.deepEqual(rows(), [existing.url], "no second row");
+  assert.equal(field().value, "");
+  assert.equal(container.querySelector('[data-role="toast"]')?.textContent, "That link is already in the queue.");
+  assert.equal(container.querySelector('[role="alert"]'), null, "not an error");
+  assert.ok(container.querySelector("li[data-highlight]"), "existing row highlighted");
+  await act(async () => t.mock.timers.tick(3000));
+  assert.equal(container.querySelector('[data-role="toast"]'), null, "toast goes away");
+  assert.equal(container.querySelector("li[data-highlight]"), null);
+});
+
+// Independent QA additions for #5 / Q2: asynchronous replies and toast lifecycle.
+test("Q2: a delayed duplicate reply preserves the next link and shows no second row", async (t) => {
+  const reply = deferred();
+  t.after(() => reply.resolve(null));
+  const existing = { id: 1, url: "https://example.test/first", ...QUEUED };
+  await mount((command) => command === "queue_list" ? [existing] : reply.promise);
+  await type(existing.url);
+  await submit("button");
+  await type("https://例え.jp/次のリンク");
+  await act(async () => reply.reject({ kind: "duplicate", message: "Already queued", id: 1 }));
+  assert.equal(field().value, "https://例え.jp/次のリンク");
+  assert.deepEqual(rows(), [existing.url]);
+  assert.equal(document.activeElement, field());
+  assert.equal(container.querySelector('[data-role="toast"]')?.textContent, "Already queued");
+});
+
+test("Q2: another duplicate replaces the highlight and restarts the full toast duration", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const items = [1, 2].map((id) => ({ id, url: `https://example.test/${id}`, ...QUEUED }));
+  await mount((command, args) => {
+    if (command === "queue_list") return items;
+    const item = items.find((item) => item.url === args.url);
+    throw { kind: "duplicate", message: `Already queued ${item.id}`, id: item.id };
+  });
+  await type(items[0].url);
+  await submit();
+  await act(async () => t.mock.timers.tick(2000));
+  await type(items[1].url);
+  await submit();
+  assert.equal(container.querySelectorAll("li[data-highlight]").length, 1);
+  assert.equal(container.querySelector("li[data-highlight] [data-role=url]").textContent, items[1].url);
+  await act(async () => t.mock.timers.tick(1000));
+  assert.equal(container.querySelector('[data-role="toast"]')?.textContent, "Already queued 2", "the first toast's timer cannot clear the second");
+  await act(async () => t.mock.timers.tick(1999));
+  assert.ok(container.querySelector('[data-role="toast"]'));
+  await act(async () => t.mock.timers.tick(1));
+  assert.equal(container.querySelector('[data-role="toast"]'), null);
+  assert.equal(container.querySelector("li[data-highlight]"), null);
+  assert.deepEqual(rows(), items.map((item) => item.url));
+});
+
+test("Q2: invalid input through + can be corrected; Unicode errors remain literal text", async () => {
+  const message = '<img src=x onerror="bad()"> 無効なリンク 🎵';
+  await mount((command, args) => {
+    if (command === "queue_list") return [];
+    if (args.url === "bad") throw { kind: "invalid", message };
+    return { id: 1, url: args.url, ...QUEUED };
+  });
+  await type("bad");
+  await submit("button");
+  assert.equal(container.querySelector('[role="alert"]')?.textContent, message);
+  assert.equal(field().value, "bad");
+  assert.equal(document.activeElement, field());
+  assert.equal(container.querySelectorAll("img,script").length, 0);
+  assert.equal(container.querySelector('[data-role="toast"]'), null);
+  await type("https://例え.jp/🎵?title=CON");
+  await submit("button");
+  assert.deepEqual(rows(), ["https://例え.jp/🎵?title=CON"]);
+  assert.equal(field().value, "");
+  assert.equal(container.querySelector('[role="alert"]'), null);
+});
+
+test("Q2: a duplicate clears an earlier inline error and safely renders the toast message", async () => {
+  const existing = { id: 3, url: "https://example.test/CON", ...QUEUED };
+  const message = "<script>bad()</script> & 日本語 already queued";
+  await mount((command, args) => {
+    if (command === "queue_list") return [existing];
+    if (args.url === "bad") throw { kind: "invalid", message: "Invalid link" };
+    throw { kind: "duplicate", message, id: existing.id };
+  });
+  await type("bad");
+  await submit();
+  assert.ok(container.querySelector('[role="alert"]'));
+  await type(existing.url);
+  await submit();
+  assert.equal(container.querySelector('[role="alert"]'), null);
+  assert.equal(container.querySelector('[data-role="toast"]')?.textContent, message);
+  assert.equal(container.querySelectorAll("img,script").length, 0);
+  assert.deepEqual(rows(), [existing.url]);
+});
+
+test("Q2: a duplicate rejected before the startup snapshot highlights the row when it arrives", async (t) => {
+  const list = deferred();
+  t.after(() => list.resolve([]));
+  const existing = { id: 4, url: "https://example.test/video", ...QUEUED };
+  await mount((command) => {
+    if (command === "queue_list") return list.promise;
+    throw { kind: "duplicate", message: "Already queued", id: existing.id };
+  });
+  await type(existing.url);
+  await submit();
+  assert.deepEqual(rows(), []);
+  assert.equal(field().value, "");
+  await act(async () => list.resolve([existing]));
+  assert.deepEqual(rows(), [existing.url]);
+  assert.equal(container.querySelector("li[data-highlight] [data-role=url]").textContent, existing.url);
+});

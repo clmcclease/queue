@@ -25,7 +25,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #10 | D1 | P0 | download | **Output folder picker, remembered** — Native folder dialog; persisted in settings. |
 | #36 | 6.4 | P0 | ui | **Settings screen** — One screen for all settings, persisted in app-data and built with #10 (its first control). #11, #17, #25/#31/#32, #20, #21, and #37 add their controls here. |
 | #39 | D7 | P0 | ui | **Open downloads folder and Show in folder** — An Open folder button (Finder / File Explorer / file manager, per OS) and Show in folder on finished rows, via Tauri's opener plugin scoped to the download folder. |
-| #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Default preset is Default. |
+| #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only / Most compatible (MP4)** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Most compatible uses D-015's `-S` flags (strict H.264/AAC, honest fallback notice), and the ffmpeg build adds the VP9 decoder + AVI demuxer. Default preset is Default. |
 | #12 | Q7 | P1 | queue | **Persist queue and settings across restarts** — JSON or SQLite in the app-data directory; in-flight items resume as Ready. |
 | #13 | Q8 | P1 | queue | **Paste multiple URLs at once** — Newline-separated paste creates one row per URL. |
 | #41 | NFR | P1 | infra | **Native macOS/Windows download tests in CI** — Run the download tests (and opt-in real-sidecar loopback tests) in the per-OS bundle jobs, and add a Windows executable fixture. M1 audit. |

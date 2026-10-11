@@ -1,10 +1,11 @@
 pub mod download;
+pub mod link;
 pub mod queue;
 pub mod sidecar;
 
 use std::sync::Mutex;
 
-use queue::{Item, Queue};
+use queue::{AddError, Item, Queue};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Emitted with the updated [`Item`] whenever a background download changes its status.
@@ -15,10 +16,10 @@ fn lock(queue: &Mutex<Queue>) -> Result<std::sync::MutexGuard<'_, Queue>, String
 }
 
 #[tauri::command]
-fn queue_add(queue: tauri::State<'_, Mutex<Queue>>, url: String) -> Result<Item, String> {
-    lock(&queue)?
+fn queue_add(queue: tauri::State<'_, Mutex<Queue>>, url: String) -> Result<Item, AddError> {
+    lock(&queue)
+        .map_err(|message| AddError::Invalid { message })?
         .add(&url)
-        .ok_or_else(|| "Enter a link to add.".to_string())
 }
 
 #[tauri::command]
