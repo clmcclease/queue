@@ -2,7 +2,7 @@
 
 A lightweight desktop app for queuing video and audio downloads. Paste links, press **+**, then hit **Download all**. Queue runs [yt-dlp](https://github.com/yt-dlp/yt-dlp) for each link, and every file gets a clean, human-readable name built from the page's metadata and tidied up by an on-device AI model, so there's nothing to rename by hand.
 
-> **Status:** M1 (walking skeleton) in progress. The app opens an empty window. See [docs/STATUS.md](docs/STATUS.md).
+> **Status:** M1 (walking skeleton) done. Paste a link, click Download, and yt-dlp saves it to your Downloads folder under its title. M2 (real queue) is next. See [docs/STATUS.md](docs/STATUS.md).
 
 ## Docs
 

@@ -103,7 +103,7 @@ The proposed name is computed as soon as metadata arrives, shown in the row, and
 | N8 | API providers: Anthropic + OpenAI-compatible (base URL, model, key); "Test connection" button | P1 |
 | N9 | Naming prompt with structured output, validation, and an eval set of real titles used to pick the default model | P0 |
 
-*Implementation note:* the name is decided before the download starts and passed to yt-dlp's `-o` flag, so yt-dlp writes the final name directly and there's no separate rename step. This matches "name it appropriately once complete" but avoids a window where a file sits under the wrong name.
+*Implementation note:* the name is decided before the download starts and passed to yt-dlp's `-o` flag. yt-dlp writes it into a private work folder, and the app then moves the finished file into the download folder without ever overwriting an existing file (D-014). There's no rename after download. This matches "name it appropriately once complete" but avoids a window where a file sits under the wrong name.
 
 ### 6.4 Settings
 Download folder · format preset (Default / Audio only) · naming template · AI naming provider (Local / API / Off) + model manager + API key · concurrency · auto-start · auto-update yt-dlp (on by default) · notifications on completion.
@@ -112,7 +112,7 @@ Download folder · format preset (Default / Audio only) · naming template · AI
 A "Completed" section listing finished items with Show in folder, Copy source URL, and Clear history.
 
 ## 7. Non-functional requirements
-- **Cross-platform:** macOS (Apple Silicon and Intel), Windows 10/11 (x64), and Linux (x64; AppImage and .deb) from M1 on. CI builds all three on every push.
+- **Cross-platform:** macOS (Apple Silicon and Intel), Windows 10/11 (x64), and Linux (x64; AppImage and .deb) from M1 on. CI builds all three for every push to `main` (and for PRs labelled `ci:bundle`), and runs the checks on every PR (D-011).
 - **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~1–2 GB) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
 - **Polished UI:** a single window with a dark/light theme that follows the system, smooth animations, thumbnails, and keyboard-first use (⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item). It follows each OS's conventions for window controls and menus.
 - **Resilient:** one item failing never stops the queue. yt-dlp self-updates (`yt-dlp -U`) at launch, at most once a day.
@@ -123,7 +123,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
   - It's the best fit for a lightweight cross-platform app that mostly orchestrates subprocesses. The app shell is about 10 MB. Tauri has first-class "sidecar" binaries (yt-dlp, ffmpeg, llama-server) and official plugins for dialogs, notifications, the filesystem, the shell, and the auto-updater. Rust also gives native access to the OS keychain.
   - Trade-off: each OS uses its own webview (WebKit, WebView2, WebKitGTK), so UI is tested on all three. Linux/WebKitGTK is the weakest of the three. Electron is the fallback if webview differences become painful, at the cost of a ~150 MB+ install and higher memory use.
 - **UI:** React, TypeScript, Tailwind, and a small component kit (shadcn/ui).
-- **Engine:** bundle the official `yt-dlp` and `ffmpeg` binaries as Tauri sidecars and drive them from Rust:
+- **Engine:** bundle the official `yt-dlp` binary, `ffmpeg`/`ffprobe` built unmodified from the official source, and `deno` (yt-dlp's JS runtime) as Tauri sidecars, and drive them from Rust (D-012):
   - `yt-dlp -J <url>` to get metadata when an item is added
   - `yt-dlp [-x] -o <computed path>.%(ext)s --newline --progress-template ...` to download with progress the app can parse. By default there's no `-f`, so yt-dlp picks the format.
 - **AI naming:** a `NamingProvider` trait with three implementations: `Local`, `Api`, and `Rules`.

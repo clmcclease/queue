@@ -7,14 +7,14 @@ yt-dlp is designed to be driven by other programs and already pulls page metadat
 
 ## D-002 Cross-platform; Tauri v2 + React/TS for the desktop shell — Confirmed (2026-10-10)
 The owner wants macOS, Windows, and Linux. Options compared:
-- **Tauri v2 (chosen):** ~10 MB shell, first-class sidecar binaries (yt-dlp, ffmpeg, llama-server), official dialog/notification/updater plugins, and a Rust backend that gives native keychain access. Trade-off: each OS uses a different system webview (WebKitGTK on Linux is the weakest), so the UI is tested on all three in CI.
+- **Tauri v2 (chosen):** ~10 MB shell, first-class sidecar binaries (yt-dlp, ffmpeg, llama-server), official dialog/notification/updater plugins, and a Rust backend that gives native keychain access. Trade-off: each OS uses a different system webview (WebKitGTK on Linux is the weakest), so the app is built for all three in CI. UI behavior tests run in jsdom (simulated DOM); native-webview smoke tests are still a gap (see STATUS).
 - **Electron:** the same Chromium everywhere and a huge ecosystem, but a 150 MB+ install and much higher memory use, which goes against the "lightweight" goal. This is the fallback if webview differences become a real problem.
 - **Flutter desktop:** good rendering, but a weaker subprocess/sidecar story, and Dart adds a language without any gain here.
 - **Wails (Go):** a similar model to Tauri, but a smaller ecosystem and a less mature v3.
 - **Qt:** heavier C++/licensing overhead for a small app.
 
 ## D-003 Compute the filename before download and pass it via `-o` — Provisional (2026-10-10)
-yt-dlp writes the final name directly, so there's no separate rename step and no window where a file has the wrong name. Users can edit the proposed name inline before the download starts.
+yt-dlp writes the final name directly, so there's no separate rename step and no window where a file has the wrong name. Users can edit the proposed name inline before the download starts. *Amended by D-014:* the name is still decided up front, but yt-dlp writes it into a private work dir, and the app then moves the finished file into place without overwriting.
 
 ## D-004 Backlog lives in `docs/BACKLOG.md` and GitHub Issues — Confirmed (2026-10-10)
 BACKLOG.md is the source of truth for scope and order. Each item links to a GitHub issue that tracks the work.
@@ -58,3 +58,6 @@ Research for #2 (ytdlp-expert, live sources) and owner choices:
 
 ## D-013 Installer size budget: under 256 MB — Confirmed (2026-10-10)
 The owner raised PRD §7's installer budget from about 80 MB to **under 256 MB per platform**. The limit covers yt-dlp, ffmpeg/ffprobe, deno, and the llama.cpp runtime; the AI model stays a separate first-run download. Reason: bundled deno (D-012) put the macOS `.dmg` at 80.8 MB before llama-server. Keep the other "lightweight" goals: cold launch under 1 s and idle memory under 150 MB.
+
+## D-014 Staged downloads with no-clobber placement — Confirmed (2026-10-10)
+Codex QA on #4 showed that letting yt-dlp write straight into the user's folder can't be made safe: merge-temp names like `Foo.temp.webm` can clobber real files, the printed path breaks on non-UTF-8 Windows consoles, and name checks miss case- and Unicode-equivalent names. So each download runs with `-P <fresh dir under the app cache>`. The one finished file is then placed in the output folder with `fs::hard_link` (atomic, fails if the name exists), falling back to a `create_new` copy across volumes; `rename` is never used because it replaces files. The work dir is always removed. The owner approved this with #4 and tested it in the app. Consequences: no `.part` files appear in the user's folder; the naming engine stays pure, and collision choice (#16) belongs to the download layer. Open follow-up: clean up work dirs left behind when the app is killed mid-download.
