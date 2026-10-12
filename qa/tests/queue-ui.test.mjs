@@ -49,7 +49,8 @@ function deferred() {
 }
 
 async function mount(handler) {
-  mockIPC(handler, { shouldMockEvents: true });
+  // "Download all" state (#7) is ambient: answer it here so per-test handlers needn't.
+  mockIPC((command, args) => (command === "queue_runner_state" ? false : handler(command, args)), { shouldMockEvents: true });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -349,7 +350,7 @@ test("D2: title and error markup are literal text; another queued row remains do
 
 // #4 review round (qa/reports/20261010-184319-review-pWmI.md).
 async function mountRaw(handler) {
-  mockIPC(handler); // no event mocking: the handler sees plugin:event|listen itself
+  mockIPC((command, args) => (command === "queue_runner_state" ? false : handler(command, args))); // no event mocking: the handler sees plugin:event|listen itself
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -707,4 +708,148 @@ test("D-017 QA #48: late replies and retry events cannot regress the attempt or 
     ...base, status: { state: "downloading" }, rev: 5, attempt: 3,
   }));
   assert.deepEqual(statusText(), ["✓ 日本語 é.webm"]);
+});
+
+// #7 (Q4): "Download all" starts the backend runner; queue://runner mirrors it.
+const allButton = () => [...container.querySelectorAll("button")].find((b) => /Download all|Downloading all/.test(b.textContent));
+
+test("Q4: Download all is enabled only with queued rows, starts the runner, and tracks its state", async () => {
+  const calls = [];
+  const rowsIn = [{ id: 1, url: "https://example.test/a", ...QUEUED, meta: null, attempt: 0 }];
+  await mount((command) => {
+    calls.push(command);
+    if (command === "queue_list") return rowsIn;
+    if (command === "queue_run_all") return true;
+    return null;
+  });
+  assert.equal(allButton().textContent, "Download all");
+  assert.equal(allButton().disabled, false);
+  await act(async () => allButton().click());
+  assert.ok(calls.includes("queue_run_all"));
+  // The backend emits queue://runner {running: true} before it replies (lib.rs queue_run_all).
+  await act(async () => emit("queue://runner", { running: true }));
+  assert.equal(allButton().textContent, "Downloading all…");
+  assert.equal(allButton().disabled, true, "no second run while one is active");
+  assert.equal(downloadButtons()[0].disabled, true, "per-row Download waits for the run");
+  await act(async () => emit("queue://runner", { running: false }));
+  assert.equal(allButton().textContent, "Download all");
+});
+
+test("Q4: Download all is disabled with nothing queued", async () => {
+  const fetching = [{ id: 1, url: "https://example.test/a", status: { state: "fetching" }, rev: 1, meta: null, attempt: 0 }];
+  await mount((command) => (command === "queue_list" ? fetching : null));
+  assert.equal(allButton().disabled, true);
+});
+
+test("Q4: a run already in progress at startup shows as running", async () => {
+  mockIPC((command) => {
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return true;
+    return null;
+  }, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  assert.equal(allButton().textContent, "Downloading all…");
+});
+
+// Independent QA for #7 / Q4,Q5: runner replies and events have no item-style revision.
+async function mountRunnerQA(handler) {
+  mockIPC(handler, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+}
+
+const runnerRows = () => [{ id: 1, url: "https://example.test/ready", ...QUEUED, meta: null, attempt: 0 }];
+
+test("Q4 QA #7: a finish event before the start reply must leave the runner stopped", async (t) => {
+  const reply = deferred();
+  t.after(() => reply.resolve(false));
+  await mount((command) => command === "queue_list" ? runnerRows() : reply.promise);
+  await act(async () => allButton().click());
+  await act(async () => emit("queue://runner", { running: true }));
+  await act(async () => emit("queue://runner", { running: false }));
+  await act(async () => reply.resolve(true));
+  assert.equal(allButton().textContent, "Download all", "a late acknowledgement cannot revive a finished run");
+  assert.equal(allButton().disabled, false);
+  assert.equal(downloadButtons()[0].disabled, false);
+});
+
+test("Q4 QA #7: a stale false startup snapshot cannot override a newer running event", async (t) => {
+  const snapshot = deferred();
+  t.after(() => snapshot.resolve(false));
+  await mountRunnerQA((command) => command === "queue_list" ? runnerRows() : snapshot.promise);
+  await act(async () => emit("queue://runner", { running: true }));
+  await act(async () => snapshot.resolve(false));
+  assert.equal(allButton().textContent, "Downloading all…");
+  assert.equal(allButton().disabled, true);
+  assert.equal(downloadButtons()[0].disabled, true);
+});
+
+test("Q4 QA #7: a stale true startup snapshot cannot override a newer finish event", async (t) => {
+  const snapshot = deferred();
+  t.after(() => snapshot.resolve(false));
+  await mountRunnerQA((command) => command === "queue_list" ? runnerRows() : snapshot.promise);
+  await act(async () => emit("queue://runner", { running: false }));
+  await act(async () => snapshot.resolve(true));
+  assert.equal(allButton().textContent, "Download all");
+  assert.equal(allButton().disabled, false);
+  assert.equal(downloadButtons()[0].disabled, false);
+});
+
+test("Q4 QA #7: runner listener failure remains visible after a successful add", async () => {
+  await mountRaw((command, args) => {
+    if (command === "plugin:event|listen") {
+      if (args.event === "queue://runner") throw "runner listener unavailable";
+      return 1;
+    }
+    if (command === "queue_add") return runnerRows()[0];
+    return null;
+  });
+  assert.match(container.querySelector('[role="alert"]')?.textContent ?? "", /runner listener unavailable/);
+  await type("https://example.test/ready");
+  await submit();
+  assert.equal(allButton().disabled, true);
+  assert.equal(downloadButtons()[0].disabled, true);
+  assert.match(container.querySelector('[role="alert"]')?.textContent ?? "", /runner listener unavailable/,
+    "a successful add must not erase the reason downloads are permanently disabled");
+});
+
+test("Q4 QA #7: rejected Download all shows literal Unicode error and permits another attempt", async () => {
+  const reason = '<script>bad()</script> 日本語 unavailable';
+  await mount((command) => {
+    if (command === "queue_list") return runnerRows();
+    throw reason;
+  });
+  await act(async () => allButton().click());
+  assert.equal(container.querySelector('[role="alert"]').textContent, reason);
+  assert.equal(container.querySelectorAll("script,img").length, 0);
+  assert.equal(allButton().disabled, false);
+  assert.equal(downloadButtons()[0].disabled, false);
+});
+
+test("Q4 QA #7: duplicate start acknowledgement does not stop a running event", async (t) => {
+  const reply = deferred();
+  t.after(() => reply.resolve(false));
+  await mount((command) => command === "queue_list" ? runnerRows() : reply.promise);
+  await act(async () => allButton().click());
+  await act(async () => emit("queue://runner", { running: true }));
+  await act(async () => reply.resolve(false));
+  assert.equal(allButton().textContent, "Downloading all…", "false acknowledges an existing run; it must not stop it");
+  assert.equal(allButton().disabled, true);
+});
+
+test("Q4 QA #7: a row added while running stays disabled until the runner stops", async () => {
+  await mount((command) => command === "queue_list" ? [] : runnerRows()[0]);
+  await act(async () => emit("queue://runner", { running: true }));
+  await type("https://example.test/ready");
+  await submit();
+  assert.equal(allButton().disabled, true);
+  assert.equal(downloadButtons()[0].disabled, true);
+  await act(async () => emit("queue://runner", { running: false }));
+  assert.equal(allButton().disabled, false);
+  assert.equal(downloadButtons()[0].disabled, false);
 });

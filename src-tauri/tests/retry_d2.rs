@@ -132,7 +132,7 @@ fn an_existing_target_is_not_retried_and_not_overwritten() {
     let f = Fake::new("printf new > \"$P/Title.webm\"");
     fs::write(f.out.join("Title.webm"), b"old").unwrap();
     let (result, waits, _) = f.run(None);
-    assert!(result.unwrap_err().contains("already exists"));
+    assert!(result.unwrap().ends_with("Title (2).webm"), "N2: keep both");
     assert!(waits.is_empty());
     assert_eq!(fs::read(f.out.join("Title.webm")).unwrap(), b"old");
 }

@@ -111,15 +111,23 @@ fn queue_list(queue: tauri::State<'_, Mutex<Queue>>) -> Result<Vec<Item>, String
     Ok(lock(&queue)?.items().to_vec())
 }
 
-/// Starts downloading one queued item into the OS Downloads folder (fixed until #10) on a
-/// background thread, staged in a fresh folder under the app cache. Returns the item as
-/// `Downloading`; the outcome arrives as [`ITEM_EVENT`].
-#[tauri::command]
-fn queue_download(
-    app: AppHandle,
-    queue: tauri::State<'_, Mutex<Queue>>,
+/// Everything a started download needs, captured while the queue was locked.
+struct DownloadJob {
     id: u64,
-) -> Result<Item, String> {
+    url: String,
+    info: Option<std::path::PathBuf>,
+    sidecar_dir: std::path::PathBuf,
+    work_dir: std::path::PathBuf,
+    out_dir: std::path::PathBuf,
+}
+
+/// Marks a queued item Downloading (one at a time, see `Queue::start`) and prepares its paths:
+/// the OS Downloads folder (fixed until #10) and a fresh staging dir under the app cache.
+fn begin_download(
+    app: &AppHandle,
+    queue: &Mutex<Queue>,
+    id: u64,
+) -> Result<(Item, DownloadJob), String> {
     let out_dir = app
         .path()
         .download_dir()
@@ -134,47 +142,153 @@ fn queue_download(
         .map_err(|e| format!("Couldn't find the app cache folder: {e}"))?
         .join("downloads")
         .join(format!("item-{id}-{stamp}"));
-    let (item, info) = {
-        let mut q = lock(&queue)?;
-        let item = q.start(id)?;
-        (item, q.fresh_info(id, std::time::SystemTime::now()))
+    let mut q = lock(queue)?;
+    let item = q.start(id)?;
+    let info = q.fresh_info(id, std::time::SystemTime::now());
+    let job = DownloadJob {
+        id,
+        url: item.url.clone(),
+        info,
+        sidecar_dir,
+        work_dir,
+        out_dir,
     };
-    let url = item.url.clone();
+    Ok((item, job))
+}
+
+/// Runs a started download to the end (blocking): 403 retries with a pause (D-017), then the
+/// outcome is recorded, the saved info deleted, and the row emitted.
+fn complete_download(app: &AppHandle, job: DownloadJob) {
+    let state = app.state::<Mutex<Queue>>();
+    let id = job.id;
+    let outcome = download::run_with_retries(
+        &job.sidecar_dir,
+        &job.work_dir,
+        &job.out_dir,
+        &job.url,
+        job.info.as_deref(),
+        std::thread::sleep,
+        |attempt| {
+            let updated = lock(&state).ok().and_then(|mut q| q.retrying(id, attempt));
+            if let Some(item) = updated {
+                let _ = app.emit(ITEM_EVENT, item);
+            }
+        },
+    );
+    let (updated, info) = match lock(&state) {
+        Ok(mut q) => (q.finish(id, outcome), q.take_info(id)),
+        Err(_) => (None, None),
+    };
+    if let Some(path) = info {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Some(item) = updated {
+        let _ = app.emit(ITEM_EVENT, item);
+    }
+}
+
+/// Starts downloading one queued item on a background thread. Returns the item as
+/// `Downloading`; the outcome arrives as [`ITEM_EVENT`].
+#[tauri::command]
+fn queue_download(
+    app: AppHandle,
+    queue: tauri::State<'_, Mutex<Queue>>,
+    id: u64,
+) -> Result<Item, String> {
+    let (item, job) = begin_download(&app, &queue, id)?;
+    std::thread::spawn(move || complete_download(&app, job));
+    Ok(item)
+}
+
+/// Emitted with `{ running }` when "Download all" starts or finishes.
+const RUNNER_EVENT: &str = "queue://runner";
+
+/// Whether "Download all" is running.
+struct Runner(Mutex<bool>);
+
+#[derive(Clone, serde::Serialize)]
+struct RunnerState {
+    running: bool,
+}
+
+/// Sets the runner flag and emits the change under one lock, so `queue://runner` events always
+/// reach the UI in the order the state changed (a stale "finished" can't follow a newer "started").
+fn set_running(app: &AppHandle, runner: &Runner, running: bool) -> bool {
+    let Ok(mut flag) = runner.0.lock() else {
+        return false;
+    };
+    if running && *flag {
+        return false; // already running
+    }
+    *flag = running;
+    let _ = app.emit(RUNNER_EVENT, RunnerState { running });
+    true
+}
+
+/// "Download all" (Q4): downloads every Queued row in order, one at a time, until none are left.
+/// Returns false if a run is already in progress, or an error if downloads can't work at all
+/// (no Downloads or cache folder, no yt-dlp): reported once instead of failing every row.
+#[tauri::command]
+fn queue_run_all(app: AppHandle, runner: tauri::State<'_, Runner>) -> Result<bool, String> {
+    app.path()
+        .download_dir()
+        .map_err(|e| format!("Couldn't find your Downloads folder: {e}"))?;
+    app.path()
+        .app_cache_dir()
+        .map_err(|e| format!("Couldn't find the app cache folder: {e}"))?;
+    sidecar::dir().map_err(|e| format!("Couldn't locate yt-dlp: {e}"))?;
+    if !set_running(&app, &runner, true) {
+        return Ok(false);
+    }
     std::thread::spawn(move || {
         let state = app.state::<Mutex<Queue>>();
-        // 403s are retried with a fresh extraction after a pause; the row shows the attempt.
-        let outcome = download::run_with_retries(
-            &sidecar_dir,
-            &work_dir,
-            &out_dir,
-            &url,
-            info.as_deref(),
-            std::thread::sleep,
-            |attempt| {
-                let updated = lock(&state).ok().and_then(|mut q| q.retrying(id, attempt));
-                if let Some(item) = updated {
-                    let _ = app.emit(ITEM_EVENT, item);
-                }
-            },
-        );
-        let (updated, info) = match lock(&state) {
-            Ok(mut q) => (q.finish(id, outcome), q.take_info(id)),
-            Err(_) => (None, None),
-        };
-        if let Some(path) = info {
-            let _ = std::fs::remove_file(path);
-        }
-        if let Some(item) = updated {
-            let _ = app.emit(ITEM_EVENT, item);
-        }
+        // Whatever happens in the run, the flag is reset (release builds unwind, see Cargo.toml).
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            queue::run_all(
+                &state,
+                |id| {
+                    if lock(&state).map(|q| q.is_busy()).unwrap_or(true) {
+                        return false; // a manual Download holds the slot: wait
+                    }
+                    match begin_download(&app, &state, id) {
+                        Ok((item, job)) => {
+                            let _ = app.emit(ITEM_EVENT, item);
+                            complete_download(&app, job);
+                        }
+                        Err(_) if lock(&state).map(|q| q.is_busy()).unwrap_or(true) => {
+                            return false; // lost a race for the slot: wait
+                        }
+                        Err(reason) => {
+                            // A lasting reason: fail this row and move on.
+                            let failed = lock(&state)
+                                .ok()
+                                .and_then(|mut q| q.fail_queued(id, reason));
+                            if let Some(item) = failed {
+                                let _ = app.emit(ITEM_EVENT, item);
+                            }
+                        }
+                    }
+                    true
+                },
+                || std::thread::sleep(Duration::from_millis(250)),
+            );
+        }));
+        set_running(&app, &app.state::<Runner>(), false);
     });
-    Ok(item)
+    Ok(true)
+}
+
+/// Whether "Download all" is running (for the UI's initial state).
+#[tauri::command]
+fn queue_runner_state(runner: tauri::State<'_, Runner>) -> bool {
+    runner.0.lock().map(|flag| *flag).unwrap_or(false)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(Queue::default()))
+        .manage(Runner(Mutex::new(false)))
         .setup(|app| {
             let (jobs, queued) = mpsc::channel();
             app.manage(Fetcher(Mutex::new(jobs)));
@@ -185,7 +299,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             queue_add,
             queue_list,
-            queue_download
+            queue_download,
+            queue_run_all,
+            queue_runner_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

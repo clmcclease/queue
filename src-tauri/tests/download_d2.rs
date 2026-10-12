@@ -239,14 +239,15 @@ mod subprocess {
         let f = Fixture::new();
         fs::write(f.out.join("existing.webm"), b"original bytes").unwrap();
         f.saves("existing.webm", "new bytes");
-        assert!(
-            f.run()
-                .unwrap_err()
-                .contains("already exists (not overwritten)")
-        );
+        // N2: keep both. The new download gets " (2)"; the existing file is untouched.
+        assert!(f.run().unwrap().ends_with("existing (2).webm"));
         assert_eq!(
             fs::read(f.out.join("existing.webm")).unwrap(),
             b"original bytes"
+        );
+        assert_eq!(
+            fs::read(f.out.join("existing (2).webm")).unwrap(),
+            b"new bytes"
         );
     }
 
@@ -255,7 +256,7 @@ mod subprocess {
         let f = Fixture::new();
         fs::create_dir(f.out.join("Title.webm")).unwrap();
         f.saves("Title.webm", "media");
-        assert!(f.run().unwrap_err().contains("already exists"));
+        assert!(f.run().unwrap().ends_with("Title (2).webm"));
         assert!(f.out.join("Title.webm").is_dir());
     }
 
@@ -285,9 +286,12 @@ mod subprocess {
         fs::write(f.out.join("Song.webm"), b"original").unwrap();
         fs::write(f.out.join("Cafe\u{301}.webm"), b"decomposed").unwrap();
         f.saves("song.WEBM", "new");
-        assert!(f.run().unwrap_err().contains("already exists"));
+        assert!(
+            f.run().unwrap().ends_with("song (2).WEBM"),
+            "N2 numbering, not overwrite"
+        );
         f.saves("Caf\u{e9}.webm", "new");
-        assert!(f.run().unwrap_err().contains("already exists"));
+        assert!(f.run().unwrap().ends_with("Caf\u{e9} (2).webm"));
         assert_eq!(fs::read(f.out.join("Song.webm")).unwrap(), b"original");
         assert_eq!(
             fs::read(f.out.join("Cafe\u{301}.webm")).unwrap(),

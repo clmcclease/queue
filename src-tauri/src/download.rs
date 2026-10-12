@@ -5,7 +5,7 @@
 //! never sit next to the user's files. The finished file is then moved into the output folder
 //! with an operation the filesystem refuses if the name already exists, so nothing is ever
 //! overwritten (including names the filesystem treats as equal: case or Unicode form).
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,10 @@ pub fn args_for(sidecar_dir: &Path, work_dir: &Path, source: Source) -> Vec<OsSt
             "--no-playlist",
             "--no-overwrites",
             "--windows-filenames",
+            // Leave room under the 255-byte name limit for yt-dlp's own suffixes (.part, .f137,
+            // .temp, .ytdl) and our " (n)" (N2). The naming engine (#14) caps names lower.
+            "--trim-filenames",
+            "200",
             // Date files by when they were downloaded, not the upload date.
             "--no-mtime",
             "--no-progress",
@@ -156,6 +160,51 @@ pub fn copy_no_clobber(src: &Path, dest: &Path) -> io::Result<()> {
     fs::remove_file(src)
 }
 
+/// Highest ` (n)` tried before giving up (N2).
+pub const MAX_COPIES: u32 = 999;
+
+/// `Title.webm` → `Title (2).webm` (N2: keep both, never overwrite). The extension is the part
+/// after the last dot; a name without one (or a dotfile) just gets the suffix.
+pub fn numbered(name: &OsStr, n: u32) -> OsString {
+    let name = name.to_string_lossy();
+    let (stem, ext) = match name.rfind('.') {
+        Some(dot) if dot > 0 => (&name[..dot], &name[dot..]),
+        _ => (&name[..], ""),
+    };
+    let suffix = format!(" ({n})");
+    // A name already at the limit must still fit its suffix: shorten the stem (never the
+    // extension) at a character boundary. UTF-8 bytes ≥ UTF-16 units, so this also fits
+    // Windows' 255-unit limit.
+    let budget = MAX_NAME_BYTES.saturating_sub(suffix.len() + ext.len());
+    let mut cut = stem.len().min(budget);
+    while !stem.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{suffix}{ext}", &stem[..cut]).into()
+}
+
+/// Longest file name (in UTF-8 bytes) most filesystems accept (APFS, ext4, NTFS in UTF-16 units).
+pub const MAX_NAME_BYTES: usize = 255;
+
+/// Places `src` in `out_dir` as `name`, or the first free `name (2)` … `name (999)` (N2). Each
+/// candidate is claimed with the atomic no-clobber [`place`], so even two downloads finishing at
+/// once can't overwrite each other or an existing file.
+pub fn place_unique(src: &Path, out_dir: &Path, name: &OsStr) -> io::Result<PathBuf> {
+    let mut candidate = name.to_owned();
+    for n in 1..=MAX_COPIES {
+        if n > 1 {
+            candidate = numbered(name, n);
+        }
+        let dest = out_dir.join(&candidate);
+        match place(src, &dest) {
+            Ok(()) => return Ok(dest),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::from(io::ErrorKind::AlreadyExists))
+}
+
 /// Downloads `url` into the fresh `work_dir`, moves the result into `out_dir`, and returns its
 /// path or a readable failure reason. `work_dir` must not exist yet; it's always removed after.
 pub fn run(
@@ -233,10 +282,9 @@ fn run_in(
     let name = file.file_name().unwrap_or_default().to_owned();
     fs::create_dir_all(out_dir)
         .map_err(|e| format!("Couldn't create {}: {e}", out_dir.display()))?;
-    let dest = out_dir.join(&name);
-    place(&file, &dest).map_err(|e| match e.kind() {
+    let dest = place_unique(&file, out_dir, &name).map_err(|e| match e.kind() {
         io::ErrorKind::AlreadyExists => format!(
-            "Not saved: a file named \"{}\" already exists (not overwritten)",
+            "Not saved: \"{}\" and {MAX_COPIES} numbered copies already exist",
             name.to_string_lossy()
         ),
         _ => format!("Couldn't save to {}: {e}", out_dir.display()),
@@ -326,6 +374,7 @@ mod tests {
                 OsString::from(REPORT)
             ]
         );
+        assert_eq!(a[at("--trim-filenames") + 1], "200");
         for flag in [
             "--no-overwrites",
             "--windows-filenames",
@@ -454,6 +503,47 @@ mod tests {
         }
         fs::write(dir.join("a.webm"), b"done").unwrap();
         assert_eq!(finished_file(&dir).unwrap(), dir.join("a.webm"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn numbered_names_keep_the_extension() {
+        let n = |name: &str, i| numbered(OsStr::new(name), i).into_string().unwrap();
+        assert_eq!(n("Title.webm", 2), "Title (2).webm");
+        assert_eq!(n("Me at the zoo.f137.mp4", 3), "Me at the zoo.f137 (3).mp4");
+        assert_eq!(n("README", 2), "README (2)");
+        assert_eq!(n(".hidden", 2), ".hidden (2)");
+        assert_eq!(n("日本語 🎵.opus", 2), "日本語 🎵 (2).opus");
+        let long = format!("{}.webm", "a".repeat(250));
+        let fitted = n(&long, 2);
+        assert_eq!(fitted.len(), MAX_NAME_BYTES);
+        assert!(fitted.ends_with(" (2).webm"));
+        let wide = format!("{}.webm", "日".repeat(83)); // 249 bytes + 5
+        let fitted = n(&wide, 999);
+        assert!(fitted.len() <= MAX_NAME_BYTES && fitted.ends_with(" (999).webm"));
+        assert!(fitted.starts_with("日日"), "cut at a character boundary");
+    }
+
+    #[test]
+    fn place_unique_keeps_both_and_never_touches_existing_files() {
+        let dir = temp("unique");
+        let out = dir.join("out");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("Title.webm"), b"first").unwrap();
+        fs::create_dir(out.join("Title (2).webm")).unwrap(); // even a folder in the way
+        let src = dir.join("new.webm");
+        fs::write(&src, b"second").unwrap();
+        let dest = place_unique(&src, &out, OsStr::new("Title.webm")).unwrap();
+        assert_eq!(dest, out.join("Title (3).webm"));
+        assert_eq!(fs::read(&dest).unwrap(), b"second");
+        assert_eq!(fs::read(out.join("Title.webm")).unwrap(), b"first");
+        assert!(out.join("Title (2).webm").is_dir());
+        let src = dir.join("free.webm");
+        fs::write(&src, b"x").unwrap();
+        assert_eq!(
+            place_unique(&src, &out, OsStr::new("Free.webm")).unwrap(),
+            out.join("Free.webm")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

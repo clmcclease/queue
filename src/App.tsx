@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import QueueList from "./components/QueueList";
 import UrlBar from "./components/UrlBar";
-import { addItem, downloadItem, isAddError, listItems, mergeItems, onItemChanged, type QueueItem } from "./queue";
+import {
+  addItem,
+  downloadItem,
+  isAddError,
+  listItems,
+  mergeItems,
+  onItemChanged,
+  onRunnerChanged,
+  runAll,
+  runnerState,
+  type QueueItem,
+} from "./queue";
 
 export default function App() {
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -10,6 +21,8 @@ export default function App() {
   // registration failure is kept separately: a later successful command must not hide it.
   const [listening, setListening] = useState(false);
   const [disconnected, setDisconnected] = useState<string | null>(null);
+  // "Download all" (Q4) runs in the backend; this mirrors it for the button.
+  const [running, setRunning] = useState(false);
   // Duplicate links (Q2): a short toast and a brief highlight on the row that already has it.
   const [toast, setToast] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -30,25 +43,47 @@ export default function App() {
   useEffect(() => {
     // Listen before taking the snapshot, so a download finishing in between can't be missed.
     let cancelled = false;
-    let stop: (() => void) | undefined;
+    const stops: (() => void)[] = [];
+    let runnerEventSeen = false;
     (async () => {
+      // Both event streams are required: without them results never arrive, so a failure here
+      // is a lasting "disconnected" state that later successful commands must not clear.
       try {
-        const unlisten = await onItemChanged((item) => setItems((prev) => mergeItems(prev, [item])));
-        if (cancelled) return unlisten();
-        stop = unlisten;
-        setListening(true);
+        for (const subscribe of [
+          () => onItemChanged((item) => setItems((prev) => mergeItems(prev, [item]))),
+          () =>
+            onRunnerChanged((running) => {
+              runnerEventSeen = true;
+              setRunning(running);
+            }),
+        ]) {
+          const unlisten = await subscribe();
+          if (cancelled) return unlisten();
+          stops.push(unlisten);
+        }
+      } catch (e) {
+        if (!cancelled) setDisconnected(String(e));
+        return;
+      }
+      setListening(true);
+      try {
         const listed = await listItems();
         // Merge rather than replace: a row added before this snapshot arrives must not disappear.
         if (!cancelled) setItems((prev) => mergeItems(prev, listed));
       } catch (e) {
-        if (cancelled) return;
-        if (stop) setError(String(e));
-        else setDisconnected(String(e));
+        if (!cancelled) setError(String(e));
       }
+      // Initial runner state only if no runner event has arrived yet: an event is at least as
+      // new as this snapshot, and every later change emits another event. Doesn't gate the
+      // list; false (the default) is safe if it can't be read.
+      runnerState().then(
+        (r) => !cancelled && !runnerEventSeen && setRunning(r),
+        () => {},
+      );
     })();
     return () => {
       cancelled = true;
-      stop?.();
+      stops.forEach((stop) => stop());
     };
   }, []);
 
@@ -79,9 +114,32 @@ export default function App() {
     }
   }
 
+  async function downloadAll() {
+    try {
+      // "Running" comes only from queue://runner events (emitted before this reply), so a late
+      // reply can't revive a run that has already finished.
+      await runAll();
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  const anyQueued = items.some((item) => item.status.state === "queued");
+
   return (
     <main className="flex h-screen flex-col bg-white p-4 dark:bg-neutral-900">
       <UrlBar onAdd={add} />
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          onClick={downloadAll}
+          disabled={!listening || running || !anyQueued}
+          className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+        >
+          {running ? "Downloading all…" : "Download all"}
+        </button>
+      </div>
       {disconnected && (
         <p role="alert" data-role="disconnected" className="mt-2 text-sm text-red-600 dark:text-red-400">
           Can't receive download updates ({disconnected}). Restart Queue to download.
@@ -96,7 +154,7 @@ export default function App() {
         <QueueList
           items={items}
           onDownload={download}
-          busy={!listening || items.some((item) => item.status.state === "downloading")}
+          busy={!listening || running || items.some((item) => item.status.state === "downloading")}
           highlight={highlight}
         />
       </div>

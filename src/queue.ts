@@ -43,6 +43,13 @@ export function isAddError(e: unknown): e is AddError {
 export const addItem = (url: string) => invoke<QueueItem>("queue_add", { url });
 export const listItems = () => invoke<QueueItem[]>("queue_list");
 export const downloadItem = (id: number) => invoke<QueueItem>("queue_download", { id });
+/** "Download all" (Q4): resolves false if a run was already in progress. */
+export const runAll = () => invoke<boolean>("queue_run_all");
+export const runnerState = () => invoke<boolean>("queue_runner_state");
+/** "Download all" starting or finishing. */
+export const onRunnerChanged = (handler: (running: boolean) => void): Promise<UnlistenFn> =>
+  listen<{ running: boolean }>("queue://runner", (event) => handler(event.payload.running));
+
 /** Background status changes (download finished or failed). */
 export const onItemChanged = (handler: (item: QueueItem) => void): Promise<UnlistenFn> =>
   listen<QueueItem>("queue://item", (event) => handler(event.payload));
