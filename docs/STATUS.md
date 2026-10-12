@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #7 (Q4/Q5 runner) + #16 (N2, pulled forward), PR open
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #7 + #16 done → #8 (live progress) next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #7 (Q4, Q5) sequential runner + Download all, with #16 (committed; PR open)
+## Done: #7 (Q4, Q5) Download all, with #16 N2 (squash-merged from PR #51)
 - `queue::run_all(queue, download, wait)` (Tauri-free): repeatedly downloads the **next Queued row (lowest id)**.
   - Rows still Fetching are waited for, but don't block rows that are ready.
   - A failure doesn't stop the run (Q6), and rows added mid-run are picked up.
@@ -162,4 +162,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-#7 + #16: PR checks, then the owner approves the squash-merge (closes both). Then #8 (live progress).
+Start **#8** (D4): live progress (percent, speed, ETA) from yt-dlp's `--newline --progress-template` (JSON with `|null` defaults, per the ytdlp-expert notes in D-015's research), streamed as item updates. Also add the **Processing** state (post-download merge/extract), completing #7's lifecycle except Naming (#14/#25).
