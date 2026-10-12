@@ -24,6 +24,8 @@ export interface QueueItem {
   url: string;
   status: Status;
   meta: Meta | null;
+  /** Download attempt: 1, then 2–3 when retrying after a 403 (D-017); 0 when not downloading. */
+  attempt: number;
   /** Bumped by the backend on every change; higher wins when replies arrive out of order. */
   rev: number;
 }

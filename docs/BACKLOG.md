@@ -19,7 +19,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 |---|---|---|---|---|
 | #5 | Q2 | P0 | queue | **Validate URLs and reject duplicates** — Inline error for invalid URLs; a duplicate shows a toast instead of a second row. |
 | #6 | Q3 | P0 | queue | **Fetch metadata on add (yt-dlp -J)** — Row fills in thumbnail, title, channel, and duration before any download. |
-| #48 | D2 | P0 | download | **Auto-retry YouTube 403s and reuse fetched info** — Retry a 403 up to 2× with backoff (~10 s/30 s); download from the saved `-J` via `--load-info-json` when it's under 6 h old (D-017). |
+| #48 | D2 | P0 | download | **Auto-retry YouTube 403s and reuse fetched info** — Retry a 403 up to 2× with backoff (~10 s/30 s); download from the saved `-J` via `--load-info-json` when it's under 5 h old, a margin before YouTube's ~6 h link expiry (D-017). |
 | #7 | Q4,Q5 | P0 | queue | **Sequential queue runner with item states** — Download all processes items in order: Queued → FetchingInfo → Naming → Ready → Downloading → Processing → Done/Failed. |
 | #8 | D4 | P0 | download | **Live progress (percent, speed, ETA)** — Parse --newline JSON progress-template output and stream events to the UI. |
 | #9 | Q6 | P0 | queue | **Remove and retry items with readable failure reasons** — A failed item shows a short reason (last stderr line) and Retry; the queue continues. |

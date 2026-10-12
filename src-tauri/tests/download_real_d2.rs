@@ -225,6 +225,45 @@ fn d2_real_directory_collision_cannot_be_done() {
     );
 }
 
+/// #48 / D-017: exercise the new saved-info source with upstream yt-dlp, including its
+/// Windows filename sanitization. Loopback only; no external media or user output folder.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn d017_real_saved_info_sanitizes_titles_and_never_overwrites() {
+    for title in ["CON", "NUL", " 日本語 🎵 é : * ? &lt;noise&gt; "] {
+        let f = LocalDownload::new(title);
+        let (_, raw) = queue_lib::meta::fetch_raw(&f.bin, &f.url, Duration::from_secs(30)).unwrap();
+        let info = f.root.join("saved info 日本語.json");
+        fs::write(&info, raw).unwrap();
+        let run = |suffix: &str| {
+            let mut retries = Vec::new();
+            let result = download::run_with_retries(
+                &f.bin,
+                &f.root.join(suffix),
+                &f.out,
+                &f.url,
+                Some(&info),
+                |_| panic!("loopback success/collision must not back off"),
+                |attempt| retries.push(attempt),
+            );
+            assert!(retries.is_empty());
+            assert!(!f.root.join(suffix).exists());
+            result
+        };
+        let path = PathBuf::from(run("first").unwrap());
+        assert_eq!(fs::read(&path).unwrap(), silence_wav());
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(!name.contains(['<', '>', ':', '"', '/', '\\', '|', '?', '*']));
+        assert!(!["CON", "NUL"].contains(&name.split('.').next().unwrap().to_uppercase().as_str()));
+        if title.contains("日本語") {
+            assert!(name.contains("日本語"));
+        }
+        fs::write(&path, b"original bytes").unwrap();
+        assert!(run("collision").unwrap_err().contains("already exists"));
+        assert_eq!(fs::read(path).unwrap(), b"original bytes");
+    }
+}
+
 /// Opt-in network check: a real YouTube DASH download (video + audio merged by our ffmpeg)
 /// through the staged flow. Set QUEUE_QA_NETWORK=1 as well as QUEUE_QA_REAL_SIDECARS.
 #[test]

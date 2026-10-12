@@ -21,7 +21,11 @@ function StatusLabel({ item }: { item: QueueItem }) {
     case "queued":
       return null;
     case "downloading":
-      return <span className="text-neutral-500 dark:text-neutral-400">Downloading…</span>;
+      return (
+        <span className="text-neutral-500 dark:text-neutral-400">
+          {item.attempt > 1 ? `Retrying (${item.attempt}/3)…` : "Downloading…"}
+        </span>
+      );
     case "done":
       return (
         <span className="text-green-700 dark:text-green-400" title={status.path}>

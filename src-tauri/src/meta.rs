@@ -1,7 +1,7 @@
 //! Item metadata from `yt-dlp -J` (Q3, #6). Parsing is pure and tested; running yt-dlp is in
 //! [`fetch`]. Every field is untrusted text from the site and is only ever displayed as text.
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -94,6 +94,15 @@ const STDERR_TAIL: usize = 64 * 1024;
 /// output, and with bounded memory. On timeout, overflow, or error the whole process tree is
 /// stopped (see [`proc`]).
 pub fn fetch(sidecar_dir: &Path, url: &str, limit: Duration) -> Result<Meta, String> {
+    fetch_raw(sidecar_dir, url, limit).map(|(meta, _)| meta)
+}
+
+/// [`fetch`], also returning yt-dlp's raw `-J` JSON so a download can reuse it (D-017).
+pub fn fetch_raw(
+    sidecar_dir: &Path,
+    url: &str,
+    limit: Duration,
+) -> Result<(Meta, Vec<u8>), String> {
     let deadline = Instant::now() + limit;
     let timed_out = || {
         format!(
@@ -172,7 +181,35 @@ pub fn fetch(sidecar_dir: &Path, url: &str, limit: Duration) -> Result<Meta, Str
             &status.to_string(),
         ));
     }
-    parse(&stdout)
+    parse(&stdout).map(|meta| (meta, stdout))
+}
+
+/// A per-run folder for saved `-J` files (D-017). Item ids restart at 1 in every run, and a dev
+/// build and the installed app share the cache dir, so each run needs its own namespace.
+pub fn session_dir(cache_dir: &Path) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    cache_dir
+        .join("info")
+        .join(format!("session-{}-{stamp}", std::process::id()))
+}
+
+/// Saves an item's raw `-J` as `<session>/item-<id>.json`, never overwriting an existing file.
+pub fn save_info(session: &Path, id: u64, raw: &[u8]) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    std::fs::create_dir_all(session)?;
+    let path = session.join(format!("item-{id}.json"));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    if let Err(e) = file.write_all(raw).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(e);
+    }
+    Ok(path)
 }
 
 /// Runs `read` on a named thread and returns a channel for its result. Thread creation can
@@ -240,6 +277,26 @@ mod tests {
                 .and_then(|m| m.duration),
             None
         );
+    }
+
+    #[test]
+    fn saved_info_is_namespaced_per_run_and_never_overwritten() {
+        let cache = std::env::temp_dir().join(format!("queue-cache-{}", std::process::id()));
+        let (a, b) = (session_dir(&cache), session_dir(&cache));
+        assert_ne!(
+            a, b,
+            "two runs (e.g. dev + installed app) never share a folder"
+        );
+        let pa = save_info(&a, 1, b"video A").unwrap();
+        let pb = save_info(&b, 1, b"video B").unwrap();
+        assert_ne!(pa, pb);
+        assert_eq!(std::fs::read(&pa).unwrap(), b"video A");
+        assert!(
+            save_info(&a, 1, b"again").is_err(),
+            "create_new: no overwrite"
+        );
+        assert_eq!(std::fs::read(&pa).unwrap(), b"video A");
+        std::fs::remove_dir_all(cache).unwrap();
     }
 
     #[test]

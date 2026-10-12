@@ -4,6 +4,12 @@ use serde::Serialize;
 
 use crate::link;
 use crate::meta::Meta;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
+
+/// Saved `-J` info is used for the first download attempt while younger than this; YouTube's
+/// media links expire about 6 h after extraction (D-017).
+pub const INFO_FRESH_FOR: Duration = Duration::from_secs(5 * 60 * 60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -29,9 +35,14 @@ pub struct Item {
     pub meta: Option<Meta>,
     /// Bumped on every change, so the UI can drop replies and events that arrive out of order.
     pub rev: u64,
+    /// Download attempt while downloading (1, then 2–3 after a 403 retry; D-017), else 0.
+    pub attempt: u32,
     /// Duplicate identity from [`link::parse`]; internal only.
     #[serde(skip)]
     key: String,
+    /// The saved `-J` info file and when it was fetched; internal only.
+    #[serde(skip)]
+    info: Option<(PathBuf, SystemTime)>,
 }
 
 /// Why a link wasn't added. Serialized for the UI as `{ kind, message, id? }`.
@@ -77,7 +88,9 @@ impl Queue {
             status: Status::Fetching,
             meta: None,
             rev: 1,
+            attempt: 0,
             key: link.key,
+            info: None,
         };
         self.items.push(item.clone());
         Ok(item)
@@ -121,8 +134,44 @@ impl Queue {
             return Err("Only queued items can be downloaded.".into());
         }
         item.status = Status::Downloading;
+        item.attempt = 1;
         item.rev += 1;
         Ok(item.clone())
+    }
+
+    /// Marks a downloading item's retry `attempt` (D-017), so the row can say so.
+    pub fn retrying(&mut self, id: u64, attempt: u32) -> Option<Item> {
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if item.status != Status::Downloading {
+            return None;
+        }
+        item.attempt = attempt;
+        item.rev += 1;
+        Some(item.clone())
+    }
+
+    /// Remembers the saved `-J` info for a row.
+    pub fn set_info(&mut self, id: u64, path: PathBuf, fetched_at: SystemTime) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            item.info = Some((path, fetched_at));
+        }
+    }
+
+    /// The saved info file if it's still fresh enough to download from at `now`.
+    pub fn fresh_info(&self, id: u64, now: SystemTime) -> Option<PathBuf> {
+        let (path, at) = self.items.iter().find(|i| i.id == id)?.info.as_ref()?;
+        let age = now.duration_since(*at).ok()?; // a clock that went backwards: don't trust it
+        (age < INFO_FRESH_FOR && path.is_file()).then(|| path.clone())
+    }
+
+    /// Forgets (and returns) a row's saved info, e.g. to delete the file once it's done.
+    pub fn take_info(&mut self, id: u64) -> Option<PathBuf> {
+        self.items
+            .iter_mut()
+            .find(|i| i.id == id)?
+            .info
+            .take()
+            .map(|(p, _)| p)
     }
 
     /// Records the outcome of a download started with [`Queue::start`].
@@ -135,6 +184,7 @@ impl Queue {
             Ok(path) => Status::Done { path },
             Err(reason) => Status::Failed { reason },
         };
+        item.attempt = 0;
         item.rev += 1;
         Some(item.clone())
     }
@@ -325,5 +375,54 @@ mod tests {
             }
         );
         assert_eq!(q.fetched(99, Ok(Meta::default())), None);
+    }
+
+    #[test]
+    fn saved_info_is_used_only_while_fresh_and_present() {
+        let dir = std::env::temp_dir().join(format!("queue-info-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("item-1.json");
+        std::fs::write(&file, "{}").unwrap();
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://example.com/v");
+        let t0 = SystemTime::now();
+        assert_eq!(q.fresh_info(id, t0), None, "nothing saved yet");
+        q.set_info(id, file.clone(), t0);
+        assert_eq!(
+            q.fresh_info(id, t0 + Duration::from_secs(60)),
+            Some(file.clone())
+        );
+        assert_eq!(q.fresh_info(id, t0 + INFO_FRESH_FOR), None, "expired");
+        assert_eq!(
+            q.fresh_info(id, t0 - Duration::from_secs(60)),
+            None,
+            "clock went back"
+        );
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(q.fresh_info(id, t0), None, "file gone");
+        assert_eq!(q.take_info(id), Some(file));
+        assert_eq!(q.take_info(id), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn retry_attempts_show_while_downloading_and_reset_after() {
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://example.com/v");
+        assert_eq!(q.retrying(id, 2), None, "not downloading yet");
+        assert_eq!(q.start(id).unwrap().attempt, 1);
+        let r = q.retrying(id, 2).unwrap();
+        assert_eq!((r.attempt, r.status.clone()), (2, Status::Downloading));
+        let done = q.finish(id, Ok("/d/x.webm".into())).unwrap();
+        assert_eq!(done.attempt, 0);
+        assert!(
+            serde_json::to_string(&done)
+                .unwrap()
+                .contains("\"attempt\":0")
+        );
+        assert!(
+            !serde_json::to_string(&done).unwrap().contains("info"),
+            "info stays internal"
+        );
     }
 }
