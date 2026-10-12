@@ -174,6 +174,23 @@ impl Queue {
             .map(|(p, _)| p)
     }
 
+    /// Fails a Queued row that couldn't start for a lasting reason (e.g. no Downloads folder), so
+    /// "Download all" moves on instead of retrying it forever.
+    pub fn fail_queued(&mut self, id: u64, reason: String) -> Option<Item> {
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if item.status != Status::Queued {
+            return None;
+        }
+        item.status = Status::Failed { reason };
+        item.rev += 1;
+        Some(item.clone())
+    }
+
+    /// Whether a download holds the one slot (Q4: one at a time).
+    pub fn is_busy(&self) -> bool {
+        self.items.iter().any(|i| i.status == Status::Downloading)
+    }
+
     /// Records the outcome of a download started with [`Queue::start`].
     pub fn finish(&mut self, id: u64, outcome: Result<String, String>) -> Option<Item> {
         let item = self.items.iter_mut().find(|i| i.id == id)?;
@@ -187,6 +204,37 @@ impl Queue {
         item.attempt = 0;
         item.rev += 1;
         Some(item.clone())
+    }
+}
+
+/// "Download all" (Q4): downloads the next Queued row (lowest id first) until none are left.
+/// Rows still fetching their info are waited for, but don't hold up rows that are ready. A
+/// failed item doesn't stop the run (Q6). `download(id)` returns false if it couldn't start
+/// (e.g. a manual download holds the one slot); the loop then `wait`s and tries again.
+pub fn run_all(
+    queue: &std::sync::Mutex<Queue>,
+    mut download: impl FnMut(u64) -> bool,
+    mut wait: impl FnMut(),
+) {
+    loop {
+        let (next, pending) = match queue.lock() {
+            Ok(q) => (
+                q.items
+                    .iter()
+                    .find(|i| i.status == Status::Queued)
+                    .map(|i| i.id),
+                q.items
+                    .iter()
+                    .any(|i| matches!(i.status, Status::Fetching | Status::Downloading)),
+            ),
+            Err(_) => return,
+        };
+        match next {
+            Some(id) if download(id) => {}
+            Some(_) => wait(),
+            None if pending => wait(),
+            None => return,
+        }
     }
 }
 
@@ -424,5 +472,158 @@ mod tests {
             !serde_json::to_string(&done).unwrap().contains("info"),
             "info stays internal"
         );
+    }
+
+    mod runner {
+        use super::*;
+        use std::sync::Mutex;
+
+        fn queued(urls: &[&str]) -> Mutex<Queue> {
+            let mut q = Queue::default();
+            for url in urls {
+                ready(&mut q, url);
+            }
+            Mutex::new(q)
+        }
+
+        /// A download stand-in: start, then finish ok (or failed for urls containing "bad").
+        fn fake_download(queue: &Mutex<Queue>, order: &mut Vec<u64>) -> impl FnMut(u64) -> bool {
+            move |id| {
+                let mut q = queue.lock().unwrap();
+                if q.start(id).is_err() {
+                    return false;
+                }
+                order.push(id);
+                let bad = q
+                    .items()
+                    .iter()
+                    .any(|i| i.id == id && i.url.contains("bad"));
+                q.finish(
+                    id,
+                    if bad {
+                        Err("x".into())
+                    } else {
+                        Ok(format!("/d/{id}"))
+                    },
+                );
+                true
+            }
+        }
+
+        #[test]
+        fn downloads_every_queued_row_in_order_and_continues_past_failures() {
+            let q = queued(&["https://e.test/1", "https://e.test/bad", "https://e.test/3"]);
+            let mut order = Vec::new();
+            run_all(&q, fake_download(&q, &mut order), || {
+                panic!("no waiting needed")
+            });
+            assert_eq!(order, [1, 2, 3]);
+            let states: Vec<_> = q
+                .lock()
+                .unwrap()
+                .items()
+                .iter()
+                .map(|i| i.status.clone())
+                .collect();
+            assert!(matches!(states[1], Status::Failed { .. }));
+            assert!(
+                matches!(states[2], Status::Done { .. }),
+                "a failure doesn't stop the run"
+            );
+        }
+
+        #[test]
+        fn waits_for_rows_still_fetching_and_then_downloads_them() {
+            let q = Mutex::new(Queue::default());
+            let a = q.lock().unwrap().add("https://e.test/a").unwrap().id;
+            let mut order = Vec::new();
+            let mut waits = 0;
+            run_all(&q, fake_download(&q, &mut order), || {
+                waits += 1;
+                q.lock().unwrap().fetched(a, Ok(Meta::default())); // the info arrives
+            });
+            assert_eq!((order, waits), (vec![a], 1));
+        }
+
+        #[test]
+        fn a_ready_row_is_not_held_up_by_an_earlier_row_still_fetching() {
+            let q = Mutex::new(Queue::default());
+            let slow = q.lock().unwrap().add("https://e.test/slow").unwrap().id;
+            let fast = ready(&mut q.lock().unwrap(), "https://e.test/fast");
+            let mut order = Vec::new();
+            run_all(&q, fake_download(&q, &mut order), || {
+                q.lock().unwrap().fetched(slow, Err("Private video".into()));
+            });
+            assert_eq!(order, [fast]);
+        }
+
+        #[test]
+        fn a_row_that_cant_start_is_failed_and_the_run_moves_on() {
+            let q = queued(&["https://e.test/1", "https://e.test/2"]);
+            let mut order = Vec::new();
+            let mut inner = fake_download(&q, &mut order);
+            run_all(
+                &q,
+                |id| {
+                    if id == 1 {
+                        // like begin_download failing for a lasting reason with the slot free
+                        assert!(!q.lock().unwrap().is_busy());
+                        q.lock()
+                            .unwrap()
+                            .fail_queued(id, "No Downloads folder".into());
+                        return true;
+                    }
+                    inner(id)
+                },
+                || panic!("a lasting failure must not be retried"),
+            );
+            drop(inner);
+            assert_eq!(order, [2]);
+            let mut q = q.lock().unwrap();
+            assert!(
+                matches!(&q.items()[0].status, Status::Failed { reason } if reason.contains("Downloads"))
+            );
+            assert_eq!(q.fail_queued(2, "x".into()), None, "only Queued rows");
+        }
+
+        #[test]
+        fn waits_while_a_manual_download_holds_the_slot() {
+            let q = queued(&["https://e.test/1", "https://e.test/2"]);
+            q.lock().unwrap().start(1).unwrap(); // manual Download in progress
+            let mut order = Vec::new();
+            let mut waits = 0;
+            run_all(&q, fake_download(&q, &mut order), || {
+                waits += 1;
+                q.lock().unwrap().finish(1, Ok("/d/1".into()));
+            });
+            assert_eq!((order, waits), (vec![2], 1));
+        }
+
+        #[test]
+        fn rows_added_during_the_run_are_picked_up_and_an_empty_queue_returns() {
+            let q = queued(&["https://e.test/1"]);
+            let qr = &q;
+            let mut order = Vec::new();
+            let mut added = false;
+            let mut inner = fake_download(qr, &mut order);
+            run_all(
+                qr,
+                |id| {
+                    let ok = inner(id);
+                    if !added {
+                        added = true;
+                        ready(&mut qr.lock().unwrap(), "https://e.test/2");
+                    }
+                    ok
+                },
+                || panic!("no waiting needed"),
+            );
+            drop(inner);
+            assert_eq!(order, [1, 2]);
+            let empty = Mutex::new(Queue::default());
+            let mut none = Vec::new();
+            run_all(&empty, fake_download(&empty, &mut none), || panic!());
+            assert!(none.is_empty());
+        }
     }
 }

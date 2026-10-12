@@ -246,7 +246,10 @@ mod subprocess {
         meta::fetch(&fake.0, url, Duration::from_secs(5)).unwrap();
         let captured = fs::read_to_string(fake.0.join("queue-yt-dlp.args")).unwrap();
         let args: Vec<_> = captured.lines().collect();
-        assert_eq!(&args[args.len() - 4..], &["--no-playlist", "-J", "--", url]);
+        assert_eq!(
+            &args[args.len() - 5..],
+            &["--no-playlist", "--flat-playlist", "-J", "--", url]
+        );
         assert!(!args.contains(&"-o") && !args.contains(&"-f"));
         assert!(args.contains(&"--ignore-config") && args.contains(&"--no-update"));
     }

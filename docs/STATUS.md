@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #48 done → #7 (sequential runner) next
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #7 (Q4/Q5 runner) + #16 (N2, pulled forward), PR open
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,31 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #7 (Q4, Q5) sequential runner + Download all, with #16 (committed; PR open)
+- `queue::run_all(queue, download, wait)` (Tauri-free): repeatedly downloads the **next Queued row (lowest id)**.
+  - Rows still Fetching are waited for, but don't block rows that are ready.
+  - A failure doesn't stop the run (Q6), and rows added mid-run are picked up.
+  - If a manual Download holds the one slot, it waits; it stops when nothing is queued, fetching, or downloading.
+- `lib.rs`: the download logic is split into `begin_download` (start + paths) and `complete_download` (blocking; retries, finish, cleanup, events). These are shared by the per-row `queue_download` (on a thread) and `queue_run_all`, which runs `run_all` on a thread guarded by `Runner(Mutex<bool>)`. `set_running` changes the flag and emits the event under that lock, so only one run happens at a time and runner events stay ordered. It emits `queue://runner {running}`; there's also `queue_runner_state`.
+- UI: a **Download all** button, disabled without queued rows, before listening, or while running ("Downloading all…"). Per-row Download is disabled during a run.
+- States: Naming and Processing from the issue's list arrive with #14/#25 and #8 (progress parsing). Today's Fetching/Queued are its FetchingInfo/Ready.
+- Tests: 5 runner unit tests (order, continuing past failure, waiting for fetching, a ready row not held up, a manual-download slot, rows added mid-run) and 3 UI tests. The test mount helpers answer `queue_runner_state`. All cargo tests pass; `npm test` 74/74.
+- **Owner test (2026-10-11):** Download all worked and picked up a link added mid-run, but the first row failed with "Not saved: … already exists". The owner asked for "keep both", so **N2 / #16 is pulled forward into this change** (D-018): `download::numbered` + `place_unique` place the file as `Title (2).ext`, `(3)`, … (≤ 999), each candidate claimed atomically. All collision tests (fake and real yt-dlp) were updated to expect ` (2)` with the original untouched.
+- `codex-qa test "#7"`: **FAIL**, then fixed (`qa/reports/20261011-192723-test-IeHf.md`), three UI races:
+  1. A late `queue_run_all` reply revived a finished run. "Running" now comes only from `queue://runner` events.
+  2. A stale startup snapshot overrode a newer event. The snapshot now applies only if no runner event has arrived.
+  3. A runner-listener failure was cleared by a successful add. A failure to subscribe to either event stream is now the persistent "disconnected" state.
+
+  Its strict-order note (ready rows overtake rows still fetching) is kept by design (D-019). Codex's tests are merged (`queue_q4_qa.rs` 7 and 7 UI tests; one updated for D-018). `cargo test` 146 passed; `npm test` 81/81; the real-sidecar collision tests pass with ` (2)`.
+- `codex-qa test "#16"`: **FAIL**, then fixed (`qa/reports/20261011-193704-test-fL5J.md`): a name at the 255-byte limit couldn't take " (2)" ("File name too long"). `numbered` now shortens the stem at a character boundary to fit 255 bytes. Its real-yt-dlp test also showed that a **250-char title failed even on the first download** (yt-dlp's `.part` suffix went over the limit), so downloads now pass `--trim-filenames 200`. Codex's tests are merged (`collision_n2_qa.rs` 7, plus 2 real tests). `cargo test` 153 passed; all 9 opt-in real-sidecar download tests pass; `npm test` 81/81.
+- `codex-qa review`: **FAIL**, then fixed (`qa/reports/20261011-194556-review-ZuR9.md`):
+  - P2: a lasting start error (no Downloads or cache folder) made Download all retry one row every 250 ms forever. Now `queue_run_all` preflights the folders and yt-dlp and returns a readable error, and a row that can't start while the slot is free is **failed** (`Queue::fail_queued`) so the run moves on. Only real contention (`Queue::is_busy`) waits.
+  - P2: a stale "finished" runner event could override a newer run. The runner is now a `Mutex<bool>`, and each change and its event are emitted under that lock (`set_running`). The run thread is wrapped in `catch_unwind`, so the flag always resets.
+  A new runner test covers the failed row and the run continuing.
+- **Owner test (2026-10-11):** a playlist-only link timed out after 90 s, because with `--no-playlist` yt-dlp still extracted every video. The `-J` fetch now passes `--flat-playlist`: a real 96-video playlist returns in 2.7 s and is refused with "Playlists aren't supported yet" (#27). A `watch?v=…&list=…` link still yields the single video (checked).
+- `codex-qa` review round 2: **PASS WITH NOTES** (`qa/reports/20261011-195758-review-gSoc.md`); its two doc P3s (BACKLOG #7 lifecycle wording, this stale bullet) are fixed.
+- `cargo test` 154 passed; the opt-in real tests pass (one `_MEI` count was skewed by the owner's dev app running yt-dlp at the same time; it passed on rerun); `npm test` 81/81.
 
 ## Done: #48 (D-017) auto-retry 403s and reuse fetched info (squash-merged from PR #50)
 - The metadata worker saves the raw `-J` to `<app cache>/info/session-<pid>-<nanos>/item-<id>.json` (`meta::fetch_raw` + `save_info`, per-run namespace, `create_new`), and the queue records it with its fetch time (`set_info`/`fresh_info`/`take_info`, internal only).
@@ -137,4 +162,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-Start **#7** (Q4, Q5): a sequential queue runner with a **Download all** button. It processes Queued items in order, one at a time (D-011's concurrency = 1), through `run_with_retries`; a failure moves on to the next item. The owner's batch test of 403 retries in the dev app is still pending.
+#7 + #16: PR checks, then the owner approves the squash-merge (closes both). Then #8 (live progress).

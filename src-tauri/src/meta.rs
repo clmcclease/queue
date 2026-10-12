@@ -80,7 +80,10 @@ pub fn parse(json: &[u8]) -> Result<Meta, String> {
 /// The yt-dlp argv for metadata. `url` is untrusted and goes after `--`.
 pub fn args(sidecar_dir: &Path, url: &str) -> Vec<OsString> {
     let mut args = sidecar::ytdlp_base_args(sidecar_dir);
-    args.extend(["--no-playlist", "-J", "--"].map(OsString::from));
+    // --flat-playlist: a playlist-only link returns its summary at once (refused below until
+    // #27) instead of extracting every video and hitting the time limit. Single videos and
+    // `watch?v=…&list=…` (with --no-playlist) are unaffected.
+    args.extend(["--no-playlist", "--flat-playlist", "-J", "--"].map(OsString::from));
     args.push(url.into());
     args
 }
@@ -318,5 +321,9 @@ mod tests {
             (Some("--"), Some("--exec=evil"))
         );
         assert!(a.iter().any(|x| x == "-J") && a.iter().any(|x| x == "--no-playlist"));
+        assert!(
+            a.iter().any(|x| x == "--flat-playlist"),
+            "playlists must not extract every video"
+        );
     }
 }

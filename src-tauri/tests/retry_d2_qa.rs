@@ -251,7 +251,7 @@ mod subprocess {
         ));
         fs::write(fake.out.join("Café.webm"), b"original").unwrap();
         let (result, events) = fake.run(None);
-        assert!(result.unwrap_err().contains("already exists"));
+        assert!(result.unwrap().ends_with("Café (2).webm"), "N2: keep both");
         assert_eq!(events, ["retry 2", "wait 10"]);
         assert_eq!(fs::read(fake.out.join("Café.webm")).unwrap(), b"original");
         assert!(!fake.temp.0.join("args-3").exists());
@@ -262,7 +262,10 @@ mod subprocess {
         let fake = Fake::new("printf new > \"$P/HTTP Error 403.webm\"");
         fs::write(fake.out.join("HTTP Error 403.webm"), b"original").unwrap();
         let (result, events) = fake.run(None);
-        assert!(result.unwrap_err().contains("already exists"));
+        assert!(
+            result.unwrap().ends_with("HTTP Error 403 (2).webm"),
+            "N2: keep both"
+        );
         assert_eq!(
             fs::read(fake.out.join("HTTP Error 403.webm")).unwrap(),
             b"original"

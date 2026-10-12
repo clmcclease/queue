@@ -204,10 +204,11 @@ fn d2_real_recent_collision_is_not_done_and_never_overwrites() {
     let result = f.run();
     assert_eq!(fs::read(&path).unwrap(), b"keep the existing file");
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
-    assert!(
-        result.is_err(),
-        "real yt-dlp skipped an existing file, but Queue reported Done: {result:?}"
-    );
+    // N2: keep both. The second download lands as " (2)"; the existing file is untouched.
+    let second = PathBuf::from(result.unwrap());
+    let expected = path.with_file_name(download::numbered(path.file_name().unwrap(), 2));
+    assert_eq!(second, expected);
+    assert_eq!(fs::read(&second).unwrap(), silence_wav());
 }
 
 #[test]
@@ -219,10 +220,70 @@ fn d2_real_directory_collision_cannot_be_done() {
     fs::create_dir(&path).unwrap();
     let result = f.run();
     assert!(path.is_dir());
+    // A folder in the way is never replaced; the download takes the next free name.
+    let expected = path.with_file_name(download::numbered(path.file_name().unwrap(), 2));
+    assert_eq!(PathBuf::from(result.unwrap()), expected);
+}
+
+/// N2 / #16: test numbering gaps after upstream sanitizes reserved and messy titles.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn n2_real_sanitized_titles_take_first_gap_and_preserve_all_existing_bytes() {
+    for title in [
+        "CON",
+        "NUL",
+        "COM1",
+        "LPT9",
+        " 日本語 🎵 é : * ? &lt;noise&gt; ",
+    ] {
+        let f = LocalDownload::new(title);
+        let first = PathBuf::from(f.run().unwrap());
+        fs::write(&first, b"original").unwrap();
+        let name = first.file_name().unwrap();
+        // Independent expected suffix construction, rather than calling numbered().
+        let text = name.to_str().unwrap();
+        let dot = text.rfind('.').unwrap();
+        let nth = |n| {
+            f.out
+                .join(format!("{} ({n}){}", &text[..dot], &text[dot..]))
+        };
+        fs::write(nth(2), b"occupied second").unwrap();
+        fs::write(nth(4), b"occupied fourth").unwrap();
+        let third = PathBuf::from(f.run().unwrap());
+        assert_eq!(third, nth(3));
+        assert_eq!(fs::read(&third).unwrap(), silence_wav());
+        assert_eq!(fs::read(&first).unwrap(), b"original");
+        assert_eq!(fs::read(nth(2)).unwrap(), b"occupied second");
+        assert_eq!(fs::read(nth(4)).unwrap(), b"occupied fourth");
+        assert_eq!(fs::read_dir(&f.out).unwrap().count(), 4);
+    }
+}
+
+/// N2 / #16: a title accepted by real yt-dlp must also support a second download.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn n2_real_long_title_collision_still_saves_a_numbered_copy() {
+    let f = LocalDownload::new(&"a".repeat(250));
+    let first = PathBuf::from(f.run().unwrap());
+    fs::write(&first, b"original long title").unwrap();
+    let result = f.run();
+    assert_eq!(fs::read(&first).unwrap(), b"original long title");
+    let second = PathBuf::from(result.unwrap_or_else(|reason| {
+        panic!(
+            "N2: a valid first filename {:?} must permit a numbered second copy: {reason}",
+            first.file_name().unwrap()
+        )
+    }));
+    assert_ne!(first, second);
     assert!(
-        result.is_err(),
-        "real yt-dlp left a directory at the output path, but Queue reported Done: {result:?}"
+        second
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with(" (2).wav")
     );
+    assert_eq!(fs::read(second).unwrap(), silence_wav());
 }
 
 /// #48 / D-017: exercise the new saved-info source with upstream yt-dlp, including its
@@ -259,7 +320,9 @@ fn d017_real_saved_info_sanitizes_titles_and_never_overwrites() {
             assert!(name.contains("日本語"));
         }
         fs::write(&path, b"original bytes").unwrap();
-        assert!(run("collision").unwrap_err().contains("already exists"));
+        let second = PathBuf::from(run("collision").unwrap()); // N2: keep both
+        assert_ne!(second, path);
+        assert_eq!(fs::read(&second).unwrap(), silence_wav());
         assert_eq!(fs::read(path).unwrap(), b"original bytes");
     }
 }
