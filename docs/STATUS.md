@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #48 (403 retry, D-017), PR open
+**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #48 done → #7 (sequential runner) next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #48 (D-017) auto-retry 403s and reuse fetched info (committed; PR open)
+## Done: #48 (D-017) auto-retry 403s and reuse fetched info (squash-merged from PR #50)
 - The metadata worker saves the raw `-J` to `<app cache>/info/session-<pid>-<nanos>/item-<id>.json` (`meta::fetch_raw` + `save_info`, per-run namespace, `create_new`), and the queue records it with its fetch time (`set_info`/`fresh_info`/`take_info`, internal only).
 - `download::run_with_retries`:
   - attempt 1 uses `--load-info-json <file>` when the saved info is under **5 h** old (`INFO_FRESH_FOR`), and `-- <url>` otherwise;
@@ -137,4 +137,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#44** yt-dlp GPG signature checks (M5).
 
 ## Next bounded action
-#48: PR checks, then the owner approves the squash-merge. Then #7 (sequential runner + Download all).
+Start **#7** (Q4, Q5): a sequential queue runner with a **Download all** button. It processes Queued items in order, one at a time (D-011's concurrency = 1), through `run_with_retries`; a failure moves on to the next item. The owner's batch test of 403 retries in the dev app is still pending.
