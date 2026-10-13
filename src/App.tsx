@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import FolderPicker from "./components/FolderPicker";
 import QueueList from "./components/QueueList";
 import UrlBar from "./components/UrlBar";
 import {
@@ -155,12 +156,13 @@ export default function App() {
   return (
     <main className="flex h-screen flex-col bg-white p-4 dark:bg-neutral-900">
       <UrlBar onAdd={add} />
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex items-start gap-3">
+        <FolderPicker />
         <button
           type="button"
           onClick={downloadAll}
           disabled={!listening || running || !anyQueued}
-          className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+          className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
         >
           {running ? "Downloading all…" : "Download all"}
         </button>

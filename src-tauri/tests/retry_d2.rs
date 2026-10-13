@@ -159,6 +159,7 @@ fn real_download_from_saved_info() {
     let root = std::env::temp_dir().join(format!("queue-retry-real-{}", std::process::id()));
     let (bin, out) = (root.join("bin"), root.join("out"));
     fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(&out).unwrap(); // the caller provides the folder (D-020)
     // queue-ffprobe has no Sidecar variant: yt-dlp finds it next to queue-ffmpeg by name.
     for name in [
         "queue-yt-dlp",
@@ -252,6 +253,7 @@ fn real_download_reports_progress_and_merge() {
     let root = std::env::temp_dir().join(format!("queue-progress-real-{}", std::process::id()));
     let (bin, out) = (root.join("bin"), root.join("out"));
     fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(&out).unwrap(); // the caller provides the folder (D-020)
     for name in [
         "queue-yt-dlp",
         "queue-ffmpeg",

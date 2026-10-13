@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #10 (D1 output folder picker, remembered), next
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #10 (D1 output folder picker, remembered), uncommitted
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,20 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #10 (D1) output folder picker, remembered (uncommitted)
+- **Settings (D-020):** new `settings.rs`, which loads and saves `settings.json` in the app config folder. Saves are atomic; a missing or damaged file means defaults. `download_dir` is `None` for the OS Downloads folder.
+- **Commands:** `settings_download_folder` returns `{ path, error }`. `settings_choose_download_folder` (async) opens the native folder picker (`tauri-plugin-dialog` =2.8.1) at the current folder, saves the choice, and returns `null` when cancelled.
+- **Downloads:** `begin_download` and "Download all" use the chosen folder. A chosen folder that's gone fails with "The download folder … isn't available. Choose another with Change…." It is never recreated. Downloads already running keep the folder they started with.
+- **UI:** a "Saving to <folder> · Change…" line next to "Download all" (`FolderPicker.tsx`, `src/settings.ts`). Errors show inline as literal text, and Change… is disabled while the picker is open.
+- **Checks:** `cargo test` 201 passed; clippy/fmt clean; `npm run build` OK; `npm test` 98/98 (macOS arm64). The native picker needs a manual check in the dev app on each OS; CI only builds it.
+- `codex-qa test "#10"`: **FAIL**, then fixed (`qa/reports/20261013-065434-test-J2uQ.md`):
+  1. A slow startup read could overwrite a folder just picked.
+  2. The same read could show its error after a successful pick. FolderPicker now ignores the startup read once a folder is chosen.
+  3. `download.rs` still did `create_dir_all(out_dir)`, so a folder that vanished mid-download came back. `run_in` no longer creates the output folder; `lib::download_dir` creates only the default Downloads folder, up front. The M1 test `d2_missing_output_folder_is_created` now asserts the opposite (`…fails_and_is_not_recreated`).
+  Codex's tests (`settings_d1_qa.rs` with 7 tests, `folder-picker-d1-qa.test.mjs` with 6) pass against the fixes in its worktree. The owner chose to add them: `cargo test` 208 passed; `npm test` 104/104; clippy/fmt clean. The real-sidecar tests caught two YouTube tests in `retry_d2.rs` that relied on the old folder creation; they now create their out folder. Real tests: 12/12.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261013-070558-review-5bRq.md`). P2: two Queue processes saving at once shared `settings.json.tmp`. Each save now claims its own temp file (pid, counter, time) with `create_new`, syncs it, and renames it over `settings.json`; a failed save removes only its own temp. New test: 16 threads × 20 saves leave one complete choice and no temp files. Codex's two temp-file tests were adapted to the unique names (a read-only folder now forces the failure; a crashed save's leftover is ignored). `cargo test` 209 passed.
+- `codex-qa review` round 2: **PASS WITH NOTES** (`qa/reports/20261013-071834-review-50NW.md`). Its P3 is fixed: cancelling the picker cleared an unresolved startup error; now only a successful pick clears it (new UI test). `npm test` 105/105. This last change is UI-only and came after the review.
 
 ## Done: #9 (Q6) remove + retry with readable reasons (squash-merged from PR #53)
 - **Readable reasons:** `download::failure_reason` drops yt-dlp's `[extractor] id: ` lead-in, so the row says "Failed: Video unavailable" rather than "[youtube] dQw4w9WgXcQ: Video unavailable". If nothing would be left, it keeps the whole line. 403 detection is unchanged; it still matches "HTTP Error 403". Metadata failures use the same rule.
@@ -219,6 +233,11 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#43** Content Security Policy (M5, P1);
    - **#44** yt-dlp GPG signature checks (M5).
 5. Flaky Linux CI: fake-sidecar tests in `download_d2.rs` sometimes fail with `Text file busy (os error 26)`. A script written by one test thread is still open in a process another thread is forking (seen on `main` 2026-10-11 and on PR #52; a re-run passed). Proposed fix: on Linux, retry the spawn a few times on ETXTBSY. Not filed yet.
+6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Not fixed yet.
+
+## Owner checks in the dev app (macOS)
+- 2026-10-13: live progress, "Processing…" and Retry worked on real downloads.
+- 2026-10-13: #10's Change… opened the native picker. A download landed in the chosen (iCloud Drive) folder, and the choice was remembered after a relaunch.
 
 ## Next bounded action
-#10 (D1 output folder picker, remembered): read the issue and PRD, then implement and run the QA gates. The owner hasn't yet tried #8's progress or #9's Retry and ✕ in the dev app.
+#10: committed for PR review with `ci:bundle` (the native dialog differs per OS).

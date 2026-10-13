@@ -300,12 +300,14 @@ mod subprocess {
     }
 
     #[test]
-    fn d2_missing_output_folder_is_created() {
+    fn d2_missing_output_folder_fails_and_is_not_recreated() {
+        // D-020 (#10): a chosen folder that vanished (an unplugged drive) must not come back as
+        // an empty local folder; Queue creates only the default Downloads folder, up front.
         let f = Fixture::new();
         fs::remove_dir(&f.out).unwrap();
         f.saves("Title.webm", "media");
-        f.run().unwrap();
-        assert_eq!(f.out_names(), ["Title.webm"]);
+        assert!(f.run().unwrap_err().contains("isn't available"));
+        assert!(!f.out.exists());
     }
 
     #[test]
