@@ -914,3 +914,148 @@ test("D4 QA #8: stale progress cannot undo Processing or terminal failure", asyn
   assert.equal(statusText()[0], "Failed: ffmpeg failed");
   assert.equal(downloadButtons()[0].disabled, false);
 });
+
+// #9 / Q6: remove and retry.
+const buttonsIn = (index) => [...container.querySelectorAll("li")[index].querySelectorAll("button")].map((b) => b.textContent);
+const clickIn = async (index, label) => {
+  const b = [...container.querySelectorAll("li")[index].querySelectorAll("button")].find((x) => x.textContent === label);
+  assert.ok(b, `row ${index} has ${label}`);
+  await act(async () => b.click());
+};
+
+test("Q6: a failed row offers Retry and ✕; Retry queues it again for Download", async () => {
+  const row = { id: 1, url: "https://example.test/a", status: { state: "failed", reason: "Video unavailable" }, rev: 3, meta: { title: "A", channel: null, duration: null, thumbnail: null, site: null }, attempt: 0 };
+  const calls = [];
+  await mount((command, args) => {
+    calls.push([command, args]);
+    if (command === "queue_list") return [row];
+    if (command === "queue_retry") return { ...row, status: { state: "queued" }, rev: 4 };
+  });
+  assert.deepEqual(statusText(), ["Failed: Video unavailable"]);
+  assert.deepEqual(buttonsIn(0), ["Retry", "✕"]);
+  await clickIn(0, "Retry");
+  assert.deepEqual(calls.at(-1), ["queue_retry", { id: 1 }]);
+  assert.deepEqual(buttonsIn(0), ["Download", "✕"]);
+});
+
+test("Q6: a retried fetch failure shows Fetching info again", async () => {
+  const row = { id: 1, url: "https://example.test/a", status: { state: "failed", reason: "timed out" }, rev: 2, meta: null, attempt: 0 };
+  await mount((command) => {
+    if (command === "queue_list") return [row];
+    if (command === "queue_retry") return { ...row, status: { state: "fetching" }, rev: 3 };
+  });
+  await clickIn(0, "Retry");
+  assert.deepEqual(statusText(), ["Fetching info…"]);
+  assert.deepEqual(buttonsIn(0), ["✕"]);
+});
+
+test("Q6: ✕ is offered on every row except one downloading or processing", async () => {
+  const states = [{ state: "fetching" }, { state: "queued" }, { state: "downloading" }, { state: "processing" }, { state: "done", path: "/d/x.webm" }, { state: "failed", reason: "no" }];
+  const list = states.map((status, i) => ({ id: i + 1, url: `https://example.test/${i}`, status, rev: 1, meta: null, attempt: status.state === "downloading" ? 1 : 0 }));
+  await mount((command) => (command === "queue_list" ? list : null));
+  const hasRemove = list.map((_, i) => buttonsIn(i).includes("✕"));
+  assert.deepEqual(hasRemove, [true, true, false, false, true, true]);
+  const x = container.querySelector('li button[aria-label="Remove"]');
+  assert.equal(x.getAttribute("title"), "Remove from queue");
+});
+
+test("Q6: removing a row drops it, and later events or snapshots can't bring it back", async (t) => {
+  const a = { id: 1, url: "https://example.test/a", ...FETCHING, attempt: 0 };
+  const b = { id: 2, url: "https://example.test/b", ...QUEUED, meta: null, attempt: 0 };
+  const calls = [];
+  await mount((command, args) => {
+    calls.push([command, args]);
+    if (command === "queue_list") return [a, b];
+    if (command === "queue_remove") return null;
+  });
+  await clickIn(0, "✕");
+  assert.deepEqual(calls.at(-1), ["queue_remove", { id: 1 }]);
+  assert.deepEqual(rows(), [b.url]);
+  await act(async () => emit("queue://item", { ...a, status: { state: "queued" }, rev: 9 }));
+  assert.deepEqual(rows(), [b.url], "a late fetch event stays dropped");
+  await act(async () => emit("queue://item", { ...b, status: { state: "downloading" }, rev: 2, attempt: 1 }));
+  assert.deepEqual(statusText(), ["Downloading…"], "other rows still update");
+});
+
+test("Q6: a rejected remove or retry keeps the row and shows the reason literally", async () => {
+  const row = { id: 1, url: "https://example.test/a", status: { state: "failed", reason: "<b>x</b>" }, rev: 2, meta: null, attempt: 0 };
+  await mount((command) => {
+    if (command === "queue_list") return [row];
+    if (command === "queue_retry") throw "That link is already in the queue again.";
+    if (command === "queue_remove") throw "A download in progress can't be removed yet.";
+  });
+  await clickIn(0, "Retry");
+  assert.equal(container.querySelector('[role="alert"]').textContent, "That link is already in the queue again.");
+  await clickIn(0, "✕");
+  assert.equal(container.querySelector('[role="alert"]').textContent, "A download in progress can't be removed yet.");
+  assert.deepEqual(rows(), [row.url]);
+  assert.equal(container.querySelectorAll("li b").length, 0, "the reason is text, not markup");
+});
+
+test("Q6 QA #9: a delayed startup snapshot cannot resurrect a removed row", async (t) => {
+  const snapshot = deferred();
+  const row = { id: 1, url: "https://example.test/removed", ...FETCHING, attempt: 0 };
+  t.after(() => snapshot.resolve([]));
+  await mount((command) => {
+    if (command === "queue_list") return snapshot.promise;
+    if (command === "queue_remove") return null;
+    assert.fail(`unexpected command ${command}`);
+  });
+  await act(async () => emit("queue://item", row));
+  await clickIn(0, "✕");
+  assert.deepEqual(rows(), []);
+  await act(async () => snapshot.resolve([{ ...row, status: { state: "queued" }, rev: 2 }]));
+  assert.deepEqual(rows(), [], "a stale initial snapshot stays tombstoned");
+});
+
+test("Q6 QA #9: a late retry reply cannot regress a newer failed event", async (t) => {
+  const retry = deferred();
+  const row = { id: 1, url: "https://example.test/retry", meta: null, attempt: 0,
+    status: { state: "failed", reason: "old failure" }, rev: 2 };
+  t.after(() => retry.resolve({ ...row, rev: 3, status: { state: "fetching" } }));
+  await mount((command) => command === "queue_list" ? [row] : retry.promise);
+  await clickIn(0, "Retry");
+  await act(async () => emit("queue://item", { ...row, rev: 4,
+    status: { state: "failed", reason: "new failure 日本語" } }));
+  await act(async () => retry.resolve({ ...row, rev: 3, status: { state: "fetching" } }));
+  assert.deepEqual(statusText(), ["Failed: new failure 日本語"]);
+  assert.deepEqual(buttonsIn(0), ["Retry", "✕"]);
+});
+
+test("Q6 QA #9: removing while Retry is pending cannot be undone by its reply", async (t) => {
+  const retry = deferred();
+  const row = { id: 1, url: "https://example.test/retry-remove", meta: null, attempt: 0,
+    status: { state: "failed", reason: "old failure" }, rev: 2 };
+  t.after(() => retry.resolve({ ...row, rev: 3, status: { state: "fetching" } }));
+  await mount((command) => {
+    if (command === "queue_list") return [row];
+    if (command === "queue_retry") return retry.promise;
+    if (command === "queue_remove") return null;
+    assert.fail(`unexpected command ${command}`);
+  });
+  await clickIn(0, "Retry");
+  await clickIn(0, "✕");
+  await act(async () => retry.resolve({ ...row, rev: 3, status: { state: "fetching" } }));
+  assert.deepEqual(rows(), []);
+});
+
+test("Q6 QA #9: retry remains usable during Download all and newer download events win", async (t) => {
+  const retry = deferred();
+  const metadata = { title: '日本語 🎵 <img src=x onerror="bad()"> CON', channel: null,
+    duration: null, thumbnail: null, site: null };
+  const row = { id: 1, url: "https://example.test/retry-all", meta: metadata, attempt: 0,
+    status: { state: "failed", reason: "old failure" }, rev: 4 };
+  t.after(() => retry.resolve({ ...row, rev: 5, status: { state: "queued" } }));
+  await mount((command) => command === "queue_list" ? [row] : retry.promise);
+  await act(async () => emit("queue://runner", { running: true }));
+  const retryButton = [...container.querySelectorAll("li button")].find((b) => b.textContent === "Retry");
+  assert.equal(retryButton.disabled, false);
+  await clickIn(0, "Retry");
+  await act(async () => emit("queue://item", { ...row, rev: 6, attempt: 1,
+    status: { state: "downloading" } }));
+  await act(async () => retry.resolve({ ...row, rev: 5, status: { state: "queued" } }));
+  assert.deepEqual(statusText(), ["Downloading…"]);
+  assert.deepEqual(buttonsIn(0), []);
+  assert.equal(container.querySelector('[data-role="title"]').textContent, metadata.title);
+  assert.equal(container.querySelectorAll("li img").length, 0);
+});

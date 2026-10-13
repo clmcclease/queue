@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #9 (remove + retry with readable reasons), next
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #9 (Q6 remove + retry with readable reasons), uncommitted
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,26 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #9 (Q6) remove + retry with readable reasons (uncommitted)
+- **Readable reasons:** `download::failure_reason` drops yt-dlp's `[extractor] id: ` lead-in, so the row says "Failed: Video unavailable" rather than "[youtube] dQw4w9WgXcQ: Video unavailable". If nothing would be left, it keeps the whole line. 403 detection is unchanged; it still matches "HTTP Error 403". Metadata failures use the same rule.
+- **Remove (✕):** `Queue::remove` / `queue_remove` takes any row except Downloading/Processing (cancel is #22).
+  - Removing a Done row leaves its file on disk. The row's saved `-J` info is deleted.
+  - A row removed while Fetching ignores the late result, and `run_fetch_job` deletes the info file that fetch saved.
+  - Ids are never reused. The UI keeps removed ids, so `mergeItems` drops late events and snapshots for them.
+- **Retry:** `Queue::retry` / `queue_retry` only accepts Failed rows.
+  - A row whose info fetch failed (no meta) goes back to Fetching and is re-dispatched to the metadata worker. Otherwise it goes back to Queued, for Download or "Download all"; a running "Download all" picks it up.
+  - Retry is refused while the same link was added again and is still active.
+  - Attempt and progress reset. The saved info was already consumed, so the download extracts again.
+- **UI:** a Failed row shows Retry and ✕; other rows show ✕, except while downloading or processing. Errors appear in the alert line as literal text.
+- **Checks:** `cargo test` 187 passed; clippy/fmt clean; `npm run build` OK; `npm test` 90/90; real tests 12/12 (macOS arm64).
+- `codex-qa test "#9"`: **FAIL**, then fixed (`qa/reports/20261012-202328-test-lWk2.md`). An `ERROR:` line with an empty body produced an empty reason (the row said just "Failed:"). This predates #9. `failure_reason` now skips empty `ERROR:` lines and falls back to the exit status. Codex's tests (`…-lWk2.tests.patch`: `queue_q6_qa.rs` with 11 tests, plus 4 UI tests) pass against the fix in its worktree: 11/11 and 94/94. The owner chose to add them; with them, `cargo test` 198 passed and `npm test` 94/94.
+- `codex-qa review`: **PASS WITH NOTES**, with no findings (`qa/reports/20261012-203221-review-tQv0.md`). It suggested more tests, none blocking:
+  - `queue_remove` itself deleting info while keeping a Done file;
+  - retrying a fetch failure during "Download all";
+  - removing a row the runner just picked;
+  - Retry disabled when the listener failed.
+  Real tests were rerun after the empty-ERROR fix: 12/12. Codex's real-sidecar run failed only because of its sandbox (`semctl: Operation not permitted`).
 
 ## Done: #8 (D4) live progress + Processing (squash-merged from PR #52)
 - yt-dlp runs with `--progress --newline` and two templates:
@@ -201,4 +221,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 5. Flaky Linux CI: fake-sidecar tests in `download_d2.rs` sometimes fail with `Text file busy (os error 26)`. A script written by one test thread is still open in a process another thread is forking (seen on `main` 2026-10-11 and on PR #52; a re-run passed). Proposed fix: on Linux, retry the spawn a few times on ETXTBSY. Not filed yet.
 
 ## Next bounded action
-#9 (Q6 remove + retry with readable reasons): read the issue, implement, then run the QA gates. The owner hasn't yet watched #8's progress in the dev app (a longer video shows the bar, "(part 2)" and "Processing…").
+#9: QA gates passed; waiting for the owner's commit approval. The owner hasn't yet watched #8's progress in the dev app (a longer video shows the bar, "(part 2)" and "Processing…").

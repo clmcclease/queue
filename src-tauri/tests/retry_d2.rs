@@ -101,7 +101,7 @@ fn persistent_403s_give_up_after_three_attempts_with_the_reason() {
 fn other_errors_are_not_retried() {
     let f = Fake::new("echo 'ERROR: [youtube] x: Video unavailable' >&2; exit 1");
     let (result, waits, retries) = f.run(None);
-    assert_eq!(result.unwrap_err(), "[youtube] x: Video unavailable");
+    assert_eq!(result.unwrap_err(), "Video unavailable");
     assert!(waits.is_empty() && retries.is_empty());
 }
 
