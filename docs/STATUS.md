@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #9 (Q6 remove + retry with readable reasons), uncommitted
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #10 (D1 output folder picker, remembered), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #9 (Q6) remove + retry with readable reasons (uncommitted)
+## Done: #9 (Q6) remove + retry with readable reasons (squash-merged from PR #53)
 - **Readable reasons:** `download::failure_reason` drops yt-dlp's `[extractor] id: ` lead-in, so the row says "Failed: Video unavailable" rather than "[youtube] dQw4w9WgXcQ: Video unavailable". If nothing would be left, it keeps the whole line. 403 detection is unchanged; it still matches "HTTP Error 403". Metadata failures use the same rule.
 - **Remove (✕):** `Queue::remove` / `queue_remove` takes any row except Downloading/Processing (cancel is #22).
   - Removing a Done row leaves its file on disk. The row's saved `-J` info is deleted.
@@ -202,9 +202,9 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #8 merge:**
-  - `cargo test` 182, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
-  - `npm test` 85/85; clippy, fmt and build clean.
+- **macOS arm64 locally, at the #9 merge:**
+  - `cargo test` 198, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
+  - `npm test` 94/94; clippy, fmt and build clean.
 - **Hosted CI:** green for every M1 merge on all 4 targets.
 - **Not verified natively:** downloads on Windows and Linux (CI builds and runs the tests there; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
 
@@ -221,4 +221,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 5. Flaky Linux CI: fake-sidecar tests in `download_d2.rs` sometimes fail with `Text file busy (os error 26)`. A script written by one test thread is still open in a process another thread is forking (seen on `main` 2026-10-11 and on PR #52; a re-run passed). Proposed fix: on Linux, retry the spawn a few times on ETXTBSY. Not filed yet.
 
 ## Next bounded action
-#9: QA gates passed; waiting for the owner's commit approval. The owner hasn't yet watched #8's progress in the dev app (a longer video shows the bar, "(part 2)" and "Processing…").
+#10 (D1 output folder picker, remembered): read the issue and PRD, then implement and run the QA gates. The owner hasn't yet tried #8's progress or #9's Retry and ✕ in the dev app.
