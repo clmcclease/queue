@@ -18,6 +18,8 @@ pub enum Status {
     Fetching,
     Queued,
     Downloading,
+    /// yt-dlp is merging streams, extracting audio, or fixing up the file (D4).
+    Processing,
     Done {
         path: String,
     },
@@ -33,6 +35,8 @@ pub struct Item {
     pub status: Status,
     /// From `yt-dlp -J`, once fetched.
     pub meta: Option<Meta>,
+    /// Live progress while downloading (D4, #8); cleared when the state changes.
+    pub progress: Option<crate::download::Progress>,
     /// Bumped on every change, so the UI can drop replies and events that arrive out of order.
     pub rev: u64,
     /// Download attempt while downloading (1, then 2–3 after a 403 retry; D-017), else 0.
@@ -87,6 +91,7 @@ impl Queue {
             url: link.text,
             status: Status::Fetching,
             meta: None,
+            progress: None,
             rev: 1,
             attempt: 0,
             key: link.key,
@@ -122,7 +127,7 @@ impl Queue {
     /// could merge onto the same title-based path; parallel downloads (#28) need reserved names.
     /// Retrying failed items is #9.
     pub fn start(&mut self, id: u64) -> Result<Item, String> {
-        if self.items.iter().any(|i| i.status == Status::Downloading) {
+        if self.is_busy() {
             return Err("Another download is in progress. Try again when it finishes.".into());
         }
         let item = self
@@ -135,17 +140,43 @@ impl Queue {
         }
         item.status = Status::Downloading;
         item.attempt = 1;
+        item.progress = None;
         item.rev += 1;
         Ok(item.clone())
+    }
+
+    /// Records live progress for a downloading item (D4).
+    pub fn progressed(&mut self, id: u64, progress: crate::download::Progress) -> Option<Item> {
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if item.status != Status::Downloading {
+            return None;
+        }
+        item.progress = Some(progress);
+        item.rev += 1;
+        Some(item.clone())
+    }
+
+    /// Downloading → Processing (merge, audio extraction, fixups).
+    pub fn processing(&mut self, id: u64) -> Option<Item> {
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if item.status != Status::Downloading {
+            return None;
+        }
+        item.status = Status::Processing;
+        item.progress = None;
+        item.rev += 1;
+        Some(item.clone())
     }
 
     /// Marks a downloading item's retry `attempt` (D-017), so the row can say so.
     pub fn retrying(&mut self, id: u64, attempt: u32) -> Option<Item> {
         let item = self.items.iter_mut().find(|i| i.id == id)?;
-        if item.status != Status::Downloading {
+        if !matches!(item.status, Status::Downloading | Status::Processing) {
             return None;
         }
+        item.status = Status::Downloading;
         item.attempt = attempt;
+        item.progress = None;
         item.rev += 1;
         Some(item.clone())
     }
@@ -188,15 +219,18 @@ impl Queue {
 
     /// Whether a download holds the one slot (Q4: one at a time).
     pub fn is_busy(&self) -> bool {
-        self.items.iter().any(|i| i.status == Status::Downloading)
+        self.items
+            .iter()
+            .any(|i| matches!(i.status, Status::Downloading | Status::Processing))
     }
 
     /// Records the outcome of a download started with [`Queue::start`].
     pub fn finish(&mut self, id: u64, outcome: Result<String, String>) -> Option<Item> {
         let item = self.items.iter_mut().find(|i| i.id == id)?;
-        if item.status != Status::Downloading {
+        if !matches!(item.status, Status::Downloading | Status::Processing) {
             return None;
         }
+        item.progress = None;
         item.status = match outcome {
             Ok(path) => Status::Done { path },
             Err(reason) => Status::Failed { reason },
@@ -223,9 +257,12 @@ pub fn run_all(
                     .iter()
                     .find(|i| i.status == Status::Queued)
                     .map(|i| i.id),
-                q.items
-                    .iter()
-                    .any(|i| matches!(i.status, Status::Fetching | Status::Downloading)),
+                q.items.iter().any(|i| {
+                    matches!(
+                        i.status,
+                        Status::Fetching | Status::Downloading | Status::Processing
+                    )
+                }),
             ),
             Err(_) => return,
         };
@@ -625,5 +662,38 @@ mod tests {
             run_all(&empty, fake_download(&empty, &mut none), || panic!());
             assert!(none.is_empty());
         }
+    }
+
+    #[test]
+    fn progress_and_processing_flow_then_finish() {
+        use crate::download::Progress;
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://example.com/v");
+        assert_eq!(
+            q.progressed(id, Progress::default()),
+            None,
+            "not downloading yet"
+        );
+        q.start(id).unwrap();
+        let p = Progress {
+            percent: Some(42.0),
+            part: 1,
+            ..Progress::default()
+        };
+        assert_eq!(q.progressed(id, p.clone()).unwrap().progress, Some(p));
+        let proc = q.processing(id).unwrap();
+        assert_eq!(
+            (proc.status.clone(), proc.progress),
+            (Status::Processing, None)
+        );
+        assert!(q.is_busy(), "processing holds the one slot");
+        assert_eq!(
+            q.progressed(id, Progress::default()),
+            None,
+            "no progress while processing"
+        );
+        let done = q.finish(id, Ok("/d/v.webm".into())).unwrap();
+        assert!(matches!(done.status, Status::Done { .. }));
+        assert!(!q.is_busy());
     }
 }

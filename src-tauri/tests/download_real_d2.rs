@@ -25,6 +25,50 @@ struct LocalDownload {
     server: Option<JoinHandle<()>>,
 }
 
+/// #8 / D4: verifies the actual JSON templates against official yt-dlp using local HTTP.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn d4_real_loopback_download_streams_parseable_progress_and_keeps_both_copies() {
+    let f = LocalDownload::new("日本語 &amp; messy title");
+    let original = PathBuf::from(f.run().unwrap());
+    let original_bytes = fs::read(&original).unwrap();
+    let work = f.root.join("work-progress");
+    let mut progress = Vec::new();
+    let result = download::run_with_retries_events(
+        &f.bin,
+        &work,
+        &f.out,
+        &f.url,
+        None,
+        |_| panic!("loopback fixture must not retry"),
+        |_| panic!("loopback fixture must not retry"),
+        |event| {
+            if let download::Event::Progress(p) = event {
+                progress.push(p);
+            }
+        },
+    );
+    let copy = PathBuf::from(result.unwrap());
+    assert_ne!(copy, original);
+    assert_eq!(fs::read(&original).unwrap(), original_bytes);
+    assert_eq!(fs::read(&copy).unwrap(), silence_wav());
+    assert!(!work.exists());
+    assert!(
+        !progress.is_empty(),
+        "real yt-dlp must emit valid template JSON"
+    );
+    assert!(progress.iter().all(|p| p.part == 1));
+    assert!(progress.iter().any(|p| p.percent == Some(100.0)));
+    assert!(
+        progress.iter().any(|p| p.speed.is_some_and(|s| s > 0.0)),
+        "live speed is parsed"
+    );
+    assert!(
+        progress.iter().any(|p| p.eta.is_some()),
+        "live ETA is parsed"
+    );
+}
+
 impl LocalDownload {
     fn new(title: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
@@ -152,7 +196,17 @@ fn respond(mut stream: TcpStream, html: &[u8], wav: &[u8]) {
         body.len()
     );
     if stream.write_all(headers.as_bytes()).is_ok() && !first.starts_with("HEAD ") {
-        let _ = stream.write_all(body);
+        // Media is paced (about 0.3 s total) so yt-dlp has elapsed time to report speed and ETA;
+        // an instant loopback transfer leaves both null.
+        let chunk = if media { 1024 } else { body.len().max(1) };
+        for part in body.chunks(chunk) {
+            if stream.write_all(part).and_then(|_| stream.flush()).is_err() {
+                return;
+            }
+            if media {
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
     }
 }
 

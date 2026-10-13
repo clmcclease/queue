@@ -853,3 +853,64 @@ test("Q4 QA #7: a row added while running stays disabled until the runner stops"
   assert.equal(allButton().disabled, false);
   assert.equal(downloadButtons()[0].disabled, false);
 });
+
+// #8 (D4): live progress from queue://item events; then Processing; then Done.
+test("D4: a downloading row shows percent, speed, ETA and a progress bar, then Processing, then Done", async () => {
+  const base = { id: 1, url: "https://example.test/v", meta: null, attempt: 1 };
+  await mount((command) => (command === "queue_list" ? [{ ...base, status: { state: "downloading" }, rev: 3, progress: null }] : null));
+  assert.deepEqual(statusText(), ["Downloading…"]);
+  assert.equal(container.querySelector('[role="progressbar"]'), null, "no bar until a percent is known");
+  const progress = { percent: 42.7, downloaded: 427, total: 1000, speed: 3_200_000, eta: 35, part: 1 };
+  await act(async () => emit("queue://item", { ...base, status: { state: "downloading" }, rev: 4, progress }));
+  assert.deepEqual(statusText(), ["Downloading… 42% · 3.2 MB/s · 0:35 left"]);
+  assert.equal(container.querySelector('[role="progressbar"]').getAttribute("aria-valuenow"), "42");
+  await act(async () => emit("queue://item", { ...base, status: { state: "downloading" }, rev: 5, progress: { ...progress, percent: 10, speed: 950, eta: 0, part: 2 } }));
+  assert.deepEqual(statusText(), ["Downloading… 10% · 950 B/s (part 2)"]);
+  await act(async () => emit("queue://item", { ...base, status: { state: "processing" }, rev: 6, progress: null }));
+  assert.deepEqual(statusText(), ["Processing…"]);
+  assert.equal(container.querySelector('[role="progressbar"]'), null);
+  assert.equal(allButton().disabled, true, "processing still holds the slot");
+  await act(async () => emit("queue://item", { ...base, status: { state: "done", path: "/d/V.webm" }, rev: 7, attempt: 0, progress: null }));
+  assert.deepEqual(statusText(), ["✓ V.webm"]);
+});
+
+test("D4 QA #8: retry downloads keep live percent, speed and ETA visible", async () => {
+  const item = { id: 1, url: "https://example.test/retry", meta: null, attempt: 2, rev: 5,
+    status: { state: "downloading" },
+    progress: { percent: 25, downloaded: 25, total: 100, speed: 1000, eta: 75, part: 1 } };
+  await mount((command) => command === "queue_list" ? [item] : null);
+  const text = statusText()[0];
+  assert.match(text, /Retrying \(2\/3\)/);
+  assert.match(text, /25%/, "D4 percent remains visible during an active retry");
+  assert.match(text, /1\.0 KB\/s/);
+  assert.match(text, /1:15 left/);
+});
+
+test("D4 QA #8: unknown total shows available speed and ETA with no numeric bar", async () => {
+  const item = { id: 1, url: "https://example.test/live", meta: null, attempt: 1, rev: 4,
+    status: { state: "downloading" },
+    progress: { percent: null, downloaded: 500, total: null, speed: 0, eta: 3661, part: 1 } };
+  await mount((command) => command === "queue_list" ? [item] : null);
+  assert.deepEqual(statusText(), ["Downloading… · 0 B/s · 1:01:01 left"]);
+  assert.equal(container.querySelector('[role="progressbar"]'), null);
+});
+
+test("D4 QA #8: stale progress cannot undo Processing or terminal failure", async () => {
+  const base = { id: 1, url: "https://example.test/v", meta: { title: '日本語 🎵 CON <script>bad()</script>', channel: null, duration: null, thumbnail: null }, attempt: 1 };
+  const active = { ...base, rev: 4, status: { state: "downloading" },
+    progress: { percent: 50, downloaded: 50, total: 100, speed: 20, eta: 2, part: 2 } };
+  const queued = { id: 2, url: "https://example.test/b", meta: null, attempt: 0, rev: 2, status: { state: "queued" } };
+  await mount((command) => command === "queue_list" ? [active, queued] : null);
+  await act(async () => emit("queue://item", { ...base, rev: 5, status: { state: "processing" }, progress: null }));
+  await act(async () => emit("queue://item", active));
+  assert.equal(statusText()[0], "Processing…");
+  assert.equal(downloadButtons()[0].disabled, true);
+  assert.equal(container.querySelector('[role="progressbar"]'), null);
+  assert.equal(container.querySelector('[data-role="title"]').textContent, base.meta.title);
+  assert.equal(container.querySelector("script"), null);
+  await act(async () => emit("queue://item", { ...base, attempt: 0, rev: 6,
+    status: { state: "failed", reason: "ffmpeg failed" }, progress: null }));
+  await act(async () => emit("queue://item", active));
+  assert.equal(statusText()[0], "Failed: ffmpeg failed");
+  assert.equal(downloadButtons()[0].disabled, false);
+});

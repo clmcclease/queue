@@ -193,9 +193,12 @@ pub fn session_dir(cache_dir: &Path) -> PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
+    // A counter too: two calls can see the same timestamp on a coarse clock.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     cache_dir
         .join("info")
-        .join(format!("session-{}-{stamp}", std::process::id()))
+        .join(format!("session-{}-{stamp}-{n}", std::process::id()))
 }
 
 /// Saves an item's raw `-J` as `<session>/item-<id>.json`, never overwriting an existing file.

@@ -161,17 +161,26 @@ fn begin_download(
 fn complete_download(app: &AppHandle, job: DownloadJob) {
     let state = app.state::<Mutex<Queue>>();
     let id = job.id;
-    let outcome = download::run_with_retries(
+    let emit = |updated: Option<Item>| {
+        if let Some(item) = updated {
+            let _ = app.emit(ITEM_EVENT, item);
+        }
+    };
+    // Progress arrives already throttled (download::PROGRESS_EVERY); state changes always do.
+    let outcome = download::run_with_retries_events(
         &job.sidecar_dir,
         &job.work_dir,
         &job.out_dir,
         &job.url,
         job.info.as_deref(),
         std::thread::sleep,
-        |attempt| {
-            let updated = lock(&state).ok().and_then(|mut q| q.retrying(id, attempt));
-            if let Some(item) = updated {
-                let _ = app.emit(ITEM_EVENT, item);
+        |attempt| emit(lock(&state).ok().and_then(|mut q| q.retrying(id, attempt))),
+        |event| match event {
+            download::Event::Progress(p) => {
+                emit(lock(&state).ok().and_then(|mut q| q.progressed(id, p)));
+            }
+            download::Event::Processing(_) => {
+                emit(lock(&state).ok().and_then(|mut q| q.processing(id)));
             }
         },
     );

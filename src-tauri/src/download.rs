@@ -5,14 +5,291 @@
 //! never sit next to the user's files. The finished file is then moved into the output folder
 //! with an operation the filesystem refuses if the name already exists, so nothing is ever
 //! overwritten (including names the filesystem treats as equal: case or Unicode form).
+use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
+use std::time::{Duration, Instant};
 
+use crate::proc;
 use crate::sidecar::{self, Sidecar};
+
+/// Marks yt-dlp's download progress lines (see [`PROGRESS_TEMPLATE`]).
+pub const PROGRESS_PREFIX: &str = "QUEUE-PROGRESS ";
+/// Marks yt-dlp's postprocessing lines (merge, audio extraction, fixups, the final move).
+pub const POST_PREFIX: &str = "QUEUE-POST ";
+pub const PROGRESS_TEMPLATE: &str = concat!(
+    "download:QUEUE-PROGRESS {",
+    r#""status":%(progress.status|null)j,"downloaded":%(progress.downloaded_bytes|null)j,"#,
+    r#""total":%(progress.total_bytes|null)j,"total_estimate":%(progress.total_bytes_estimate|null)j,"#,
+    r#""speed":%(progress.speed|null)j,"eta":%(progress.eta|null)j,"#,
+    r#""fragment":%(progress.fragment_index|null)j,"fragments":%(progress.fragment_count|null)j}"#
+);
+pub const POST_TEMPLATE: &str = concat!(
+    "postprocess:QUEUE-POST {",
+    r#""status":%(progress.status|null)j,"postprocessor":%(progress.postprocessor|null)j}"#
+);
+
+/// Live download progress for the row (D4). Every field is optional: sites report what they can.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct Progress {
+    /// 0–100, from bytes when the total is known (or estimated), else from HLS/DASH fragments.
+    pub percent: Option<f64>,
+    pub downloaded: Option<u64>,
+    pub total: Option<u64>,
+    /// Bytes per second.
+    pub speed: Option<f64>,
+    /// Seconds left.
+    pub eta: Option<u64>,
+    /// Which stream is downloading: a merged video downloads video (part 1) then audio (part 2).
+    pub part: u32,
+}
+
+/// What a download reports while it runs.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    Progress(Progress),
+    /// A postprocessor started (merging streams, extracting audio, fixups): the row shows
+    /// "Processing". yt-dlp's final MoveFiles step isn't reported.
+    Processing(String),
+}
+
+#[derive(serde::Deserialize)]
+struct RawProgress {
+    status: Option<String>,
+    downloaded: Option<f64>,
+    total: Option<f64>,
+    total_estimate: Option<f64>,
+    speed: Option<f64>,
+    eta: Option<f64>,
+    fragment: Option<f64>,
+    fragments: Option<f64>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawPost {
+    status: Option<String>,
+    postprocessor: Option<String>,
+}
+
+/// A finite, non-negative number that fits in a u64, else none (yt-dlp values are untrusted).
+fn count(v: Option<f64>) -> Option<u64> {
+    v.filter(|v| v.is_finite() && *v >= 0.0 && *v < u64::MAX as f64)
+        .map(|v| v as u64)
+}
+
+/// Parses one stdout line. `finished` counts finished streams so far, giving the `part`; it is
+/// advanced here. Anything that isn't a well-formed progress line is ignored.
+pub fn parse_line(line: &str, finished: &mut u32) -> Option<Event> {
+    if let Some(json) = line.strip_prefix(PROGRESS_PREFIX) {
+        let raw: RawProgress = serde_json::from_str(json.trim()).ok()?;
+        let part = *finished + 1;
+        if raw.status.as_deref() == Some("finished") {
+            *finished += 1;
+        }
+        let downloaded = count(raw.downloaded);
+        // A zero total means unknown (some sites send 0 alongside a real estimate).
+        let total = count(raw.total)
+            .filter(|t| *t > 0)
+            .or(count(raw.total_estimate).filter(|t| *t > 0));
+        let percent = match (downloaded, total, count(raw.fragment), count(raw.fragments)) {
+            (Some(d), Some(t), _, _) => Some(d as f64 / t as f64 * 100.0),
+            (_, _, Some(i), Some(n)) if n > 0 => Some(i as f64 / n as f64 * 100.0),
+            _ => None,
+        }
+        .map(|p| p.clamp(0.0, 100.0));
+        return Some(Event::Progress(Progress {
+            percent,
+            downloaded,
+            total,
+            speed: raw.speed.filter(|s| s.is_finite() && *s >= 0.0),
+            eta: count(raw.eta),
+            part,
+        }));
+    }
+    if let Some(json) = line.strip_prefix(POST_PREFIX) {
+        let raw: RawPost = serde_json::from_str(json.trim()).ok()?;
+        let name = raw.postprocessor?;
+        return (raw.status.as_deref() == Some("started") && name != "MoveFiles")
+            .then_some(Event::Processing(name));
+    }
+    None
+}
+
+/// Longest stdout line kept; progress lines are ~250 bytes, anything far longer is skipped.
+const MAX_LINE: usize = 64 * 1024;
+
+/// How long the pipes may stay open after yt-dlp exits before its leftover descendants are
+/// stopped.
+const DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+/// Most events that may wait for the caller before the stdout reader waits for room.
+const EVENT_BACKLOG: usize = 64;
+
+/// Minimum gap between progress updates delivered for one download (a few a second is smooth;
+/// yt-dlp can print hundreds).
+pub const PROGRESS_EVERY: Duration = Duration::from_millis(250);
+
+/// Holds back progress that comes within [`PROGRESS_EVERY`] of the last one delivered, except
+/// the first of each part and its first 100%, which go at once. (Downloads that outgrow an
+/// underestimated total report 100% repeatedly; those wait like any other.) A held update
+/// stays in the [`Mailbox`], where newer ones replace it, and goes out once it's due, so the
+/// newest value shows even if yt-dlp then goes quiet.
+#[derive(Default)]
+struct Throttle {
+    last: Option<(Instant, u32)>,
+    full: bool, // this part's 100% was delivered
+}
+
+impl Throttle {
+    fn due(&self, p: &Progress, now: Instant) -> bool {
+        match self.last {
+            None => true,
+            Some((at, part)) => {
+                part != p.part
+                    || (p.percent == Some(100.0) && !self.full)
+                    || now.saturating_duration_since(at) >= PROGRESS_EVERY
+            }
+        }
+    }
+
+    fn delivered(&mut self, p: &Progress, now: Instant) {
+        let same_part = self.last.is_some_and(|(_, part)| part == p.part);
+        self.full = (same_part && self.full) || p.percent == Some(100.0);
+        self.last = Some((now, p.part));
+    }
+}
+
+/// Hands parsed events from the stdout reader to the caller. Progress that arrives while the
+/// newest waiting event is progress for the same part replaces it (see [`supersedes`]), so a
+/// flood stays one entry and the
+/// newest value is ready the moment the caller looks. Other events (Processing) keep their
+/// order and are never dropped; the reader waits when [`EVENT_BACKLOG`] are queued.
+#[derive(Default)]
+struct Mailbox {
+    state: Mutex<MailboxState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct MailboxState {
+    events: VecDeque<Event>,
+    closed: bool,  // the reader reached EOF
+    hung_up: bool, // the caller stopped taking events
+}
+
+enum Take {
+    Event(Event),
+    Empty,
+    NotYet, // the oldest event isn't `ready` yet
+    Closed,
+}
+
+impl Mailbox {
+    fn lock(&self) -> std::sync::MutexGuard<'_, MailboxState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn put(&self, event: Event) {
+        let mut state = self.lock();
+        if let (Event::Progress(new), Some(Event::Progress(last))) =
+            (&event, state.events.back_mut())
+            && supersedes(new, last)
+        {
+            *last = new.clone();
+        } else {
+            while state.events.len() >= EVENT_BACKLOG && !state.hung_up {
+                state = self
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            if state.hung_up {
+                return;
+            }
+            state.events.push_back(event);
+        }
+        self.changed.notify_all();
+    }
+
+    fn close(&self) {
+        self.lock().closed = true;
+        self.changed.notify_all();
+    }
+
+    /// The oldest waiting event if `ready` accepts it, waiting up to `timeout` for one.
+    fn take(&self, timeout: Duration, ready: impl Fn(&Event) -> bool) -> Take {
+        let state = self.lock();
+        let (mut state, _) = self
+            .changed
+            .wait_timeout_while(state, timeout, |s| s.events.is_empty() && !s.closed)
+            .unwrap_or_else(PoisonError::into_inner);
+        if state.events.front().is_some_and(|e| !ready(e)) {
+            return Take::NotYet;
+        }
+        match state.events.pop_front() {
+            Some(event) => {
+                self.changed.notify_all(); // room for a waiting reader
+                Take::Event(event)
+            }
+            None if state.closed => Take::Closed,
+            None => Take::Empty,
+        }
+    }
+}
+
+/// Whether `new` may replace a waiting `old`: same part, and a part's 100% (which the UI
+/// always shows) only gives way to another 100%.
+fn supersedes(new: &Progress, old: &Progress) -> bool {
+    let full = |p: &Progress| p.percent == Some(100.0);
+    new.part == old.part && (!full(old) || full(new))
+}
+
+/// Marks the [`Mailbox`] abandoned when the caller is done, so a waiting reader returns.
+struct HangUp(Arc<Mailbox>);
+
+impl Drop for HangUp {
+    fn drop(&mut self) {
+        self.0.lock().hung_up = true;
+        self.0.changed.notify_all();
+    }
+}
+
+/// Reads `pipe` line by line (bounded), calling `on_line` for each complete line.
+fn for_each_line(pipe: impl io::Read, mut on_line: impl FnMut(&str)) {
+    use io::BufRead;
+    let mut reader = io::BufReader::new(pipe);
+    let mut line = Vec::new();
+    let mut too_long = false;
+    loop {
+        let buf = match reader.fill_buf() {
+            Ok([]) | Err(_) => break,
+            Ok(buf) => buf,
+        };
+        let (chunk, end) = match buf.iter().position(|b| *b == b'\n') {
+            Some(i) => (&buf[..i], Some(i + 1)),
+            None => (buf, None),
+        };
+        if !too_long && line.len() + chunk.len() <= MAX_LINE {
+            line.extend_from_slice(chunk);
+        } else {
+            too_long = true;
+            line.clear();
+        }
+        let used = end.unwrap_or(buf.len());
+        reader.consume(used);
+        if end.is_some() {
+            if !too_long {
+                on_line(String::from_utf8_lossy(&line).trim_end_matches('\r'));
+            }
+            line.clear();
+            too_long = false;
+        }
+    }
+}
 
 /// Where yt-dlp gets the video from: a fresh extraction of the URL, or the `-J` info saved
 /// when the row was added (D-017; its media links last about 6 h and are tied to this IP).
@@ -41,7 +318,14 @@ pub fn args_for(sidecar_dir: &Path, work_dir: &Path, source: Source) -> Vec<OsSt
             "200",
             // Date files by when they were downloaded, not the upload date.
             "--no-mtime",
-            "--no-progress",
+            // Live progress (D4, #8): one JSON line per update, prefixed so it can't be mixed up
+            // with any other output. `|null` keeps missing values valid JSON.
+            "--progress",
+            "--newline",
+            "--progress-template",
+            PROGRESS_TEMPLATE,
+            "--progress-template",
+            POST_TEMPLATE,
         ]
         .map(OsString::from),
     );
@@ -227,7 +511,7 @@ pub fn run_source(
         fs::create_dir_all(parent).map_err(|e| format!("Couldn't create a working folder: {e}"))?;
     }
     fs::create_dir(work_dir).map_err(|e| format!("Couldn't create a working folder: {e}"))?;
-    let result = run_in(sidecar_dir, work_dir, out_dir, source).map_err(|f| f.reason);
+    let result = run_in(sidecar_dir, work_dir, out_dir, source, &mut |_| {}).map_err(|f| f.reason);
     let _ = fs::remove_dir_all(work_dir); // partial and intermediate files, success or not
     result
 }
@@ -253,25 +537,103 @@ fn run_in(
     work_dir: &Path,
     out_dir: &Path,
     source: Source,
+    on_event: &mut dyn FnMut(Event),
 ) -> Result<String, Failure> {
     let _ = fs::remove_file(work_dir.join(REPORT)); // a previous attempt's report
     let mut cmd = Command::new(Sidecar::YtDlp.path_in(sidecar_dir));
     cmd.args(args_for(sidecar_dir, work_dir, source))
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console window flashing up from the GUI app
-        cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut tree = proc::spawn_tree(&mut cmd).map_err(|e| format!("Couldn't start yt-dlp: {e}"))?;
+    let stdout = tree.child.stdout.take().expect("piped");
+    let stderr = tree.child.stderr.take().expect("piped");
+    // Both pipes are read on their own threads (stderr as a bounded tail, for the failure
+    // reason) so neither can fill up and block yt-dlp. Events come back through a [`Mailbox`]
+    // and `on_event` runs here, while this thread also watches for yt-dlp to exit.
+    let mailbox = Arc::new(Mailbox::default());
+    let _hang_up = HangUp(mailbox.clone()); // however this returns, the reader can't block
+    let sender = mailbox.clone();
+    let (err_tx, err) = mpsc::channel();
+    let readers = std::thread::Builder::new()
+        .name("yt-dlp stdout".into())
+        .spawn(move || {
+            let mut finished = 0;
+            for_each_line(stdout, |line| {
+                if let Some(event) = parse_line(line, &mut finished) {
+                    sender.put(event);
+                }
+            });
+            sender.close();
+        })
+        .and_then(|_| {
+            std::thread::Builder::new()
+                .name("yt-dlp stderr".into())
+                .spawn(move || {
+                    let _ = err_tx.send(proc::read_tail(stderr, 64 * 1024).unwrap_or_default());
+                })
+        });
+    if let Err(e) = readers {
+        tree.terminate();
+        return Err(format!("Couldn't read yt-dlp's output: {e}").into());
     }
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Couldn't start yt-dlp: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let reason = failure_reason(&stderr, &output.status.to_string());
+    // A descendant (ffmpeg, the onefile child) can outlive yt-dlp and keep a pipe open. Once
+    // yt-dlp has exited, the pipes get DRAIN_GRACE to close; then the rest of the tree is
+    // stopped, so a stuck child can never hold the download slot.
+    let mut status = None;
+    let mut drain_until = None;
+    let mut throttle = Throttle::default(); // per attempt: a retry's first update goes at once
+    loop {
+        let ready = |e: &Event| match e {
+            Event::Progress(p) => throttle.due(p, Instant::now()),
+            Event::Processing(_) => true,
+        };
+        match mailbox.take(Duration::from_millis(25), ready) {
+            Take::Event(Event::Progress(p)) => {
+                throttle.delivered(&p, Instant::now());
+                on_event(Event::Progress(p));
+            }
+            Take::Event(event) => on_event(event),
+            Take::Closed => break, // stdout closed
+            Take::Empty => {}
+            Take::NotYet => std::thread::sleep(Duration::from_millis(25)),
+        }
+        if status.is_none() {
+            match tree.child.try_wait() {
+                Ok(Some(s)) => {
+                    status = Some(s);
+                    drain_until = Some(Instant::now() + DRAIN_GRACE);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tree.terminate();
+                    return Err(format!("Couldn't wait for yt-dlp: {e}").into());
+                }
+            }
+        }
+        if drain_until.is_some_and(|t| Instant::now() >= t) {
+            tree.terminate(); // a descendant still holds stdout open
+            break;
+        }
+    }
+    let status = match status {
+        Some(status) => status,
+        None => tree
+            .child
+            .wait()
+            .map_err(|e| format!("Couldn't wait for yt-dlp: {e}"))?,
+    };
+    let drain_until = drain_until.unwrap_or_else(|| Instant::now() + DRAIN_GRACE);
+    let stderr = match err.recv_timeout(drain_until.saturating_duration_since(Instant::now())) {
+        Ok(stderr) => stderr,
+        Err(_) => {
+            tree.terminate(); // a descendant still holds stderr open
+            err.recv_timeout(Duration::from_secs(1)).unwrap_or_default()
+        }
+    };
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr);
+        let reason = failure_reason(&stderr, &status.to_string());
         let retryable = is_forbidden(&reason);
         return Err(Failure { reason, retryable });
     }
@@ -312,8 +674,32 @@ pub fn run_with_retries(
     out_dir: &Path,
     url: &str,
     info: Option<&Path>,
+    wait: impl FnMut(Duration),
+    on_retry: impl FnMut(u32),
+) -> Result<String, String> {
+    run_with_retries_events(
+        sidecar_dir,
+        work_dir,
+        out_dir,
+        url,
+        info,
+        wait,
+        on_retry,
+        |_| {},
+    )
+}
+
+/// [`run_with_retries`], also streaming progress and processing [`Event`]s.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_retries_events(
+    sidecar_dir: &Path,
+    work_dir: &Path,
+    out_dir: &Path,
+    url: &str,
+    info: Option<&Path>,
     mut wait: impl FnMut(Duration),
     mut on_retry: impl FnMut(u32),
+    mut on_event: impl FnMut(Event),
 ) -> Result<String, String> {
     if let Some(parent) = work_dir.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Couldn't create a working folder: {e}"))?;
@@ -326,7 +712,7 @@ pub fn run_with_retries(
             (1, Some(path)) => Source::Info(path),
             _ => Source::Url(url),
         };
-        result = run_in(sidecar_dir, work_dir, out_dir, source);
+        result = run_in(sidecar_dir, work_dir, out_dir, source, &mut on_event);
         match &result {
             Err(f) if f.retryable && attempt < attempts => {
                 on_retry(attempt + 1);
@@ -342,6 +728,70 @@ pub fn run_with_retries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_full_mailbox_keeps_order_and_a_hang_up_releases_a_blocked_reader() {
+        let mailbox = Arc::new(Mailbox::default());
+        let reader = {
+            let mailbox = mailbox.clone();
+            std::thread::spawn(move || {
+                for n in 0..=EVENT_BACKLOG {
+                    mailbox.put(Event::Processing(n.to_string())); // never merged
+                }
+            })
+        };
+        let taken: Vec<_> = (0..3)
+            .map(|_| match mailbox.take(Duration::from_secs(5), |_| true) {
+                Take::Event(Event::Processing(n)) => n,
+                _ => panic!("expected an event"),
+            })
+            .collect();
+        assert_eq!(taken, ["0", "1", "2"]);
+        reader.join().unwrap(); // the 65th fit once one was taken
+        let blocked = {
+            let mailbox = mailbox.clone();
+            std::thread::spawn(move || {
+                for n in 0..10 {
+                    mailbox.put(Event::Processing(format!("more {n}")));
+                }
+            })
+        };
+        drop(HangUp(mailbox));
+        blocked.join().unwrap(); // returns instead of waiting forever
+    }
+
+    #[test]
+    fn progress_is_throttled_within_a_part_but_not_across_parts_or_at_100() {
+        let p = |percent: f64, part: u32| Progress {
+            percent: Some(percent),
+            downloaded: None,
+            total: None,
+            speed: None,
+            eta: None,
+            part,
+        };
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut t = Throttle::default();
+        let mut t = |p: &Progress, now| {
+            let due = t.due(p, now);
+            if due {
+                t.delivered(p, now);
+            }
+            due
+        };
+        assert!(t(&p(1.0, 1), ms(0)), "first update");
+        assert!(!t(&p(2.0, 1), ms(100)), "too soon");
+        assert!(!t(&p(3.0, 1), ms(249)), "still too soon");
+        assert!(t(&p(4.0, 1), ms(250)), "gap elapsed");
+        assert!(t(&p(100.0, 1), ms(260)), "the first 100% always");
+        assert!(!t(&p(100.0, 1), ms(262)), "a repeated 100% is throttled");
+        assert!(!t(&p(100.0, 1), ms(265)));
+        assert!(t(&p(0.5, 2), ms(270)), "new part always");
+        assert!(!t(&p(1.0, 2), ms(300)));
+        assert!(t(&p(2.0, 2), ms(520)));
+        assert!(t(&p(100.0, 2), ms(530)), "each part's first 100%");
+    }
 
     fn temp(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("queue-d2-{tag}-{}", std::process::id()));
@@ -375,6 +825,8 @@ mod tests {
             ]
         );
         assert_eq!(a[at("--trim-filenames") + 1], "200");
+        assert!(a.iter().any(|x| x == "--newline") && !a.iter().any(|x| x == "--no-progress"));
+        assert!(a.iter().any(|x| x == PROGRESS_TEMPLATE) && a.iter().any(|x| x == POST_TEMPLATE));
         for flag in [
             "--no-overwrites",
             "--windows-filenames",
@@ -410,6 +862,141 @@ mod tests {
         ));
         assert!(!is_forbidden("HTTP Error 404: Not Found"));
         assert!(!is_forbidden("Video unavailable"));
+    }
+
+    #[test]
+    fn progress_lines_parse_with_bytes_estimates_fragments_and_parts() {
+        let mut finished = 0;
+        let line = |s: &str| format!("{PROGRESS_PREFIX}{s}");
+        let ev = parse_line(
+            &line(
+                r#"{"status":"downloading","downloaded":50,"total":200,"total_estimate":null,"speed":1000.5,"eta":3,"fragment":null,"fragments":null}"#,
+            ),
+            &mut finished,
+        );
+        assert_eq!(
+            ev,
+            Some(Event::Progress(Progress {
+                percent: Some(25.0),
+                downloaded: Some(50),
+                total: Some(200),
+                speed: Some(1000.5),
+                eta: Some(3),
+                part: 1
+            }))
+        );
+        let est = parse_line(
+            &line(
+                r#"{"status":"downloading","downloaded":10,"total":null,"total_estimate":40,"speed":null,"eta":null,"fragment":null,"fragments":null}"#,
+            ),
+            &mut finished,
+        );
+        assert!(
+            matches!(est, Some(Event::Progress(Progress { percent: Some(p), .. })) if p == 25.0)
+        );
+        let frags = parse_line(
+            &line(
+                r#"{"status":"downloading","downloaded":null,"total":null,"total_estimate":null,"speed":null,"eta":null,"fragment":3,"fragments":12}"#,
+            ),
+            &mut finished,
+        );
+        assert!(
+            matches!(frags, Some(Event::Progress(Progress { percent: Some(p), .. })) if p == 25.0)
+        );
+        parse_line(
+            &line(r#"{"status":"finished","downloaded":200,"total":200}"#),
+            &mut finished,
+        );
+        assert_eq!(finished, 1);
+        let second = parse_line(
+            &line(r#"{"status":"downloading","downloaded":1,"total":2}"#),
+            &mut finished,
+        );
+        assert!(
+            matches!(second, Some(Event::Progress(Progress { part: 2, .. }))),
+            "audio is part 2"
+        );
+    }
+
+    #[test]
+    fn bad_progress_values_are_dropped_and_other_lines_ignored() {
+        let mut finished = 0;
+        let ev = parse_line(
+            &format!(
+                r#"{PROGRESS_PREFIX}{{"status":"downloading","downloaded":-5,"total":0,"speed":-1,"eta":1e308}}"#
+            ),
+            &mut finished,
+        );
+        assert_eq!(
+            ev,
+            Some(Event::Progress(Progress {
+                part: 1,
+                ..Progress::default()
+            }))
+        );
+        let over = parse_line(
+            &format!(r#"{PROGRESS_PREFIX}{{"downloaded":300,"total":200}}"#),
+            &mut finished,
+        );
+        assert!(
+            matches!(over, Some(Event::Progress(Progress { percent: Some(p), .. })) if p == 100.0),
+            "clamped"
+        );
+        for junk in [
+            "[download] 10%",
+            "QUEUE-PROGRESS not json",
+            "QUEUE-PROGRESS {\"downloaded\":",
+            "",
+        ] {
+            assert_eq!(parse_line(junk, &mut finished), None, "{junk:?}");
+        }
+    }
+
+    #[test]
+    fn postprocessing_starts_processing_except_the_final_move() {
+        let mut f = 0;
+        let post = |s: &str| format!("{POST_PREFIX}{s}");
+        assert_eq!(
+            parse_line(
+                &post(r#"{"status":"started","postprocessor":"Merger"}"#),
+                &mut f
+            ),
+            Some(Event::Processing("Merger".into()))
+        );
+        assert_eq!(
+            parse_line(
+                &post(r#"{"status":"finished","postprocessor":"Merger"}"#),
+                &mut f
+            ),
+            None
+        );
+        assert_eq!(
+            parse_line(
+                &post(r#"{"status":"started","postprocessor":"MoveFiles"}"#),
+                &mut f
+            ),
+            None
+        );
+        assert_eq!(
+            parse_line(
+                &post(r#"{"status":"started","postprocessor":null}"#),
+                &mut f
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn lines_are_split_bounded_and_crlf_tolerant() {
+        let long = "x".repeat(MAX_LINE + 10);
+        let input = format!("one\r\n{long}\ntwo\nno-newline-at-end");
+        let mut lines = Vec::new();
+        for_each_line(input.as_bytes(), |l| lines.push(l.to_owned()));
+        assert_eq!(
+            lines,
+            ["one", "two"],
+            "over-long line skipped; unterminated tail dropped"
+        );
     }
 
     #[test]
