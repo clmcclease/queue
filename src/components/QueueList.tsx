@@ -3,6 +3,12 @@ import { formatDuration, progressText, type QueueItem } from "../queue";
 interface Props {
   items: QueueItem[];
   onDownload: (id: number) => void;
+  /** Q6: a Failed row tries again. */
+  onRetry: (id: number) => void;
+  /** Q6: removes a row that isn't downloading. */
+  onRemove: (id: number) => void;
+  /** Updates are arriving (the event listener is up), so a retried row can be followed. */
+  connected: boolean;
   /** A download is running; only one at a time (see queue.rs `start`). */
   busy: boolean;
   /** Row to flash briefly, e.g. the existing row for a duplicate link. */
@@ -52,7 +58,7 @@ function Thumbnail({ src }: { src: string | null }) {
   );
 }
 
-export default function QueueList({ items, onDownload, busy, highlight }: Props) {
+export default function QueueList({ items, onDownload, onRetry, onRemove, connected, busy, highlight }: Props) {
   if (items.length === 0) {
     return <p className="mt-16 text-center text-sm text-neutral-500 dark:text-neutral-400">Queue is empty.</p>;
   }
@@ -109,6 +115,27 @@ export default function QueueList({ items, onDownload, busy, highlight }: Props)
               className="shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 dark:border-neutral-700 dark:text-neutral-200 disabled:opacity-40"
             >
               Download
+            </button>
+          )}
+          {item.status.state === "failed" && (
+            <button
+              type="button"
+              onClick={() => onRetry(item.id)}
+              disabled={!connected}
+              className="shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 dark:border-neutral-700 dark:text-neutral-200 disabled:opacity-40"
+            >
+              Retry
+            </button>
+          )}
+          {item.status.state !== "downloading" && item.status.state !== "processing" && (
+            <button
+              type="button"
+              onClick={() => onRemove(item.id)}
+              aria-label="Remove"
+              title="Remove from queue"
+              className="shrink-0 rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            >
+              ✕
             </button>
           )}
         </li>

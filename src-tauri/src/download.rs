@@ -354,16 +354,37 @@ pub fn failure_reason(stderr: &str, status: &str) -> String {
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .collect();
+    // An `ERROR:` with nothing after it says nothing: skip it, and fall back to the exit status.
+    let body = |l: &&str| l.trim_start_matches("ERROR:").trim().to_owned();
     let line = lines
         .iter()
         .rev()
-        .find(|l| l.starts_with("ERROR:"))
+        .find(|l| l.starts_with("ERROR:") && !body(l).is_empty())
         .or(lines.last())
-        .copied();
+        .map(body)
+        .filter(|l| !l.is_empty());
     match line {
-        Some(l) => l.trim_start_matches("ERROR:").trim().to_owned(),
+        Some(l) => readable(&l).to_owned(),
         None => format!("yt-dlp exited with {status}"),
     }
+}
+
+/// Drops yt-dlp's `[extractor] video-id: ` lead-in (Q6), so the row says "Video unavailable"
+/// rather than "[youtube] dQw4w9WgXcQ: Video unavailable". The row already shows the link.
+fn readable(line: &str) -> &str {
+    let Some(rest) = line
+        .strip_prefix('[')
+        .and_then(|l| l.split_once("] "))
+        .map(|(_, rest)| rest)
+    else {
+        return line;
+    };
+    let rest = match rest.split_once(' ') {
+        Some((id, tail)) if id.len() > 1 && id.ends_with(':') => tail.trim_start(),
+        None if rest.ends_with(':') => "", // just an id: nothing readable is left
+        _ => rest,
+    };
+    if rest.is_empty() { line } else { rest }
 }
 
 /// Where yt-dlp records the finished file's path, relative to the work dir (`-P`). A plain name,
@@ -1004,13 +1025,46 @@ mod tests {
         let stderr = "WARNING: something\nERROR: [youtube] abc: Video unavailable\n\n";
         assert_eq!(
             failure_reason(stderr, "exit status: 1"),
-            "[youtube] abc: Video unavailable"
+            "Video unavailable"
         );
         assert_eq!(failure_reason("just noise\nlast line", "x"), "last line");
         assert_eq!(
             failure_reason("  \n", "exit status: 2"),
             "yt-dlp exited with exit status: 2"
         );
+    }
+
+    #[test]
+    fn failure_reasons_drop_the_extractor_and_id_lead_in() {
+        for (line, want) in [
+            (
+                "ERROR: [youtube] dQw4w9WgXcQ: Video unavailable",
+                "Video unavailable",
+            ),
+            (
+                "ERROR: [youtube] abc: Private video. Sign in if you've been granted access",
+                "Private video. Sign in if you've been granted access",
+            ),
+            (
+                "ERROR: [generic] Unsupported URL: https://e.test/x",
+                "Unsupported URL: https://e.test/x",
+            ),
+            (
+                "ERROR: [download] Got error: HTTP Error 403: Forbidden",
+                "Got error: HTTP Error 403: Forbidden",
+            ),
+            ("ERROR: [youtube] abc:", "[youtube] abc:"), // nothing left: keep it all
+            ("ERROR: [broken", "[broken"),
+            ("ERROR: no prefix: here", "no prefix: here"),
+            (
+                "ERROR: [x] 日本語: 動画は利用できません",
+                "動画は利用できません",
+            ),
+            ("WARNING: cleanup\nERROR:   \n", "yt-dlp exited with x"),
+            ("ERROR: real reason\nERROR:\n", "real reason"),
+        ] {
+            assert_eq!(failure_reason(line, "x"), want, "{line}");
+        }
     }
 
     #[test]

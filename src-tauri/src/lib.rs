@@ -59,13 +59,21 @@ pub fn run_fetch_job(
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(fetch))
         .unwrap_or_else(|_| Err("Getting the video's info failed unexpectedly.".into()));
     let mut q = lock(queue).ok()?;
+    let mut saved_path = None;
     let outcome = outcome.map(|(meta, saved)| {
         if let Some(path) = saved {
-            q.set_info(id, path, std::time::SystemTime::now());
+            q.set_info(id, path.clone(), std::time::SystemTime::now());
+            saved_path = Some(path);
         }
         meta
     });
-    q.fetched(id, outcome)
+    let updated = q.fetched(id, outcome);
+    if updated.is_none()
+        && let Some(path) = saved_path
+    {
+        let _ = std::fs::remove_file(path); // the row was removed meanwhile (Q6)
+    }
+    updated
 }
 
 /// Hands a new row to the metadata worker. If the worker is gone, the row fails now instead of
@@ -109,6 +117,31 @@ fn queue_add(
 #[tauri::command]
 fn queue_list(queue: tauri::State<'_, Mutex<Queue>>) -> Result<Vec<Item>, String> {
     Ok(lock(&queue)?.items().to_vec())
+}
+
+/// Removes a row that isn't downloading (Q6), and deletes its saved info. A Done row's file stays.
+#[tauri::command]
+fn queue_remove(queue: tauri::State<'_, Mutex<Queue>>, id: u64) -> Result<(), String> {
+    let mut removed = lock(&queue)?.remove(id)?;
+    if let Some(path) = removed.take_info() {
+        let _ = std::fs::remove_file(path);
+    }
+    Ok(())
+}
+
+/// Retries a Failed row (Q6). A row whose info fetch failed goes back to the metadata worker;
+/// otherwise it's Queued again for Download or "Download all".
+#[tauri::command]
+fn queue_retry(
+    queue: tauri::State<'_, Mutex<Queue>>,
+    fetcher: tauri::State<'_, Fetcher>,
+    id: u64,
+) -> Result<Item, String> {
+    let item = lock(&queue)?.retry(id)?;
+    Ok(match item.status {
+        queue::Status::Fetching => dispatch_fetch(&queue, &fetcher.0, item),
+        _ => item,
+    })
 }
 
 /// Everything a started download needs, captured while the queue was locked.
@@ -309,6 +342,8 @@ pub fn run() {
             queue_add,
             queue_list,
             queue_download,
+            queue_remove,
+            queue_retry,
             queue_run_all,
             queue_runner_state
         ])
@@ -321,6 +356,21 @@ mod tests {
     use super::*;
     use meta::Meta;
     use queue::Status;
+
+    #[test]
+    fn a_fetch_finishing_after_its_row_was_removed_deletes_the_saved_info() {
+        let queue = Mutex::new(Queue::default());
+        let id = queue.lock().unwrap().add("https://e.test/gone").unwrap().id;
+        let dir = std::env::temp_dir().join(format!("queue-q6-removed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let saved = dir.join("item.json");
+        std::fs::write(&saved, b"{}").unwrap();
+        queue.lock().unwrap().remove(id).unwrap();
+        let updated = run_fetch_job(&queue, id, || Ok((Meta::default(), Some(saved.clone()))));
+        assert_eq!(updated, None);
+        assert!(!saved.exists(), "no orphaned info file");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn a_panicking_job_fails_its_row_and_the_next_job_still_works() {

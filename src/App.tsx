@@ -7,6 +7,8 @@ import {
   isAddError,
   listItems,
   mergeItems,
+  removeItem,
+  retryItem,
   onItemChanged,
   onRunnerChanged,
   runAll,
@@ -27,6 +29,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Rows removed here (Q6): a late event or snapshot must not bring them back.
+  const removed = useRef(new Set<number>());
 
   function flashDuplicate(message: string, id: number) {
     setToast(message);
@@ -50,7 +54,7 @@ export default function App() {
       // is a lasting "disconnected" state that later successful commands must not clear.
       try {
         for (const subscribe of [
-          () => onItemChanged((item) => setItems((prev) => mergeItems(prev, [item]))),
+          () => onItemChanged((item) => setItems((prev) => mergeItems(prev, [item], removed.current))),
           () =>
             onRunnerChanged((running) => {
               runnerEventSeen = true;
@@ -69,7 +73,7 @@ export default function App() {
       try {
         const listed = await listItems();
         // Merge rather than replace: a row added before this snapshot arrives must not disappear.
-        if (!cancelled) setItems((prev) => mergeItems(prev, listed));
+        if (!cancelled) setItems((prev) => mergeItems(prev, listed, removed.current));
       } catch (e) {
         if (!cancelled) setError(String(e));
       }
@@ -90,7 +94,7 @@ export default function App() {
   async function add(url: string) {
     try {
       const item = await addItem(url);
-      setItems((prev) => mergeItems(prev, [item]));
+      setItems((prev) => mergeItems(prev, [item], removed.current));
       setError(null);
       return true;
     } catch (e) {
@@ -107,7 +111,28 @@ export default function App() {
   async function download(id: number) {
     try {
       const item = await downloadItem(id);
-      setItems((prev) => mergeItems(prev, [item]));
+      setItems((prev) => mergeItems(prev, [item], removed.current));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function remove(id: number) {
+    try {
+      await removeItem(id);
+      removed.current.add(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function retry(id: number) {
+    try {
+      const item = await retryItem(id);
+      setItems((prev) => mergeItems(prev, [item], removed.current));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -154,6 +179,9 @@ export default function App() {
         <QueueList
           items={items}
           onDownload={download}
+          onRetry={retry}
+          onRemove={remove}
+          connected={listening}
           busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
           highlight={highlight}
         />

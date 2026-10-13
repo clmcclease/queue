@@ -58,6 +58,10 @@ export function isAddError(e: unknown): e is AddError {
 export const addItem = (url: string) => invoke<QueueItem>("queue_add", { url });
 export const listItems = () => invoke<QueueItem[]>("queue_list");
 export const downloadItem = (id: number) => invoke<QueueItem>("queue_download", { id });
+/** Q6: removes a row that isn't downloading (a Done row's file stays on disk). */
+export const removeItem = (id: number) => invoke<void>("queue_remove", { id });
+/** Q6: a Failed row goes back to Fetching (its info never arrived) or Queued. */
+export const retryItem = (id: number) => invoke<QueueItem>("queue_retry", { id });
 /** "Download all" (Q4): resolves false if a run was already in progress. */
 export const runAll = () => invoke<boolean>("queue_run_all");
 export const runnerState = () => invoke<boolean>("queue_runner_state");
@@ -72,10 +76,17 @@ export const onItemChanged = (handler: (item: QueueItem) => void): Promise<Unlis
 /**
  * Merge rows from any reply or event into what's shown: one row per id, the highest `rev` wins,
  * in backend order (ascending id). Replies can arrive late or out of order, so never append blindly.
+ * Ids in `removed` (Q6) stay gone even if an older event or snapshot still has them; the backend
+ * never reuses an id.
  */
-export function mergeItems(shown: QueueItem[], incoming: QueueItem[]): QueueItem[] {
+export function mergeItems(
+  shown: QueueItem[],
+  incoming: QueueItem[],
+  removed: ReadonlySet<number> = new Set(),
+): QueueItem[] {
   const byId = new Map(shown.map((item) => [item.id, item]));
   for (const item of incoming) {
+    if (removed.has(item.id)) continue;
     const current = byId.get(item.id);
     if (!current || item.rev >= current.rev) byId.set(item.id, item);
   }

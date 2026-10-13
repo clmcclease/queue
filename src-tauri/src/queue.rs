@@ -49,6 +49,13 @@ pub struct Item {
     info: Option<(PathBuf, SystemTime)>,
 }
 
+impl Item {
+    /// Forgets (and returns) the saved info file, e.g. of a row just removed from the queue.
+    pub fn take_info(&mut self) -> Option<PathBuf> {
+        self.info.take().map(|(p, _)| p)
+    }
+}
+
 /// Why a link wasn't added. Serialized for the UI as `{ kind, message, id? }`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -67,7 +74,7 @@ pub struct Queue {
 
 impl Queue {
     /// Appends a row for a valid, new link (Q2). A link matching a row that hasn't failed is a
-    /// duplicate; a failed row doesn't block adding its link again (retry proper is #9).
+    /// duplicate; a failed row doesn't block adding its link again (or it can be retried, Q6).
     pub fn add(&mut self, input: &str) -> Result<Item, AddError> {
         if input.trim().is_empty() {
             return Err(AddError::Invalid {
@@ -125,7 +132,6 @@ impl Queue {
 
     /// Marks a queued item as downloading. One download at a time (Q4 default): concurrent runs
     /// could merge onto the same title-based path; parallel downloads (#28) need reserved names.
-    /// Retrying failed items is #9.
     pub fn start(&mut self, id: u64) -> Result<Item, String> {
         if self.is_busy() {
             return Err("Another download is in progress. Try again when it finishes.".into());
@@ -217,6 +223,60 @@ impl Queue {
         Some(item.clone())
     }
 
+    /// Removes a row (Q6) and returns it, so the caller can delete its saved info. A download in
+    /// progress can't be removed (cancel is #22). Removing a Done row leaves its file alone, and
+    /// a row removed while Fetching just ignores the late result ([`Queue::fetched`]).
+    pub fn remove(&mut self, id: u64) -> Result<Item, String> {
+        let index = self
+            .items
+            .iter()
+            .position(|i| i.id == id)
+            .ok_or("That item is no longer in the queue.")?;
+        if matches!(
+            self.items[index].status,
+            Status::Downloading | Status::Processing
+        ) {
+            return Err("A download in progress can't be removed yet.".into());
+        }
+        Ok(self.items.remove(index))
+    }
+
+    /// Retries a Failed row (Q6): back to Fetching if its info never arrived (the caller fetches
+    /// it again), else Queued, to download again; the queue (and "Download all") picks it up.
+    /// Refused if the same link was added again meanwhile and is still active.
+    pub fn retry(&mut self, id: u64) -> Result<Item, String> {
+        let item = self
+            .items
+            .iter()
+            .find(|i| i.id == id)
+            .ok_or("That item is no longer in the queue.")?;
+        if !matches!(item.status, Status::Failed { .. }) {
+            return Err("Only failed items can be retried.".into());
+        }
+        let key = item.key.clone();
+        if self
+            .items
+            .iter()
+            .any(|i| i.id != id && i.key == key && !matches!(i.status, Status::Failed { .. }))
+        {
+            return Err("That link is already in the queue again.".into());
+        }
+        let item = self
+            .items
+            .iter_mut()
+            .find(|i| i.id == id)
+            .expect("found above");
+        item.status = if item.meta.is_some() {
+            Status::Queued
+        } else {
+            Status::Fetching
+        };
+        item.progress = None;
+        item.attempt = 0;
+        item.rev += 1;
+        Ok(item.clone())
+    }
+
     /// Whether a download holds the one slot (Q4: one at a time).
     pub fn is_busy(&self) -> bool {
         self.items
@@ -284,6 +344,79 @@ mod tests {
         let id = q.add(url).unwrap().id;
         q.fetched(id, Ok(Meta::default())).unwrap();
         id
+    }
+
+    #[test]
+    fn remove_takes_any_row_except_a_download_in_progress() {
+        let mut q = Queue::default();
+        let fetching = q.add("https://e.test/fetching").unwrap().id;
+        let queued = ready(&mut q, "https://e.test/queued");
+        let busy = ready(&mut q, "https://e.test/busy");
+        q.start(busy).unwrap();
+        assert!(q.remove(busy).unwrap_err().contains("in progress"));
+        q.processing(busy).unwrap();
+        assert!(q.remove(busy).unwrap_err().contains("in progress"));
+        q.finish(busy, Ok("/d/busy.webm".into())).unwrap();
+        assert_eq!(q.remove(queued).unwrap().id, queued);
+        assert_eq!(q.remove(fetching).unwrap().id, fetching);
+        assert_eq!(
+            q.fetched(fetching, Ok(Meta::default())),
+            None,
+            "late fetch ignored"
+        );
+        assert_eq!(q.remove(busy).unwrap().id, busy, "done rows can go");
+        assert!(q.items().is_empty());
+        assert!(q.remove(busy).unwrap_err().contains("no longer"));
+        assert_eq!(
+            q.add("https://e.test/queued").unwrap().id,
+            4,
+            "ids are never reused"
+        );
+    }
+
+    #[test]
+    fn retry_requeues_a_failed_download_and_refetches_a_failed_fetch() {
+        let mut q = Queue::default();
+        let fetch = q.add("https://e.test/fetch").unwrap().id;
+        q.fetched(fetch, Err("timed out".into())).unwrap();
+        let dl = ready(&mut q, "https://e.test/dl");
+        q.start(dl).unwrap();
+        q.retrying(dl, 2).unwrap();
+        let failed = q.finish(dl, Err("HTTP Error 403".into())).unwrap();
+        let r = q.retry(dl).unwrap();
+        assert_eq!(r.status, Status::Queued);
+        assert_eq!((r.attempt, r.progress.clone()), (0, None));
+        assert!(r.rev > failed.rev);
+        assert_eq!(q.retry(fetch).unwrap().status, Status::Fetching);
+        assert!(
+            q.fetched(fetch, Ok(Meta::default())).is_some(),
+            "the new fetch lands"
+        );
+        assert!(q.retry(dl).unwrap_err().contains("Only failed"));
+        assert!(q.retry(99).unwrap_err().contains("no longer"));
+        q.start(dl).unwrap();
+        q.finish(dl, Ok("/d/dl.webm".into())).unwrap();
+        assert!(matches!(q.items()[1].status, Status::Done { .. }));
+    }
+
+    #[test]
+    fn retry_is_refused_while_the_same_link_was_added_again() {
+        let mut q = Queue::default();
+        let old = ready(&mut q, "https://www.youtube.com/watch?v=jNQXAC9IVRw");
+        q.start(old).unwrap();
+        q.finish(old, Err("unavailable".into())).unwrap();
+        let again = q.add("https://youtu.be/jNQXAC9IVRw").unwrap().id;
+        assert!(q.retry(old).unwrap_err().contains("already in the queue"));
+        q.fetched(again, Err("still unavailable".into())).unwrap();
+        assert_eq!(
+            q.retry(old).unwrap().status,
+            Status::Queued,
+            "both failed: ok"
+        );
+        assert!(matches!(
+            q.add("https://youtu.be/jNQXAC9IVRw"),
+            Err(AddError::Duplicate { id, .. }) if id == old
+        ));
     }
 
     #[test]

@@ -54,7 +54,7 @@ fn failure_returns_the_last_error_line() {
     let f = Fake::new("echo 'WARNING: x' >&2\necho 'ERROR: [generic] Unsupported URL' >&2\nexit 1");
     assert_eq!(
         f.fetch(Duration::from_secs(10)).unwrap_err(),
-        "[generic] Unsupported URL"
+        "Unsupported URL"
     );
 }
 
