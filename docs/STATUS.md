@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-10 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #7 + #16 done → #8 (live progress) next
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #9 (remove + retry with readable reasons), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,44 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## Done: #8 (D4) live progress + Processing (squash-merged from PR #52)
+- yt-dlp runs with `--progress --newline` and two templates:
+  - `download:QUEUE-PROGRESS {json}` (status, downloaded, total, total_estimate, speed, eta, fragment, fragments; `|null` defaults);
+  - `postprocess:QUEUE-POST {json}`.
+  Both were verified against the real yt-dlp.
+- `download::parse_line` (pure):
+  - Progress `{percent (bytes, else fragments; clamped), downloaded, total, speed, eta, part}`; `part` counts finished streams (video = 1, audio = 2);
+  - `Processing(name)` when a postprocessor other than MoveFiles starts;
+  - bad values are dropped and other lines ignored.
+- Downloads now stream stdout (bounded 64 KB lines) through `proc::spawn_tree` (process group or Job Object, like metadata); stderr keeps a 64 KB tail on its own thread. The Windows CREATE_NO_WINDOW flag comes from spawn_tree.
+- `run_with_retries_events` adds an event callback; `run_with_retries` keeps its signature.
+- Queue:
+  - `Status::Processing`, `Item.progress`, `progressed`/`processing`;
+  - finish and retry accept Processing; `is_busy` and the runner count it.
+- lib: progress throttled to ~4/s per item (a new part or 100% always goes through; state changes always do).
+- UI: a progress bar (`role=progressbar`), "Downloading… 42% · 3.2 MB/s · 0:35 left (part 2)", and "Processing…".
+- Tests:
+  - 5 parser/line unit tests and 1 queue flow test;
+  - a fake-yt-dlp streaming test;
+  - an opt-in **real** test (part 1 + part 2 progress, then Merger, in 3.5 s);
+  - 1 UI test.
+  `cargo test` 160 passed; `npm test` 82/82.
+- `codex-qa test`: **FAIL**, then fixed (`qa/reports/20261012-063510-test-Mxcf.md`):
+  1. A retry hid the live numbers. `progressText(progress, attempt)` now shows "Retrying (2/3)… 25% · …".
+  2. A `total` of 0 suppressed a valid `total_estimate`; zero now counts as unknown.
+  3. A flaky `session_dir` collision on a coarse clock; a per-process counter is added to the name.
+  Codex's tests are merged (`progress_d4_qa.rs` 9, `progress_stream_d4_qa.rs` 3, 3 UI tests, and an opt-in real loopback progress test). `cargo test` 172 passed; `npm test` 85/85.
+- Opt-in real tests (macOS arm64, pinned sidecars, network on): `download_real_d2` 8/8, `retry_d2` 2/2, `meta_q3` 2/2. The loopback fixture now paces its media (1 KB every 20 ms). An instant transfer left yt-dlp's speed and ETA null, which failed Codex's ETA assertion.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261012-064826-review-tyGd.md`). If yt-dlp exited while a descendant kept stdout or stderr open, the download waited forever and held the slot. Both pipes are now read on threads. Once yt-dlp exits, the pipes get 5 s (`DRAIN_GRACE`) to close; then the tree is stopped. The progress throttle is now a tested `Throttle` type. New tests: orphan holding stdout, orphan holding stderr, a success with a lingering descendant, and throttle rules. `cargo test` 176 passed; clippy/fmt clean; `npm test` 85/85; real tests still 12/12 (macOS arm64). Windows streaming is only covered by CI's build (fake-subprocess tests are Unix-only, #41).
+- `codex-qa review` round 2: **FAIL**, then fixed (`qa/reports/20261012-065552-review-4k73.md`):
+  - P2: progress events were buffered without limit. The channel is now bounded at 64; when it's full, progress is dropped (later updates replace it), and Processing waits for room.
+  - P3: a repeated 100% skipped the throttle. Now only each part's first 100% does.
+  New tests: progress flood with a slow consumer, repeated 100%, and a row failing while Processing doesn't stop the next one. `cargo test` 178 passed; clippy/fmt clean; real tests rerun.
+- `codex-qa review` round 3: **PASS WITH NOTES** (`qa/reports/20261012-072413-review-NXPT.md`). Its P3 is fixed: under backpressure the final 100% could be dropped. The reader now keeps the newest progress that didn't fit and sends it before the next Processing and at EOF. New test: the final progress survives backpressure; the flood test also checks that the newest value survives and that order holds. `cargo test` 179 passed.
+- `codex-qa review` round 4: **PASS WITH NOTES** (`qa/reports/20261012-073039-review-OjrZ.md`). Its P3 is fixed: a held-back update could wait for more output while yt-dlp was quiet. The channel is replaced by a small `Mailbox`, a bounded queue where consecutive progress for the same part merges into the newest one, so the newest value is ready immediately. A part's 100% gives way only to another 100%; Processing is never dropped; the reader waits when 64 events queue, and is released if the caller returns. Two ordering tests now allow an intermediate update to be merged. New test: the newest progress arrives during a pause after a burst. `cargo test` 180 passed (streaming tests repeated 10×); real tests rerun.
+- `codex-qa review` round 5: **PASS WITH NOTES** (`qa/reports/20261012-080911-review-R9XZ.md`). Its P3 is fixed: lib.rs's throttle discarded a quick update, so a pause left the UI on the older value. The throttle moved into `run_in`'s loop (`download::PROGRESS_EVERY`). A held update stays in the Mailbox, where newer ones replace it, and goes out once due, with no further output needed. New tests: a throttled update is delivered during a pause; a full mailbox keeps order, and a hang-up releases a blocked reader. `cargo test` 182 passed (streaming tests repeated 10×); real tests rerun.
+- `codex-qa review` round 6: **PASS WITH NOTES** (`qa/reports/20261012-081645-review-Pl5d.md`). Its only P3 was about a test: the held-update test could merge 10% and 60% before the first callback. Fixed: 60% is now printed only after 10% is delivered, and the test asserts 60% arrives at least `PROGRESS_EVERY` later. It passed 10/10 repeats; `cargo test` 182 passed. This last change touches only the test; the reviewed app code is unchanged.
 
 ## Done: #7 (Q4, Q5) Download all, with #16 N2 (squash-merged from PR #51)
 - `queue::run_all(queue, download, wait)` (Tauri-free): repeatedly downloads the **next Queued row (lowest id)**.
@@ -144,9 +182,9 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #4 merge:**
-  - `cargo test` 41, plus 4 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS=src-tauri/binaries [QUEUE_QA_NETWORK=1] cargo test --test download_real_d2 -- --ignored`), including a real YouTube DASH merge;
-  - `npm test` 54/54; clippy, fmt and build clean.
+- **macOS arm64 locally, at the #8 merge:**
+  - `cargo test` 182, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
+  - `npm test` 85/85; clippy, fmt and build clean.
 - **Hosted CI:** green for every M1 merge on all 4 targets.
 - **Not verified natively:** downloads on Windows and Linux (CI builds and runs the tests there; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
 
@@ -160,6 +198,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#45** staging-folder cleanup (M2);
    - **#43** Content Security Policy (M5, P1);
    - **#44** yt-dlp GPG signature checks (M5).
+5. Flaky Linux CI: fake-sidecar tests in `download_d2.rs` sometimes fail with `Text file busy (os error 26)`. A script written by one test thread is still open in a process another thread is forking (seen on `main` 2026-10-11 and on PR #52; a re-run passed). Proposed fix: on Linux, retry the spawn a few times on ETXTBSY. Not filed yet.
 
 ## Next bounded action
-Start **#8** (D4): live progress (percent, speed, ETA) from yt-dlp's `--newline --progress-template` (JSON with `|null` defaults, per the ytdlp-expert notes in D-015's research), streamed as item updates. Also add the **Processing** state (post-download merge/extract), completing #7's lifecycle except Naming (#14/#25).
+#9 (Q6 remove + retry with readable reasons): read the issue, implement, then run the QA gates. The owner hasn't yet watched #8's progress in the dev app (a longer video shows the bar, "(part 2)" and "Processing…").

@@ -188,3 +188,105 @@ fn real_download_from_saved_info() {
     let _ = fs::remove_dir_all(&root);
     assert!(result.unwrap().contains("Me at the zoo"));
 }
+
+/// #8 / D4: progress and processing events stream through the retry path as yt-dlp prints them.
+#[test]
+fn progress_and_processing_events_stream_from_stdout() {
+    let f = Fake::new(
+        r#"echo 'QUEUE-PROGRESS {"status":"downloading","downloaded":50,"total":200,"speed":10.0,"eta":15}'
+echo '[download] noise that is not ours'
+echo 'QUEUE-PROGRESS {"status":"finished","downloaded":200,"total":200}'
+echo 'QUEUE-PROGRESS {"status":"downloading","downloaded":1,"total":4}'
+echo 'QUEUE-POST {"status":"started","postprocessor":"Merger"}'
+echo 'QUEUE-POST {"status":"started","postprocessor":"MoveFiles"}'
+printf media > "$P/Title.webm""#,
+    );
+    let mut events = Vec::new();
+    let result = download::run_with_retries_events(
+        &f.root,
+        &f.root.join("work"),
+        &f.out,
+        "https://example.test/v",
+        None,
+        |_| {},
+        |_| {},
+        |e| events.push(e),
+    );
+    assert!(result.unwrap().ends_with("Title.webm"));
+    let summary: Vec<String> = events
+        .iter()
+        .map(|e| match e {
+            download::Event::Progress(p) => format!("{}:{:?}", p.part, p.percent),
+            download::Event::Processing(name) => format!("processing {name}"),
+        })
+        .collect();
+    // A progress update the UI hasn't taken yet may be replaced by a newer one for the same
+    // part; each part's 100%, the next part, and Processing always arrive, in order.
+    let summary = match summary.first().map(String::as_str) {
+        Some("1:Some(25.0)") => &summary[1..],
+        _ => &summary[..],
+    };
+    assert_eq!(
+        summary,
+        ["1:Some(100.0)", "2:Some(25.0)", "processing Merger"]
+    );
+}
+
+/// Opt-in: a real YouTube download streams byte progress for both streams, then Processing.
+#[test]
+#[ignore = "requires pinned sidecars and network"]
+fn real_download_reports_progress_and_merge() {
+    let (Some(src), Some(_)) = (
+        std::env::var_os("QUEUE_QA_REAL_SIDECARS"),
+        std::env::var_os("QUEUE_QA_NETWORK"),
+    ) else {
+        return;
+    };
+    let triple = if cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin"
+    } else if cfg!(target_os = "macos") {
+        "x86_64-apple-darwin"
+    } else {
+        "x86_64-unknown-linux-gnu"
+    };
+    let root = std::env::temp_dir().join(format!("queue-progress-real-{}", std::process::id()));
+    let (bin, out) = (root.join("bin"), root.join("out"));
+    fs::create_dir_all(&bin).unwrap();
+    for name in [
+        "queue-yt-dlp",
+        "queue-ffmpeg",
+        "queue-ffprobe",
+        "queue-deno",
+    ] {
+        fs::copy(
+            PathBuf::from(&src).join(format!("{name}-{triple}")),
+            bin.join(name),
+        )
+        .unwrap();
+    }
+    let mut events = Vec::new();
+    let result = download::run_with_retries_events(
+        &bin,
+        &root.join("work"),
+        &out,
+        "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        None,
+        std::thread::sleep,
+        |_| {},
+        |e| events.push(e),
+    );
+    let _ = fs::remove_dir_all(&root);
+    assert!(result.unwrap().contains("Me at the zoo"));
+    let parts: Vec<u32> = events
+        .iter()
+        .filter_map(|e| match e {
+            download::Event::Progress(p) if p.percent.is_some() => Some(p.part),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        parts.contains(&1) && parts.contains(&2),
+        "video and audio progress: {parts:?}"
+    );
+    assert!(events.contains(&download::Event::Processing("Merger".into())));
+}

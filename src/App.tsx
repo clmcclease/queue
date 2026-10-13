@@ -154,7 +154,7 @@ export default function App() {
         <QueueList
           items={items}
           onDownload={download}
-          busy={!listening || running || items.some((item) => item.status.state === "downloading")}
+          busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
           highlight={highlight}
         />
       </div>

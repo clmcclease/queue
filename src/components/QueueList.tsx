@@ -1,4 +1,4 @@
-import { formatDuration, type QueueItem } from "../queue";
+import { formatDuration, progressText, type QueueItem } from "../queue";
 
 interface Props {
   items: QueueItem[];
@@ -23,9 +23,11 @@ function StatusLabel({ item }: { item: QueueItem }) {
     case "downloading":
       return (
         <span className="text-neutral-500 dark:text-neutral-400">
-          {item.attempt > 1 ? `Retrying (${item.attempt}/3)…` : "Downloading…"}
+          {progressText(item.progress, item.attempt)}
         </span>
       );
+    case "processing":
+      return <span className="text-neutral-500 dark:text-neutral-400">Processing…</span>;
     case "done":
       return (
         <span className="text-green-700 dark:text-green-400" title={status.path}>
@@ -85,6 +87,18 @@ export default function QueueList({ items, onDownload, busy, highlight }: Props)
             <div className="truncate text-xs">
               <StatusLabel item={item} />
             </div>
+            {item.status.state === "downloading" && item.progress?.percent != null && (
+              <div
+                role="progressbar"
+                aria-label="Download progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.floor(item.progress.percent)}
+                className="mt-1 h-1 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-800"
+              >
+                <div className="h-full bg-neutral-900 transition-[width] dark:bg-neutral-100" style={{ width: `${item.progress.percent}%` }} />
+              </div>
+            )}
           </div>
           {item.status.state === "queued" && (
             <button

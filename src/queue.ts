@@ -6,6 +6,7 @@ export type Status =
   | { state: "fetching" }
   | { state: "queued" }
   | { state: "downloading" }
+  | { state: "processing" }
   | { state: "done"; path: string }
   | { state: "failed"; reason: string };
 
@@ -19,11 +20,25 @@ export interface Meta {
   site: string | null;
 }
 
+/** Live download progress (src-tauri/src/download.rs `Progress`); every field may be missing. */
+export interface Progress {
+  percent: number | null;
+  downloaded: number | null;
+  total: number | null;
+  /** Bytes per second. */
+  speed: number | null;
+  /** Seconds left. */
+  eta: number | null;
+  /** 1 = first stream (video), 2 = second (audio) for merged downloads. */
+  part: number;
+}
+
 export interface QueueItem {
   id: number;
   url: string;
   status: Status;
   meta: Meta | null;
+  progress?: Progress | null;
   /** Download attempt: 1, then 2–3 when retrying after a 403 (D-017); 0 when not downloading. */
   attempt: number;
   /** Bumped by the backend on every change; higher wins when replies arrive out of order. */
@@ -75,4 +90,32 @@ export function formatDuration(seconds: number | null | undefined): string {
   const m = Math.floor((total % 3600) / 60);
   const s = String(total % 60).padStart(2, "0");
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+/** `3.2 MB/s`; empty when unknown. Decimal units, as file managers show them. */
+export function formatSpeed(bytesPerSecond: number | null | undefined): string {
+  if (bytesPerSecond == null || !Number.isFinite(bytesPerSecond) || bytesPerSecond < 0) return "";
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let value = bytesPerSecond;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * "Downloading… 42% · 3.2 MB/s · 0:35 left (part 2)" from whatever yt-dlp reported; a retry
+ * after a 403 (D-017) leads with "Retrying (2/3)…" and keeps the live numbers.
+ */
+export function progressText(progress: Progress | null | undefined, attempt = 1): string {
+  const parts = [attempt > 1 ? `Retrying (${attempt}/3)…` : "Downloading…"];
+  if (progress?.percent != null) parts[0] += ` ${Math.floor(progress.percent)}%`;
+  const speed = formatSpeed(progress?.speed);
+  if (speed) parts.push(speed);
+  const eta = formatDuration(progress?.eta);
+  if (eta && progress?.eta) parts.push(`${eta} left`);
+  const text = parts.join(" · ");
+  return progress && progress.part > 1 ? `${text} (part ${progress.part})` : text;
 }
