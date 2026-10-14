@@ -3,6 +3,7 @@ pub mod link;
 pub mod meta;
 pub mod proc;
 pub mod queue;
+pub mod settings;
 pub mod sidecar;
 
 use std::sync::Mutex;
@@ -144,6 +145,100 @@ fn queue_retry(
     })
 }
 
+/// The user's settings and the file they're saved in (D1). `file` is `None` if the OS has no
+/// config folder; settings then last until the app quits.
+struct Settings {
+    file: Option<std::path::PathBuf>,
+    current: Mutex<settings::Settings>,
+}
+
+/// Where finished downloads go (D1): the chosen folder, or the OS Downloads folder.
+fn download_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let settings = app.state::<Settings>();
+    let current = settings
+        .current
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?
+        .clone();
+    current.download_dir(|| {
+        let dir = app
+            .path()
+            .download_dir()
+            .map_err(|e| format!("Couldn't find your Downloads folder: {e}"))?;
+        // The default folder is the one Queue may create (D-020); a chosen one never is.
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
+        Ok(dir)
+    })
+}
+
+/// The download folder as the UI shows it. `error` says why it can't be used right now (a
+/// chosen folder that's gone), while `path` still names it.
+#[derive(Clone, Debug, serde::Serialize)]
+struct DownloadFolder {
+    path: String,
+    error: Option<String>,
+}
+
+fn download_folder(app: &AppHandle) -> DownloadFolder {
+    let chosen = app
+        .state::<Settings>()
+        .current
+        .lock()
+        .ok()
+        .and_then(|s| s.download_dir.clone());
+    match download_dir(app) {
+        Ok(dir) => DownloadFolder {
+            path: dir.to_string_lossy().into_owned(),
+            error: None,
+        },
+        Err(error) => DownloadFolder {
+            path: chosen
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            error: Some(error),
+        },
+    }
+}
+
+/// The current download folder (D1).
+#[tauri::command]
+fn settings_download_folder(app: AppHandle) -> DownloadFolder {
+    download_folder(&app)
+}
+
+/// Opens the OS folder picker at the current download folder and saves the choice (D1).
+/// `None` if the picker was cancelled. Async, so the blocking picker never runs on the main
+/// thread. Downloads already running keep the folder they started with.
+#[tauri::command]
+async fn settings_choose_download_folder(app: AppHandle) -> Result<Option<DownloadFolder>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut picker = app.dialog().file().set_title("Choose the download folder");
+    if let Ok(dir) = download_dir(&app) {
+        picker = picker.set_directory(dir);
+    }
+    let Some(picked) = picker.blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let dir = picked
+        .into_path()
+        .map_err(|e| format!("Couldn't use that folder: {e}"))?;
+    let state = app.state::<Settings>();
+    let mut current = state
+        .current
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?;
+    let mut next = current.clone();
+    next.download_dir = Some(dir);
+    if let Some(file) = &state.file {
+        next.save(file)
+            .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+    }
+    *current = next;
+    drop(current);
+    Ok(Some(download_folder(&app)))
+}
+
 /// Everything a started download needs, captured while the queue was locked.
 struct DownloadJob {
     id: u64,
@@ -155,16 +250,13 @@ struct DownloadJob {
 }
 
 /// Marks a queued item Downloading (one at a time, see `Queue::start`) and prepares its paths:
-/// the OS Downloads folder (fixed until #10) and a fresh staging dir under the app cache.
+/// the download folder (D1) and a fresh staging dir under the app cache.
 fn begin_download(
     app: &AppHandle,
     queue: &Mutex<Queue>,
     id: u64,
 ) -> Result<(Item, DownloadJob), String> {
-    let out_dir = app
-        .path()
-        .download_dir()
-        .map_err(|e| format!("Couldn't find your Downloads folder: {e}"))?;
+    let out_dir = download_dir(app)?;
     let sidecar_dir = sidecar::dir().map_err(|e| format!("Couldn't locate yt-dlp: {e}"))?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -269,12 +361,10 @@ fn set_running(app: &AppHandle, runner: &Runner, running: bool) -> bool {
 
 /// "Download all" (Q4): downloads every Queued row in order, one at a time, until none are left.
 /// Returns false if a run is already in progress, or an error if downloads can't work at all
-/// (no Downloads or cache folder, no yt-dlp): reported once instead of failing every row.
+/// (no download or cache folder, no yt-dlp): reported once instead of failing every row.
 #[tauri::command]
 fn queue_run_all(app: AppHandle, runner: tauri::State<'_, Runner>) -> Result<bool, String> {
-    app.path()
-        .download_dir()
-        .map_err(|e| format!("Couldn't find your Downloads folder: {e}"))?;
+    download_dir(&app)?;
     app.path()
         .app_cache_dir()
         .map_err(|e| format!("Couldn't find the app cache folder: {e}"))?;
@@ -331,7 +421,21 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(Queue::default()))
         .manage(Runner(Mutex::new(false)))
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let file = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .map(|d| d.join(settings::FILE));
+            let current = file
+                .as_deref()
+                .map(settings::Settings::load)
+                .unwrap_or_default();
+            app.manage(Settings {
+                file,
+                current: Mutex::new(current),
+            });
             let (jobs, queued) = mpsc::channel();
             app.manage(Fetcher(Mutex::new(jobs)));
             let handle = app.handle().clone();
@@ -345,7 +449,9 @@ pub fn run() {
             queue_remove,
             queue_retry,
             queue_run_all,
-            queue_runner_state
+            queue_runner_state,
+            settings_download_folder,
+            settings_choose_download_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

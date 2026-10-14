@@ -48,9 +48,18 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+// Ambient answers so per-test handlers needn't: "Download all" state (#7) and the folder (D1).
+const DEFAULT_FOLDER = { path: "/Users/me/Downloads", error: null };
+function ambient(handler) {
+  return (command, args) => {
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder") return DEFAULT_FOLDER;
+    return handler(command, args);
+  };
+}
+
 async function mount(handler) {
-  // "Download all" state (#7) is ambient: answer it here so per-test handlers needn't.
-  mockIPC((command, args) => (command === "queue_runner_state" ? false : handler(command, args)), { shouldMockEvents: true });
+  mockIPC(ambient(handler), { shouldMockEvents: true });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -350,7 +359,7 @@ test("D2: title and error markup are literal text; another queued row remains do
 
 // #4 review round (qa/reports/20261010-184319-review-pWmI.md).
 async function mountRaw(handler) {
-  mockIPC((command, args) => (command === "queue_runner_state" ? false : handler(command, args))); // no event mocking: the handler sees plugin:event|listen itself
+  mockIPC(ambient(handler)); // no event mocking: the handler sees plugin:event|listen itself
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -1058,4 +1067,94 @@ test("Q6 QA #9: retry remains usable during Download all and newer download even
   assert.deepEqual(buttonsIn(0), []);
   assert.equal(container.querySelector('[data-role="title"]').textContent, metadata.title);
   assert.equal(container.querySelectorAll("li img").length, 0);
+});
+
+// #10 / D1: the download folder, shown and changed through the OS picker (mocked here).
+const folderText = () => container.querySelector('[data-role="folder"]').textContent;
+const changeButton = () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Change…");
+
+test("D1: the current download folder is shown, and Change… saves the picked one", async () => {
+  const calls = [];
+  const picked = { path: "C:\\Users\\Me\\Vidéos 日本語", error: null };
+  await mount((command) => {
+    calls.push(command);
+    if (command === "queue_list") return [];
+    if (command === "settings_choose_download_folder") return picked;
+  });
+  assert.equal(folderText(), DEFAULT_FOLDER.path);
+  await act(async () => changeButton().click());
+  assert.equal(calls.filter((c) => c === "settings_choose_download_folder").length, 1);
+  assert.equal(folderText(), picked.path);
+  assert.equal(container.querySelector('[data-role="folder"]').getAttribute("title"), picked.path);
+  assert.equal(container.querySelector('[data-role="folder-error"]'), null);
+});
+
+test("D1: cancelling the picker keeps the folder; a failed save shows the reason literally", async () => {
+  let reply = null;
+  await mount((command) => {
+    if (command === "queue_list") return [];
+    if (command === "settings_choose_download_folder") {
+      if (reply instanceof Error) throw reply.message;
+      return reply;
+    }
+  });
+  await act(async () => changeButton().click());
+  assert.equal(folderText(), DEFAULT_FOLDER.path, "cancel changes nothing");
+  reply = new Error("Couldn't save your settings: <b>denied</b>");
+  await act(async () => changeButton().click());
+  assert.equal(text('[data-role="folder-error"]'), "Couldn't save your settings: <b>denied</b>");
+  assert.equal(container.querySelectorAll("p b").length, 0);
+  assert.equal(folderText(), DEFAULT_FOLDER.path);
+  assert.equal(changeButton().disabled, false, "can try again");
+});
+
+test("D1: a chosen folder that's gone is still named, with the reason", async () => {
+  mockIPC((command) => {
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder")
+      return { path: "/Volumes/USB/Videos", error: "The download folder /Volumes/USB/Videos isn't available. Choose another with Change…." };
+    return null;
+  }, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  assert.equal(folderText(), "/Volumes/USB/Videos");
+  assert.match(text('[data-role="folder-error"]'), /isn't available/);
+});
+
+test("D1: Change… is disabled while the picker is open", async (t) => {
+  const pending = deferred();
+  await mount((command) => {
+    if (command === "queue_list") return [];
+    if (command === "settings_choose_download_folder") return pending.promise;
+  });
+  await act(async () => changeButton().click());
+  assert.equal(changeButton().disabled, true);
+  await act(async () => pending.resolve({ path: "/new", error: null }));
+  assert.equal(changeButton().disabled, false);
+  assert.equal(folderText(), "/new");
+});
+
+test("D1: cancelling the picker leaves an unresolved startup error showing; a pick clears it", async () => {
+  let reply = null;
+  mockIPC((command) => {
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder") throw "settings lock poisoned";
+    if (command === "settings_choose_download_folder") return reply;
+    return null;
+  }, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  assert.equal(text('[data-role="folder-error"]'), "settings lock poisoned");
+  await act(async () => changeButton().click());
+  assert.equal(text('[data-role="folder-error"]'), "settings lock poisoned", "cancel keeps it");
+  reply = { path: "/picked", error: null };
+  await act(async () => changeButton().click());
+  assert.equal(container.querySelector('[data-role="folder-error"]'), null);
+  assert.equal(folderText(), "/picked");
 });

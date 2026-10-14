@@ -97,3 +97,6 @@ The owner hit "Not saved: … already exists" during a Download all and asked fo
 
 ## D-019 Download all doesn't wait behind rows still fetching info — Confirmed (2026-10-11)
 `queue::run_all` takes the next **Queued** row by id. A row still Fetching (up to the 90 s limit) is waited for at the end but doesn't hold up ready rows, so one slow or failing fetch can't stall a batch. Among ready rows the order is strict. Codex QA noted that this differs from strict insertion order; the owner can switch to strict order later if wanted.
+
+## D-020 Settings live in one JSON file in the app config folder — Provisional (2026-10-13)
+For #10 (D1), and as the base for the settings screen (#36): `settings.json` sits in Tauri's `app_config_dir`. It's written atomically (a temp file, then a rename) and read with defaults for any missing or damaged value, so a bad file never stops the app from starting. API keys never go here; they use the OS credential store (AGENTS.md). The folder picker is the official `tauri-plugin-dialog` (=2.8.1, the stable 2.x line; 3.0 is alpha), called from a Rust command, so the webview gets no new permission. A chosen download folder that no longer exists (e.g. an unplugged drive) fails the download with a clear reason instead of being recreated as an empty local folder. With no folder chosen, the OS Downloads folder is used and created if needed.

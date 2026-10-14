@@ -663,8 +663,11 @@ fn run_in(
         None => finished_file(work_dir)?, // no report (e.g. test fakes): the strict rule
     };
     let name = file.file_name().unwrap_or_default().to_owned();
-    fs::create_dir_all(out_dir)
-        .map_err(|e| format!("Couldn't create {}: {e}", out_dir.display()))?;
+    // Never created here: a chosen folder that vanished (an unplugged drive) must not come
+    // back as an empty local folder (D-020). The caller creates the default Downloads folder.
+    if !out_dir.is_dir() {
+        return Err(crate::settings::unavailable(out_dir).into());
+    }
     let dest = place_unique(&file, out_dir, &name).map_err(|e| match e.kind() {
         io::ErrorKind::AlreadyExists => format!(
             "Not saved: \"{}\" and {MAX_COPIES} numbered copies already exist",

@@ -15,7 +15,7 @@ impl Fake {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(root.join("out")).unwrap();
         let path = Sidecar::YtDlp.path_in(&root);
         let script = format!(
             "#!/bin/sh\nROOT='{}'\nP=; prev=; for a in \"$@\"; do [ \"$prev\" = -P ] && P=$a; prev=$a; done\n{body}\n",
