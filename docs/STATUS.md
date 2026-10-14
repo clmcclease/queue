@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #10 (D1 output folder picker, remembered), uncommitted
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #36 (settings screen), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #10 (D1) output folder picker, remembered (uncommitted)
+## Done: #10 (D1) output folder picker, remembered (squash-merged from PR #54; 4-OS bundles green)
 - **Settings (D-020):** new `settings.rs`, which loads and saves `settings.json` in the app config folder. Saves are atomic; a missing or damaged file means defaults. `download_dir` is `None` for the OS Downloads folder.
 - **Commands:** `settings_download_folder` returns `{ path, error }`. `settings_choose_download_folder` (async) opens the native folder picker (`tauri-plugin-dialog` =2.8.1) at the current folder, saves the choice, and returns `null` when cancelled.
 - **Downloads:** `begin_download` and "Download all" use the chosen folder. A chosen folder that's gone fails with "The download folder … isn't available. Choose another with Change…." It is never recreated. Downloads already running keep the folder they started with.
@@ -216,9 +216,9 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #9 merge:**
-  - `cargo test` 198, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
-  - `npm test` 94/94; clippy, fmt and build clean.
+- **macOS arm64 locally, at the #10 merge:**
+  - `cargo test` 209, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
+  - `npm test` 105/105; clippy, fmt and build clean.
 - **Hosted CI:** green for every M1 merge on all 4 targets.
 - **Not verified natively:** downloads on Windows and Linux (CI builds and runs the tests there; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
 
@@ -240,4 +240,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - 2026-10-13: #10's Change… opened the native picker. A download landed in the chosen (iCloud Drive) folder, and the choice was remembered after a relaunch.
 
 ## Next bounded action
-#10: committed for PR review with `ci:bundle` (the native dialog differs per OS).
+#36 (settings screen): read the issue and PRD 6.4, then move "Saving to … Change…" in as its first control (D-020 settings file). Then run the QA gates. Remaining M2 after that: #39, #11, #12, #13, #41, #42, #45.
