@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #39 (D7 Open folder / Show in folder), next
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #39 (D7 Open folder / Show in folder), uncommitted
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,43 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #39 (D7) Open folder and Show in folder (uncommitted)
+- **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
+- **Show in folder** on Done rows: `reveal_download(id)` looks up the row's file with `Queue::saved_file` (Done rows only), checks it still exists ("… isn't there anymore. It may have been moved or deleted."), then calls `reveal::reveal`, which selects the file. On Linux without `FileManager1`, it opens the folder and returns a notice that the UI shows as a toast.
+- **Scope (D-022):** both commands take no path from the UI: the folder is the current download folder, and a reveal takes a row id. `tauri-plugin-opener` (=2.7.0) is a Linux-only dependency, used for one Rust function and never registered, so the webview gets no opener permission. All blocking work runs on worker threads.
+- **Per-OS wording:** `src/platform.ts` (`detectOs`, `wordingFor`) gives "Show in Finder" / "Show in File Explorer" / "Show in folder" and the tooltip "Open the download folder in Finder / File Explorer / your file manager". It also holds the ⌘, / Ctrl+, shortcut from #36.
+- **Checks:** `cargo test` 210 passed; clippy/fmt clean; `npm run build` OK; `npm test` 128/128 (macOS arm64). The file-manager behavior needs a manual check on each OS; CI builds all four with `ci:bundle`.
+- `codex-qa test "#39"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261013-201159-test-nrRC.md`). Its tests are added (D-021): `folder_d7_qa.rs` (6) and `folder-d7-39-qa.test.mjs` (9). `cargo test` 216 passed; `npm test` 137/137; clippy/fmt clean.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261013-201902-review-J6cA.md`):
+  1. Both commands ran on the main thread, so a slow network folder or a stuck Linux file manager could freeze the window. They're now async: filesystem checks, `open_path`, and the Windows/Linux reveal run in `spawn_blocking`. The macOS reveal goes to the main thread with `run_on_main_thread`, as AppKit requires, and returns at once.
+  2. Linux: opener 2.7.0's portal fallback is broken (service and interface names swapped, and it passes a URI instead of a file descriptor), and 2.7.1 only changes iOS. If `FileManager1` can't select the file, Queue now opens the file's folder with `open_path` (xdg-open) instead of failing.
+  The non-macOS branch can't be compiled locally (a Windows cross-check needs Windows resource tools). Linux `check` and the `ci:bundle` Windows build cover it. `cargo test` 216, `npm test` 137/137.
+- `codex-qa review` round 2: **FAIL**, then fixed (`qa/reports/20261013-202339-review-kw59.md`):
+  1. The macOS reveal still canonicalized the path on the main thread, inside opener.
+  2. On Windows, opener 2.7.0 drops most `SHOpenFolderAndSelectItems` errors and reports success.
+  The new `reveal.rs` does its own reveal on each OS, all on a worker thread:
+  - macOS: `/usr/bin/open -R <path>`, args as an array, with failure from the exit status.
+  - Windows: `SHOpenFolderAndSelectItems` through `windows-sys` (features `Win32_System_Com` and `Win32_UI_Shell_Common` added to the same pinned 0.61.2), with the HRESULT reported.
+  - Linux: opener's `FileManager1` reveal, falling back to opening the folder.
+  `reveal.rs` was type-checked and clippy-clean for `x86_64-pc-windows-msvc` in a scratch crate; Linux can't be cross-checked here (GTK system libraries), so CI `check` covers it. New macOS test: a failed reveal is reported. `cargo test` 217.
+- `codex-qa review` round 3: **FAIL** (`qa/reports/20261013-202848-review-FCeh.md`):
+  1. The Linux fallback opened the folder, without selecting the file, yet reported success.
+  2. Opener's detached folder launchers report success before checking anything.
+  The owner chose "fix both now". `reveal.rs` now owns every launch, and each reports its failure:
+  - macOS: `open <dir>` and `open -R <file>`, checking the exit status.
+  - Windows: `ShellExecuteExW` with the "explore" verb, `SEE_MASK_FLAG_NO_UI` and `SEE_MASK_NOASYNC`, plus `GetLastError`; reveal uses `SHOpenFolderAndSelectItems`.
+  - Linux: `xdg-open <dir>`, checking its exit status (round 4 removed a 10 s cutoff). Reveal tries `FileManager1` and otherwise opens the folder through that checked path and returns a notice ("Opened the folder, but your file manager couldn't select …"), which the UI shows as a toast, not an error.
+  The opener plugin is now a Linux/BSD-only dependency. More `windows-sys` features, same pinned version: `Win32_UI_Shell`, `Win32_System_Registry`. Cross-checks in a scratch crate: Windows clippy is clean, and the Linux branch is clippy-clean on the host with its cfg swapped. New tests cover launcher exit status, arguments passed byte for byte, macOS open/reveal failures, and the toast notice. `cargo test` 219; `npm test` 138/138.
+- `codex-qa review` round 4: **FAIL**, then fixed (`qa/reports/20261013-212009-review-qS6R.md`):
+  1. A launcher still running after 10 s counted as success and was never reaped. `launch` now waits for the real exit status, with no timeout. It runs on a worker, so the window never blocks, and the child is always reaped.
+  2. Windows Open folder called the shell without COM. A `with_com` helper (STA, balanced `CoUninitialize`) now wraps both shell calls.
+  New test: a slow launcher that fails is reported as a failure. `cargo test` 220; Windows and Linux branches clippy-clean in the scratch crate.
+- `codex-qa review` round 5: **PASS WITH NOTES** (`qa/reports/20261013-213127-review-T6IQ.md`). Its P3 (STATUS and BACKLOG still described the old opener-based design) is fixed. Its suggested tests, none blocking:
+  - backend-command tests (missing id, deleted file, unavailable folder, launcher failure);
+  - Windows HRESULT, Unicode and UNC cases;
+  - Linux `FileManager1` and fallback cases;
+  - native happy-path checks on each OS.
 
 ## Done: #36 (PRD §6.4) settings screen (squash-merged from PR #55)
 - **Panel, not a window:** the PRD asks for "a single window". A ⚙ button next to the link field opens Settings over the queue, as does ⌘, on macOS or Ctrl+, elsewhere; the tooltip shows the right one.
@@ -249,6 +286,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 ## Owner checks in the dev app (macOS)
 - 2026-10-13: live progress, "Processing…" and Retry worked on real downloads.
 - 2026-10-13: #10's Change… opened the native picker. A download landed in the chosen (iCloud Drive) folder, and the choice was remembered after a relaunch.
+- 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#39 (D7 Open folder / Show in folder): read the issue and PRD D7. It needs per-OS wording ("Show in Finder" / "Show in File Explorer" / "Show in folder") and Tauri's opener plugin scoped to the download folder. Implement, then the QA gates. Use `ci:bundle`, since it's per-OS. Remaining M2 after that: #11, #12, #13, #41, #42, #45.
+#39: committed for PR review with `ci:bundle`. Remaining M2 after that: #11, #12, #13, #41, #42, #45.

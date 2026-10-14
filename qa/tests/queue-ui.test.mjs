@@ -1243,3 +1243,82 @@ test("#36: Escape closes Settings even when focus has left the panel, with or wi
     assert.equal(settingsPanel(), null, JSON.stringify(mods));
   }
 });
+
+// #39 / D7: Open folder and Show in folder, with per-OS wording.
+const openFolderButton = () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Open folder");
+
+test("D7: wording follows the OS, and only macOS says Finder", async () => {
+  const { detectOs, wordingFor } = await server.ssrLoadModule("/src/platform.ts");
+  assert.equal(detectOs("MacIntel"), "macos");
+  assert.equal(detectOs("Win32"), "windows");
+  assert.equal(detectOs("Linux x86_64"), "linux");
+  assert.equal(detectOs(""), "linux");
+  assert.deepEqual(wordingFor("macos"), { settingsShortcut: "⌘,", fileManager: "Finder", showFile: "Show in Finder" });
+  assert.deepEqual(wordingFor("windows"), { settingsShortcut: "Ctrl+,", fileManager: "File Explorer", showFile: "Show in File Explorer" });
+  assert.deepEqual(wordingFor("linux"), { settingsShortcut: "Ctrl+,", fileManager: "your file manager", showFile: "Show in folder" });
+  for (const other of ["windows", "linux"]) assert.doesNotMatch(JSON.stringify(wordingFor(other)), /Finder/);
+});
+
+test("D7: Open folder opens the download folder; a failure shows the reason literally", async () => {
+  const calls = [];
+  let fail = false;
+  await mount((command, args) => {
+    calls.push([command, args]);
+    if (command === "queue_list") return [];
+    if (command === "open_download_folder") {
+      if (fail) throw "Couldn't open <i>/x</i>: denied";
+      return null;
+    }
+  });
+  const { wordingFor, os } = await server.ssrLoadModule("/src/platform.ts");
+  assert.equal(openFolderButton().getAttribute("title"), `Open the download folder in ${wordingFor(os).fileManager}`);
+  await act(async () => openFolderButton().click());
+  assert.deepEqual(calls.at(-1), ["open_download_folder", {}]);
+  assert.equal(container.querySelector('[role="alert"]'), null);
+  fail = true;
+  await act(async () => openFolderButton().click());
+  assert.equal(container.querySelector('[role="alert"]').textContent, "Couldn't open <i>/x</i>: denied");
+  assert.equal(container.querySelectorAll("p i").length, 0);
+});
+
+test("D7: only finished rows offer Show in folder, which reveals that row by id", async () => {
+  const { SHOW_FILE } = await server.ssrLoadModule("/src/platform.ts");
+  const list = [
+    { id: 1, url: "https://example.test/a", status: { state: "done", path: "/d/a.webm" }, rev: 3, meta: null, attempt: 0 },
+    { id: 2, url: "https://example.test/b", status: { state: "failed", reason: "no" }, rev: 3, meta: null, attempt: 0 },
+    { id: 3, url: "https://example.test/c", ...QUEUED, meta: null, attempt: 0 },
+  ];
+  const calls = [];
+  await mount((command, args) => {
+    calls.push([command, args]);
+    if (command === "queue_list") return list;
+    if (command === "reveal_download") return null;
+  });
+  assert.deepEqual(list.map((_, i) => buttonsIn(i).includes(SHOW_FILE)), [true, false, false]);
+  await clickIn(0, SHOW_FILE);
+  assert.deepEqual(calls.at(-1), ["reveal_download", { id: 1 }], "an id, never a path");
+});
+
+test("D7: a moved or deleted file shows why it can't be revealed", async () => {
+  const { SHOW_FILE } = await server.ssrLoadModule("/src/platform.ts");
+  const row = { id: 1, url: "https://example.test/a", status: { state: "done", path: "/d/a.webm" }, rev: 3, meta: null, attempt: 0 };
+  await mount((command) => {
+    if (command === "queue_list") return [row];
+    if (command === "reveal_download") throw "a.webm isn't there anymore. It may have been moved or deleted.";
+  });
+  await clickIn(0, SHOW_FILE);
+  assert.equal(container.querySelector('[role="alert"]').textContent, "a.webm isn't there anymore. It may have been moved or deleted.");
+  assert.deepEqual(rows(), [row.url], "the row stays");
+});
+
+test("D7: when only the folder could be opened, the notice shows as a toast, not an error", async () => {
+  const { SHOW_FILE } = await server.ssrLoadModule("/src/platform.ts");
+  const row = { id: 1, url: "https://example.test/a", status: { state: "done", path: "/d/日本語.webm" }, rev: 3, meta: null, attempt: 0 };
+  await mount((command) => {
+    if (command === "queue_list") return [row];
+    if (command === "reveal_download") return "Opened the folder, but your file manager couldn't select 日本語.webm.";
+  });
+  await clickIn(0, SHOW_FILE);
+  assert.equal(text('[data-role="toast"]'), "Opened the folder, but your file manager couldn't select 日本語.webm.");
+  assert.equal(container.querySelector('[role="alert"]'), null);
+});

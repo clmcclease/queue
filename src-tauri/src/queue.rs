@@ -277,6 +277,21 @@ impl Queue {
         Ok(item.clone())
     }
 
+    /// The file a Done row saved (D7, for Show in folder). Looked up by row id, so the UI can
+    /// only ever reveal files Queue itself saved, never an arbitrary path.
+    pub fn saved_file(&self, id: u64) -> Result<PathBuf, String> {
+        match &self
+            .items
+            .iter()
+            .find(|i| i.id == id)
+            .ok_or("That item is no longer in the queue.")?
+            .status
+        {
+            Status::Done { path } => Ok(PathBuf::from(path)),
+            _ => Err("Only finished items have a file to show.".into()),
+        }
+    }
+
     /// Whether a download holds the one slot (Q4: one at a time).
     pub fn is_busy(&self) -> bool {
         self.items
@@ -417,6 +432,25 @@ mod tests {
             q.add("https://youtu.be/jNQXAC9IVRw"),
             Err(AddError::Duplicate { id, .. }) if id == old
         ));
+    }
+
+    #[test]
+    fn saved_file_is_only_for_done_rows() {
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://e.test/a");
+        assert!(q.saved_file(id).unwrap_err().contains("Only finished"));
+        q.start(id).unwrap();
+        assert!(q.saved_file(id).unwrap_err().contains("Only finished"));
+        q.finish(id, Ok("/d/日本語 (2).webm".into())).unwrap();
+        assert_eq!(
+            q.saved_file(id).unwrap(),
+            PathBuf::from("/d/日本語 (2).webm")
+        );
+        let failed = ready(&mut q, "https://e.test/b");
+        q.start(failed).unwrap();
+        q.finish(failed, Err("no".into())).unwrap();
+        assert!(q.saved_file(failed).is_err());
+        assert!(q.saved_file(99).unwrap_err().contains("no longer"));
     }
 
     #[test]

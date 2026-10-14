@@ -60,6 +60,13 @@ export const listItems = () => invoke<QueueItem[]>("queue_list");
 export const downloadItem = (id: number) => invoke<QueueItem>("queue_download", { id });
 /** Q6: removes a row that isn't downloading (a Done row's file stays on disk). */
 export const removeItem = (id: number) => invoke<void>("queue_remove", { id });
+/** D7: opens the download folder in the OS file manager. */
+export const openDownloadFolder = () => invoke<void>("open_download_folder");
+/**
+ * D7: reveals a Done row's file in the OS file manager (by row id, never by path). Resolves a
+ * notice when only its folder could be opened (Linux without a file manager that can select).
+ */
+export const revealDownload = (id: number) => invoke<string | null>("reveal_download", { id });
 /** Q6: a Failed row goes back to Fetching (its info never arrived) or Queued. */
 export const retryItem = (id: number) => invoke<QueueItem>("queue_retry", { id });
 /** "Download all" (Q4): resolves false if a run was already in progress. */
