@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import FolderPicker from "./components/FolderPicker";
 import QueueList from "./components/QueueList";
+import SettingsPanel from "./components/SettingsPanel";
 import UrlBar from "./components/UrlBar";
 import {
   addItem,
@@ -16,6 +17,11 @@ import {
   runnerState,
   type QueueItem,
 } from "./queue";
+import { useDownloadFolder } from "./useDownloadFolder";
+
+/** ⌘, on macOS and Ctrl+, elsewhere opens Settings, as each OS expects. */
+const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform || navigator.userAgent);
+const SETTINGS_SHORTCUT = isMac ? "⌘," : "Ctrl+,";
 
 export default function App() {
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -30,6 +36,21 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The download folder (D1), shared by the "Saving to" line and Settings so both agree.
+  const folder = useDownloadFolder();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // What had focus when Settings opened (the gear, or the field for ⌘,). Recorded here, before
+  // the queue goes inert, and restored after it isn't, so StrictMode's effect replay can't lose it.
+  const settingsOpener = useRef<HTMLElement | null>(null);
+  function openSettings() {
+    if (!settingsOpener.current) settingsOpener.current = document.activeElement as HTMLElement | null;
+    setSettingsOpen(true);
+  }
+  useEffect(() => {
+    if (settingsOpen) return;
+    settingsOpener.current?.focus?.();
+    settingsOpener.current = null;
+  }, [settingsOpen]);
   // Rows removed here (Q6): a late event or snapshot must not bring them back.
   const removed = useRef(new Set<number>());
 
@@ -44,6 +65,17 @@ export default function App() {
   }
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((isMac ? e.metaKey : e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        openSettings();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     // Listen before taking the snapshot, so a download finishing in between can't be missed.
@@ -154,49 +186,66 @@ export default function App() {
   const anyQueued = items.some((item) => item.status.state === "queued");
 
   return (
-    <main className="flex h-screen flex-col bg-white p-4 dark:bg-neutral-900">
-      <UrlBar onAdd={add} />
-      <div className="mt-2 flex items-start gap-3">
-        <FolderPicker />
-        <button
-          type="button"
-          onClick={downloadAll}
-          disabled={!listening || running || !anyQueued}
-          className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
-        >
-          {running ? "Downloading all…" : "Download all"}
-        </button>
-      </div>
-      {disconnected && (
-        <p role="alert" data-role="disconnected" className="mt-2 text-sm text-red-600 dark:text-red-400">
-          Can't receive download updates ({disconnected}). Restart Queue to download.
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </p>
-      )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <QueueList
-          items={items}
-          onDownload={download}
-          onRetry={retry}
-          onRemove={remove}
-          connected={listening}
-          busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
-          highlight={highlight}
-        />
-      </div>
-      {toast && (
-        <div
-          role="status"
-          data-role="toast"
-          className="pointer-events-none fixed inset-x-0 bottom-4 mx-auto w-fit rounded-md bg-neutral-900 px-3 py-2 text-sm text-white shadow-lg dark:bg-neutral-100 dark:text-neutral-900"
-        >
-          {toast}
+    <main className="relative flex h-screen flex-col bg-white p-4 dark:bg-neutral-900">
+      {/* While Settings is open, the queue behind it can't be focused or clicked. */}
+      <div inert={settingsOpen} className="flex min-h-0 flex-1 flex-col">
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-1">
+            <UrlBar onAdd={add} />
+          </div>
+          <button
+            type="button"
+            onClick={openSettings}
+            aria-label="Settings"
+            title={`Settings (${SETTINGS_SHORTCUT})`}
+            className="shrink-0 rounded-md px-2 text-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            ⚙
+          </button>
         </div>
-      )}
+        <div className="mt-2 flex items-start gap-3">
+          <FolderPicker state={folder} />
+          <button
+            type="button"
+            onClick={downloadAll}
+            disabled={!listening || running || !anyQueued}
+            className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            {running ? "Downloading all…" : "Download all"}
+          </button>
+        </div>
+        {disconnected && (
+          <p role="alert" data-role="disconnected" className="mt-2 text-sm text-red-600 dark:text-red-400">
+            Can't receive download updates ({disconnected}). Restart Queue to download.
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {error}
+          </p>
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <QueueList
+            items={items}
+            onDownload={download}
+            onRetry={retry}
+            onRemove={remove}
+            connected={listening}
+            busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
+            highlight={highlight}
+          />
+        </div>
+        {toast && (
+          <div
+            role="status"
+            data-role="toast"
+            className="pointer-events-none fixed inset-x-0 bottom-4 mx-auto w-fit rounded-md bg-neutral-900 px-3 py-2 text-sm text-white shadow-lg dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            {toast}
+          </div>
+        )}
+      </div>
+      {settingsOpen && <SettingsPanel folder={folder} onClose={() => setSettingsOpen(false)} />}
     </main>
   );
 }

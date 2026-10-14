@@ -1,46 +1,21 @@
-import { useEffect, useRef, useState } from "react";
-import { chooseDownloadFolder, downloadFolder, type DownloadFolder } from "../settings";
+import { useDownloadFolder, type DownloadFolderState } from "../useDownloadFolder";
+
+interface Props {
+  /** Shared state (App passes one, so every copy agrees); without it, the picker keeps its own. */
+  state?: DownloadFolderState;
+  /** Text before the path. */
+  label?: string;
+}
 
 /** "Saving to <folder> · Change…" (D1). The folder is remembered by the backend. */
-export default function FolderPicker() {
-  const [folder, setFolder] = useState<DownloadFolder | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [choosing, setChoosing] = useState(false);
-  // Once a folder is chosen, the startup read is stale: its late reply or error must not win.
-  const chosen = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    downloadFolder().then(
-      (f) => !cancelled && !chosen.current && setFolder(f),
-      (e) => !cancelled && !chosen.current && setError(String(e)),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function change() {
-    setChoosing(true);
-    try {
-      const picked = await chooseDownloadFolder();
-      if (picked) {
-        chosen.current = true;
-        setFolder(picked);
-        setError(null); // only a pick resolves an earlier error; a cancel leaves it showing
-      }
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setChoosing(false);
-    }
-  }
-
+export default function FolderPicker({ state, label = "Saving to" }: Props) {
+  const own = useDownloadFolder(!state);
+  const { folder, error, choosing, change } = state ?? own;
   const problem = error ?? folder?.error ?? null;
   return (
     <div className="flex min-w-0 flex-1 flex-col text-xs">
       <div className="flex min-w-0 items-center gap-2 text-neutral-500 dark:text-neutral-400">
-        <span className="shrink-0">Saving to</span>
+        <span className="shrink-0">{label}</span>
         <span data-role="folder" className="truncate font-mono text-neutral-800 dark:text-neutral-200" title={folder?.path}>
           {folder?.path ?? "…"}
         </span>

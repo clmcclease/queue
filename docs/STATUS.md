@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #36 (settings screen), next
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #39 (D7 Open folder / Show in folder), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## Done: #36 (PRD §6.4) settings screen (squash-merged from PR #55)
+- **Panel, not a window:** the PRD asks for "a single window". A ⚙ button next to the link field opens Settings over the queue, as does ⌘, on macOS or Ctrl+, elsewhere; the tooltip shows the right one.
+  - It's a `role="dialog"` with `aria-modal`, and the queue behind it is `inert`.
+  - Focus moves to ✕ on open and returns to the opener on close. Escape or ✕ closes it.
+- **First section, Downloads:** the download-folder control (D1). The folder state moved into `useDownloadFolder`, which the app calls once and shares between the main "Saving to" line and Settings, so both agree and the folder is read once. `FolderPicker` still works standalone, as Codex's D1 tests use it.
+- Only working controls are shown; later items add sections (#11, #17, #25/#31/#32, #21, #20).
+- **Owner check (dev app):** ⚙ opened Settings and the folder change worked, but Escape did nothing. It only worked while focus was inside the panel, and a mouse click on the panel background drops focus to the body. Fixed: a window-level Escape listener closes Settings, with or without ⌘/Ctrl, plus a new test. Retested by the owner: Escape closes Settings, and ⌘, opens it.
+- `codex-qa test "#36"`: **FAIL**, then fixed (`qa/reports/20261013-193855-test-s3D5.md`). Under React StrictMode (used by `main.tsx`), the panel's mount effect ran twice. The replay recorded the ✕ button as the opener, so closing left focus on the body instead of the gear. Now `App` records the opener before the queue goes inert and restores focus after it isn't. Codex's tests (`settings-screen-36-qa.test.mjs`, 14 tests) are merged. From now on, QA-written tests are added by default, minus their STATUS edits (D-021; CLAUDE.md and docs/QA.md updated). `npm test` 124/124.
+- `codex-qa review`: **PASS WITH NOTES**, with no findings (`qa/reports/20261013-194921-review-afj4.md`). Its suggested tests, none blocking: native Tab traversal while Settings is open, cancelling the native picker with Escape, and queue events arriving while Settings is open.
+- **Checks:** `npm run build` OK; `npm test` 124/124. No Rust changes (macOS arm64).
 
 ## Done: #10 (D1) output folder picker, remembered (squash-merged from PR #54; 4-OS bundles green)
 - **Settings (D-020):** new `settings.rs`, which loads and saves `settings.json` in the app config folder. Saves are atomic; a missing or damaged file means defaults. `download_dir` is `None` for the OS Downloads folder.
@@ -218,7 +229,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 ## Checks (latest)
 - **macOS arm64 locally, at the #10 merge:**
   - `cargo test` 209, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
-  - `npm test` 105/105; clippy, fmt and build clean.
+  - `npm test` 124/124 (at the #36 merge; Rust unchanged since #10); clippy, fmt and build clean.
 - **Hosted CI:** green for every M1 merge on all 4 targets.
 - **Not verified natively:** downloads on Windows and Linux (CI builds and runs the tests there; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
 
@@ -240,4 +251,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - 2026-10-13: #10's Change… opened the native picker. A download landed in the chosen (iCloud Drive) folder, and the choice was remembered after a relaunch.
 
 ## Next bounded action
-#36 (settings screen): read the issue and PRD 6.4, then move "Saving to … Change…" in as its first control (D-020 settings file). Then run the QA gates. Remaining M2 after that: #39, #11, #12, #13, #41, #42, #45.
+#39 (D7 Open folder / Show in folder): read the issue and PRD D7. It needs per-OS wording ("Show in Finder" / "Show in File Explorer" / "Show in folder") and Tauri's opener plugin scoped to the download folder. Implement, then the QA gates. Use `ci:bundle`, since it's per-OS. Remaining M2 after that: #11, #12, #13, #41, #42, #45.
