@@ -15,7 +15,7 @@ Claude delegates to `.claude/agents/codex-qa.md`, which runs `scripts/codex-qa` 
 | `audit` | `scripts/codex-qa audit` | read-only | At the end of each milestone, or when "is everything set up right?" comes up |
 
 - Reports are saved in `qa/reports/` (git-ignored).
-- Tests that Codex writes are exported to `qa/reports/<run>.tests.patch`, and the worktree is kept for inspection (the script prints its path and the remove command). The owner decides whether to `git apply` the patch. Claude never applies it automatically.
+- Tests that Codex writes are exported to `qa/reports/<run>.tests.patch`, and the worktree is kept for inspection (the script prints its path and the remove command). By the owner's standing approval (2026-10-13), Claude applies the patch without its `docs/STATUS.md` edit (`git apply --exclude=docs/STATUS.md <patch>`) once its tests pass against any fixes, then removes the worktree.
 - If Codex fails (auth, model, timeout), the script exits non-zero and prints the log path plus the last log lines.
 - To override the model, effort, or timeout: `CODEX_QA_MODEL=… CODEX_QA_EFFORT=… CODEX_QA_TIMEOUT=<seconds> scripts/codex-qa …` (the default timeout is 1500s).
 - Prompts are in `qa/prompts/` and can be edited to tune what QA checks.

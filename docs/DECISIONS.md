@@ -100,3 +100,6 @@ The owner hit "Not saved: … already exists" during a Download all and asked fo
 
 ## D-020 Settings live in one JSON file in the app config folder — Provisional (2026-10-13)
 For #10 (D1), and as the base for the settings screen (#36): `settings.json` sits in Tauri's `app_config_dir`. It's written atomically (a temp file, then a rename) and read with defaults for any missing or damaged value, so a bad file never stops the app from starting. API keys never go here; they use the OS credential store (AGENTS.md). The folder picker is the official `tauri-plugin-dialog` (=2.8.1, the stable 2.x line; 3.0 is alpha), called from a Rust command, so the webview gets no new permission. A chosen download folder that no longer exists (e.g. an unplugged drive) fails the download with a clear reason instead of being recreated as an empty local folder. With no folder chosen, the OS Downloads folder is used and created if needed.
+
+## D-021 QA-written tests are added by default — Confirmed (2026-10-13)
+The owner said "always add them from this point forward" about the tests that `codex-qa test` writes. Claude applies the tests patch without its `docs/STATUS.md` edit, once the tests pass against any fixes, and reports which tests were added. This replaces "offer, never merge automatically" in CLAUDE.md and docs/QA.md.

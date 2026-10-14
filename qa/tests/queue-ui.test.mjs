@@ -1158,3 +1158,88 @@ test("D1: cancelling the picker leaves an unresolved startup error showing; a pi
   assert.equal(container.querySelector('[data-role="folder-error"]'), null);
   assert.equal(folderText(), "/picked");
 });
+
+// #36: the Settings panel (PRD §6.4), in the app's single window.
+const settingsPanel = () => container.querySelector('[role="dialog"][data-role="settings"]');
+const gear = () => container.querySelector('button[aria-label="Settings"]');
+
+test("#36: the gear opens Settings with the download folder; ✕ closes it and returns focus", async () => {
+  await mount((command) => (command === "queue_list" ? [] : null));
+  assert.equal(settingsPanel(), null);
+  gear().focus();
+  await act(async () => gear().click());
+  const panel = settingsPanel();
+  assert.ok(panel);
+  assert.equal(panel.getAttribute("aria-modal"), "true");
+  assert.equal(panel.querySelector("#settings-title").textContent, "Settings");
+  assert.equal(panel.querySelector('[data-role="folder"]').textContent, DEFAULT_FOLDER.path);
+  assert.equal(document.activeElement.getAttribute("aria-label"), "Close settings", "focus moves in");
+  assert.ok(gear().closest("[inert]"), "the queue behind the panel is inert");
+  assert.equal(panel.closest("[inert]"), null);
+  await act(async () => panel.querySelector('button[aria-label="Close settings"]').click());
+  assert.equal(settingsPanel(), null);
+  assert.equal(gear().closest("[inert]"), null);
+  assert.equal(document.activeElement, gear(), "focus goes back to the gear");
+});
+
+test("#36: Escape closes Settings; Ctrl+, opens it (⌘, on macOS)", async () => {
+  await mount((command) => (command === "queue_list" ? [] : null));
+  const mac = gear().getAttribute("title").includes("⌘");
+  const other = mac ? { ctrlKey: true } : { metaKey: true };
+  await act(async () => window.dispatchEvent(new window.KeyboardEvent("keydown", { key: ",", ...other, bubbles: true })));
+  assert.equal(settingsPanel(), null, "the other OS's modifier does nothing");
+  const own = mac ? { metaKey: true } : { ctrlKey: true };
+  await act(async () => window.dispatchEvent(new window.KeyboardEvent("keydown", { key: ",", ...own, bubbles: true })));
+  assert.ok(settingsPanel());
+  await act(async () =>
+    document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+  );
+  assert.equal(settingsPanel(), null);
+  assert.match(gear().getAttribute("title"), /^Settings \((Ctrl\+,|⌘,)\)$/);
+});
+
+test("#36: a folder changed in Settings shows on the main 'Saving to' line too", async () => {
+  await mount((command) => {
+    if (command === "queue_list") return [];
+    if (command === "settings_choose_download_folder") return { path: "/Volumes/Media/Video 日本語", error: null };
+  });
+  await act(async () => gear().click());
+  const change = [...settingsPanel().querySelectorAll("button")].find((b) => b.textContent === "Change…");
+  await act(async () => change.click());
+  const shown = [...container.querySelectorAll('[data-role="folder"]')].map((f) => f.textContent);
+  assert.deepEqual(shown, ["/Volumes/Media/Video 日本語", "/Volumes/Media/Video 日本語"], "main line and panel agree");
+});
+
+test("#36: the folder is read once, however many places show it", async () => {
+  let reads = 0;
+  mockIPC((command) => {
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder") {
+      reads++;
+      return DEFAULT_FOLDER;
+    }
+    return null;
+  }, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  await act(async () => gear().click());
+  await act(async () => settingsPanel().querySelector('button[aria-label="Close settings"]').click());
+  await act(async () => gear().click());
+  assert.equal(reads, 1, "opening Settings doesn't read it again");
+  assert.equal(settingsPanel().querySelector('[data-role="folder"]').textContent, DEFAULT_FOLDER.path);
+});
+
+test("#36: Escape closes Settings even when focus has left the panel, with or without ⌘/Ctrl", async () => {
+  await mount((command) => (command === "queue_list" ? [] : null));
+  for (const mods of [{}, { metaKey: true }, { ctrlKey: true }]) {
+    await act(async () => gear().click());
+    assert.ok(settingsPanel());
+    await act(async () => document.activeElement.blur()); // e.g. a click on the panel background
+    assert.equal(document.activeElement, document.body);
+    await act(async () => document.body.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", ...mods, bubbles: true })));
+    assert.equal(settingsPanel(), null, JSON.stringify(mods));
+  }
+});
