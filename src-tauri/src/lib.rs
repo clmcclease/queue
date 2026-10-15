@@ -3,6 +3,7 @@ pub mod link;
 pub mod meta;
 pub mod proc;
 pub mod queue;
+pub mod reveal;
 pub mod settings;
 pub mod sidecar;
 
@@ -239,6 +240,48 @@ async fn settings_choose_download_folder(app: AppHandle) -> Result<Option<Downlo
     Ok(Some(download_folder(&app)))
 }
 
+/// Runs blocking file-manager and filesystem work off the main thread, so a slow network
+/// folder or an unresponsive file manager (Linux D-Bus) can't freeze the window.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| format!("Couldn't finish that: {e}"))?
+}
+
+/// Opens the download folder in the OS file manager (D7). No path comes from the UI: it's always
+/// the current download folder. Queue's own launchers (`reveal`) report failures; the opener
+/// plugin is never registered, so the webview gets no opener permission (D-022).
+#[tauri::command]
+async fn open_download_folder(app: AppHandle) -> Result<(), String> {
+    blocking(move || reveal::open_folder(&download_dir(&app)?)).await
+}
+
+/// Reveals (selects) a finished row's file in the OS file manager (D7). Takes a row id, not a
+/// path, so only files Queue saved can be shown. Returns a notice when only the file's folder
+/// could be opened (Linux without a file manager that can select files).
+#[tauri::command]
+async fn reveal_download(app: AppHandle, id: u64) -> Result<Option<String>, String> {
+    let file = lock(&app.state::<Mutex<Queue>>())?.saved_file(id)?; // lock released here
+    blocking(move || {
+        if !file.is_file() {
+            return Err(format!(
+                "{} isn't there anymore. It may have been moved or deleted.",
+                file.file_name().unwrap_or_default().to_string_lossy()
+            ));
+        }
+        Ok(match reveal::reveal(&file)? {
+            reveal::Shown::Selected => None,
+            reveal::Shown::FolderOnly => Some(format!(
+                "Opened the folder, but your file manager couldn't select {}.",
+                file.file_name().unwrap_or_default().to_string_lossy()
+            )),
+        })
+    })
+    .await
+}
+
 /// Everything a started download needs, captured while the queue was locked.
 struct DownloadJob {
     id: u64,
@@ -451,7 +494,9 @@ pub fn run() {
             queue_run_all,
             queue_runner_state,
             settings_download_folder,
-            settings_choose_download_folder
+            settings_choose_download_folder,
+            open_download_folder,
+            reveal_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
