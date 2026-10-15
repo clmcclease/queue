@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #41 (native tests in CI + Linux box), PR #57
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #41 (NFR) native tests on Linux, Windows and macOS (PR #57, D-023); going public
+## Done: #41 (NFR) native tests on Linux, Windows and macOS; the repo went public (squash-merged from PR #57; D-023, D-024)
 The owner asked for tests that actually run and pass on all three OSes, using hosted runners and their Ubuntu box. The owner's choices: keep Rust pinned (D-010); extend `build.yml` as #41 rather than add a separate `ci.yml`.
 - **CI (`build.yml`):** `check` is now a `test` matrix (`ubuntu-24.04`, `windows-2025`, `macos-26` arm64; `fail-fast: false`) with each OS's own sidecars. It runs `npm run build`, `npm test`, fmt, clippy `-D warnings`, `cargo test --locked` and the real-sidecar loopback tests. Bundles need `test`.
 - **Green before billing stopped it:** `test (linux)`, `test (windows)`, `test (macos)` and a self-hosted box job on commit `434d58e`.
@@ -94,9 +94,10 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
   1. Every path segment must start with a letter or digit.
   2. Before any sync, a box-side guard resolves the folder with `realpath`. It must be strictly inside the home, and if it already has files it must carry `.queue-test-checkout`, which the script creates.
   Tested on the box: a symlink to the home and an unrelated folder with files were both refused, with nothing touched. A normal run passes. `npm test` 144/144.
-- **Done before the merge:**
-  1. `codex-qa review` round 3.
-  2. The squash-merge.
+- `codex-qa review` round 3: **PASS WITH NOTES** (`qa/reports/20261014-220617-review-sZab.md`). Two P3s, both about test strength, are left as follow-ups:
+  1. The orphan-timeout test doesn't assert that the descendant actually exited.
+  2. `test-linux.test.mjs` checks the remote guard's text rather than running it (it was verified by hand on the box).
+- **Final CI on `3293625`:** green on `test (linux/windows/macos)` and all 4 bundles.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
@@ -301,11 +302,10 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #39 merge:**
-  - `cargo test` 220, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`; last run at #10), including a real YouTube DASH merge with live progress;
-  - `npm test` 138/138; clippy, fmt and build clean.
-- **Hosted CI:** green for every M1 and M2 merge; 4-OS bundles green at the #10 and #39 merges.
-- **Not verified natively:** downloads, the folder picker and Open folder / Show in folder on Windows and Linux (CI builds them and runs the tests; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
+- **macOS arm64 locally, at the #41 merge:** `cargo test` 225, `npm test` 144/144, real-sidecar loopback 8/8; clippy, fmt, actionlint and shellcheck clean.
+- **Owner's Linux box (`scripts/test-linux.sh`):** all checks, including the loopback and ETXTBSY tests.
+- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #41 merge.
+- **Not verified natively:** UI behavior (folder picker, Open folder / Show in folder, webviews) on Windows and Linux; CI only runs the automated tests there.
 
 ## Open questions and problems
 1. Default local model: **provisionally Qwen3-4B-Instruct-2507** (2.5 GB), with Qwen3.5-2B as the small option (D-016); N9 (#33) confirms it.
@@ -326,4 +326,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-Going public: the owner flips the visibility (and removes the box runner service with `queue-box-runner-remove.sh`). Then turn on fork-workflow approval and private vulnerability reporting, and let PR #57's CI run on free runners. Then the `codex-qa review` gate and the squash-merge for #41. Next item: #11 (D2 format presets, D-015).
+#11 (D2 format presets: Default / Audio only / Most compatible MP4, D-015): read the issue, PRD and D-015. It includes adding the VP9 decoder and AVI demuxer to the ffmpeg build, and the preset control goes in Settings (#36). Use `ci:bundle` (ffmpeg changes). Follow-ups from #41: the two P3 test gaps above. Remaining M2 after #11: #12, #13, #42, #45.
