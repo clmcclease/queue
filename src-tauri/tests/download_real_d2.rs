@@ -168,6 +168,10 @@ fn silence_wav() -> Vec<u8> {
 }
 
 fn respond(mut stream: TcpStream, html: &[u8], wav: &[u8]) {
+    // On Windows a socket accepted from a non-blocking listener is non-blocking too (Linux and
+    // macOS hand back a blocking one), so the first read would fail with WouldBlock and drop the
+    // connection: yt-dlp then saw WSAECONNABORTED (10053).
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
