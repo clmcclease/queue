@@ -9,6 +9,8 @@ import {
   isAddError,
   listItems,
   mergeItems,
+  openDownloadFolder,
+  revealDownload,
   removeItem,
   retryItem,
   onItemChanged,
@@ -19,9 +21,7 @@ import {
 } from "./queue";
 import { useDownloadFolder } from "./useDownloadFolder";
 
-/** ⌘, on macOS and Ctrl+, elsewhere opens Settings, as each OS expects. */
-const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform || navigator.userAgent);
-const SETTINGS_SHORTCUT = isMac ? "⌘," : "Ctrl+,";
+import { FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
 
 export default function App() {
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -55,8 +55,12 @@ export default function App() {
   const removed = useRef(new Set<number>());
 
   function flashDuplicate(message: string, id: number) {
-    setToast(message);
+    showToast(message);
     setHighlight(id);
+  }
+
+  function showToast(message: string) {
+    setToast(message);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => {
       setToast(null);
@@ -68,7 +72,7 @@ export default function App() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((isMac ? e.metaKey : e.ctrlKey) && e.key === ",") {
+      if ((os === "macos" ? e.metaKey : e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         openSettings();
       }
@@ -172,6 +176,25 @@ export default function App() {
     }
   }
 
+  async function openFolder() {
+    try {
+      await openDownloadFolder();
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function reveal(id: number) {
+    try {
+      const notice = await revealDownload(id);
+      setError(null);
+      if (notice) showToast(notice);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function downloadAll() {
     try {
       // "Running" comes only from queue://runner events (emitted before this reply), so a late
@@ -207,6 +230,14 @@ export default function App() {
           <FolderPicker state={folder} />
           <button
             type="button"
+            onClick={openFolder}
+            title={`Open the download folder in ${FILE_MANAGER}`}
+            className="shrink-0 rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-800 dark:border-neutral-700 dark:text-neutral-200"
+          >
+            Open folder
+          </button>
+          <button
+            type="button"
             onClick={downloadAll}
             disabled={!listening || running || !anyQueued}
             className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
@@ -230,6 +261,7 @@ export default function App() {
             onDownload={download}
             onRetry={retry}
             onRemove={remove}
+            onReveal={reveal}
             connected={listening}
             busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
             highlight={highlight}

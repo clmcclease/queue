@@ -1,3 +1,4 @@
+import { SHOW_FILE } from "../platform";
 import { formatDuration, progressText, type QueueItem } from "../queue";
 
 interface Props {
@@ -7,6 +8,8 @@ interface Props {
   onRetry: (id: number) => void;
   /** Q6: removes a row that isn't downloading. */
   onRemove: (id: number) => void;
+  /** D7: reveals a Done row's file in the OS file manager. */
+  onReveal: (id: number) => void;
   /** Updates are arriving (the event listener is up), so a retried row can be followed. */
   connected: boolean;
   /** A download is running; only one at a time (see queue.rs `start`). */
@@ -58,7 +61,7 @@ function Thumbnail({ src }: { src: string | null }) {
   );
 }
 
-export default function QueueList({ items, onDownload, onRetry, onRemove, connected, busy, highlight }: Props) {
+export default function QueueList({ items, onDownload, onRetry, onRemove, onReveal, connected, busy, highlight }: Props) {
   if (items.length === 0) {
     return <p className="mt-16 text-center text-sm text-neutral-500 dark:text-neutral-400">Queue is empty.</p>;
   }
@@ -115,6 +118,15 @@ export default function QueueList({ items, onDownload, onRetry, onRemove, connec
               className="shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 dark:border-neutral-700 dark:text-neutral-200 disabled:opacity-40"
             >
               Download
+            </button>
+          )}
+          {item.status.state === "done" && (
+            <button
+              type="button"
+              onClick={() => onReveal(item.id)}
+              className="shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 dark:border-neutral-700 dark:text-neutral-200"
+            >
+              {SHOW_FILE}
             </button>
           )}
           {item.status.state === "failed" && (
