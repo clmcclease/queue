@@ -20,9 +20,31 @@ XVFB="${QUEUE_LINUX_XVFB:-0}"
 # Both reach a remote shell (ssh, and rsync's remote path; macOS's openrsync has no
 # --protect-args), so only plain names are accepted rather than escaped.
 case "$HOST" in -* | *[!A-Za-z0-9._@-]* | '') echo "QUEUE_LINUX_HOST must be a plain SSH host or alias: $HOST" >&2; exit 2 ;; esac
-case "$DEST" in -* | /* | *..* | *[!A-Za-z0-9._/-]* | '') echo "QUEUE_LINUX_DIR must be a plain path under the remote home (letters, digits, . _ - /): $DEST" >&2; exit 2 ;; esac
+# DEST gets `rsync --delete`, so it must be a dedicated folder strictly inside the remote home:
+# every segment starts with a letter or digit (no ".", "..", hidden folders or the home itself).
+if ! [[ "$DEST" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]]; then
+  echo "QUEUE_LINUX_DIR must be a plain folder under the remote home (segments start with a letter or digit): $DEST" >&2
+  exit 2
+fi
 case "$XVFB" in 0 | 1) ;; *) echo "QUEUE_LINUX_XVFB must be 0 or 1" >&2; exit 2 ;; esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Before any --delete: on the box, the folder must resolve (symlinks followed) to a path strictly
+# inside the home, and if it already has files it must be one this script made (its marker).
+# shellcheck disable=SC2029  # expanding (and quoting) here, on the Mac, is the point
+ssh "$HOST" "bash -s -- $(printf '%q ' "$DEST")" <<'GUARD'
+set -euo pipefail
+DEST="$1"; MARK=.queue-test-checkout
+home="$(realpath "$HOME")"
+mkdir -p "$HOME/$DEST"
+real="$(realpath "$HOME/$DEST")"
+case "$real" in "$home"/?*) ;; *) echo "Refusing: $DEST resolves to $real, not a folder inside $home" >&2; exit 3 ;; esac
+if [ ! -e "$real/$MARK" ] && [ -n "$(ls -A "$real")" ]; then
+  echo "Refusing: $real has files but wasn't made by scripts/test-linux.sh (no $MARK)" >&2
+  exit 3
+fi
+touch "$real/$MARK"
+GUARD
 
 echo "==> Syncing $ROOT to $HOST:~/$DEST"
 # --delete keeps the box an exact copy of this tree, except the paths it owns (excluded here,
@@ -36,6 +58,7 @@ rsync -az --delete \
   --exclude '/src-tauri/target/' \
   --exclude '/src-tauri/binaries/' \
   --exclude '/src-tauri/gen/' \
+  --exclude '/.queue-test-checkout' \
   "$ROOT/" "$HOST:$DEST/"
 
 echo "==> Running the checks on $HOST"

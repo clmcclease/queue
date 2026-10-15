@@ -90,8 +90,12 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261014-215725-review-MExm.md`), both in `scripts/test-linux.sh`:
   1. The box never rebuilt a stale ffmpeg. It now stores a fingerprint of `build-ffmpeg.sh` and `sidecars.json` and rebuilds when it changes or a binary is missing.
   2. ssh split quoted arguments. Host, folder and xvfb values are now validated as plain (openrsync has no `--protect-args`), and the ssh arguments are quoted with `printf %q`. `qa/tests/test-linux.test.mjs` covers this. Verified on the box.
+- `codex-qa review` round 2: **FAIL** (P1), then fixed (`qa/reports/20261014-220204-review-pUlL.md`). `QUEUE_LINUX_DIR=.` passed validation, which would have pointed `rsync --delete` at the box's whole home folder. Two layers now prevent it:
+  1. Every path segment must start with a letter or digit.
+  2. Before any sync, a box-side guard resolves the folder with `realpath`. It must be strictly inside the home, and if it already has files it must carry `.queue-test-checkout`, which the script creates.
+  Tested on the box: a symlink to the home and an unrelated folder with files were both refused, with nothing touched. A normal run passes. `npm test` 144/144.
 - **Done before the merge:**
-  1. `codex-qa review` round 2.
+  1. `codex-qa review` round 3.
   2. The squash-merge.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
