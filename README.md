@@ -69,6 +69,7 @@ you live.
 ## License
 
 Queue is licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at
-your option. Its installers also include yt-dlp (Unlicense), deno (MIT) and an LGPL-only FFmpeg
-build; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Security reports: [SECURITY.md](SECURITY.md).
+your option. Its installers also include separate programs under their own licenses: yt-dlp
+(Unlicense source; the official binary is GPLv3+), deno (MIT) and an LGPL-only FFmpeg build. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Security reports: [SECURITY.md](SECURITY.md).
 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).

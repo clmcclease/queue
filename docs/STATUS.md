@@ -81,7 +81,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - **Linux box:** `chrisbeast` (Ubuntu 26.04, Ryzen, 16 threads) runs `scripts/test-linux.sh` over SSH; section C of `docs/QA.md` covers it. Passes, including the loopback and ETXTBSY tests.
 - **Local checks:** `cargo test` 225, `npm test` 141/141, actionlint and shellcheck clean.
 - **License and public-facing files (D-024):** MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`; `Cargo.toml`, `package.json` and the lockfile's root entry). Also added:
-  - `THIRD_PARTY_NOTICES.md`: yt-dlp Unlicense, deno MIT, and the LGPL FFmpeg build with its exact source and build script;
+  - `THIRD_PARTY_NOTICES.md`: yt-dlp (Unlicense source; the shipped binary is GPLv3+), deno MIT, and the LGPL FFmpeg build with its exact source and build script. This rewrite of an existing file first dropped the GPLv3+ note and the FFmpeg trademark line; both are restored;
   - `SECURITY.md`, which asks for private vulnerability reports;
   - `CONTRIBUTING.md`: issues welcome, and an issue before any PR;
   - the README's responsible-use and License sections.
