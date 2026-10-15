@@ -150,8 +150,11 @@ jobs:
           cp ffmpeg-out/x86_64-unknown-linux-gnu/* src-tauri/binaries/
           chmod +x src-tauri/binaries/queue-*
           node scripts/fetch-sidecars.mjs --target x86_64-unknown-linux-gnu --check
+      # The runner service doesn't read a login profile, so rustup's ~/.cargo/bin isn't on PATH.
       - name: Install Rust (rust-toolchain.toml)
-        run: rustup toolchain install
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" toolchain install
       - run: npm ci
       - run: npm run build
       - run: npm test

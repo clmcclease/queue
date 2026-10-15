@@ -76,6 +76,7 @@ test("the self-hosted box job is opt-in, never runs fork PRs, and runs the same 
     assert.ok(steps(box).some((entry) => entry.split("\n")[0] === `run: ${command}`), `box job runs ${command}`);
   }
   assert.doesNotMatch(box, /sudo /, "the runner user has no sudo");
+  assert.match(box, /echo "\$HOME\/\.cargo\/bin" >> "\$GITHUB_PATH"/, "the service has no login PATH; cargo must be added");
 });
 
 test("PR checks run on open, synchronize, reopen, and label events", () => {
