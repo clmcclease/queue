@@ -8,7 +8,8 @@
 //!   is terminated or its handle closes.
 use std::io::{self, Read};
 use std::process::{Child, Command};
-use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::time::{Duration, Instant}; // the SIGTERM grace period
 
 /// A spawned child plus whatever is needed to stop everything it started.
 pub struct Tree {
