@@ -85,10 +85,14 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
   - `SECURITY.md`, which asks for private vulnerability reports;
   - `CONTRIBUTING.md`: issues welcome, and an issue before any PR;
   - the README's responsible-use and License sections.
-- **Remaining, after the owner flips the repo to public:**
-  1. Turn on "require approval for outside contributors" for fork workflows, and private vulnerability reporting.
-  2. Let PR #57's CI run on free runners (the first Windows run of the portable fixture).
-  3. `codex-qa review`, then the squash-merge.
+- **Public (2026-10-14):** the owner flipped it. Set: fork-PR workflows need approval for all outside contributors; private vulnerability reporting; secret scanning with push protection; Dependabot alerts and security updates (no open alerts). The box runner service and user were removed (`queue-box-runner-remove.sh`, run by the owner).
+- **CI on free runners:** `test (windows)` first failed 2 of 8 real-sidecar tests with WSAECONNABORTED (10053). On Windows, a socket accepted from the fixture's non-blocking listener is non-blocking too, so a read could hit WouldBlock and drop the connection. Fixed by setting it blocking. Run on `99cb845`: green on all three test jobs and all 4 bundles.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261014-215725-review-MExm.md`), both in `scripts/test-linux.sh`:
+  1. The box never rebuilt a stale ffmpeg. It now stores a fingerprint of `build-ffmpeg.sh` and `sidecars.json` and rebuilds when it changes or a binary is missing.
+  2. ssh split quoted arguments. Host, folder and xvfb values are now validated as plain (openrsync has no `--protect-args`), and the ssh arguments are quoted with `printf %q`. `qa/tests/test-linux.test.mjs` covers this. Verified on the box.
+- **Done before the merge:**
+  1. `codex-qa review` round 2.
+  2. The squash-merge.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.

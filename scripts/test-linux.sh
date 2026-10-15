@@ -14,8 +14,15 @@ set -euo pipefail
 
 HOST="${QUEUE_LINUX_HOST:-chrisbeast}"
 DEST="${QUEUE_LINUX_DIR:-queue-test}"   # relative to the remote user's home
-ROOT="$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
 TARGET=x86_64-unknown-linux-gnu
+XVFB="${QUEUE_LINUX_XVFB:-0}"
+
+# Both reach a remote shell (ssh, and rsync's remote path; macOS's openrsync has no
+# --protect-args), so only plain names are accepted rather than escaped.
+case "$HOST" in -* | *[!A-Za-z0-9._@-]* | '') echo "QUEUE_LINUX_HOST must be a plain SSH host or alias: $HOST" >&2; exit 2 ;; esac
+case "$DEST" in -* | /* | *..* | *[!A-Za-z0-9._/-]* | '') echo "QUEUE_LINUX_DIR must be a plain path under the remote home (letters, digits, . _ - /): $DEST" >&2; exit 2 ;; esac
+case "$XVFB" in 0 | 1) ;; *) echo "QUEUE_LINUX_XVFB must be 0 or 1" >&2; exit 2 ;; esac
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> Syncing $ROOT to $HOST:~/$DEST"
 # --delete keeps the box an exact copy of this tree, except the paths it owns (excluded here,
@@ -32,8 +39,10 @@ rsync -az --delete \
   "$ROOT/" "$HOST:$DEST/"
 
 echo "==> Running the checks on $HOST"
-# The remote script gets its settings as arguments, never by pasting them into the command.
-ssh "$HOST" bash -s -- "$DEST" "$TARGET" "${QUEUE_LINUX_XVFB:-0}" <<'REMOTE'
+# The remote script gets its settings as arguments, quoted for the remote shell (ssh joins its
+# arguments into one command line), never pasted into the script itself.
+# shellcheck disable=SC2029  # expanding (and quoting) here, on the Mac, is the point
+ssh "$HOST" "bash -s -- $(printf '%q ' "$DEST" "$TARGET" "$XVFB")" <<'REMOTE'
 set -euo pipefail
 DEST="$1"; TARGET="$2"; XVFB="$3"
 cd "$HOME/$DEST"
@@ -42,11 +51,17 @@ eval "$(mise activate bash --shims)"   # the pinned Node from mise.toml
 mise trust --quiet . >/dev/null 2>&1 || true
 mise install --quiet
 
-# Sidecars: built once per ffmpeg/manifest version and kept on the box.
+# Sidecars: ffmpeg/ffprobe are kept on the box and rebuilt whenever the build script or the
+# manifest changes (like CI's cache key), or either binary is missing.
 mkdir -p src-tauri/binaries
-if [ ! -x "src-tauri/binaries/queue-ffmpeg-$TARGET" ]; then
-  echo "==> Building ffmpeg for $TARGET (first run only; several minutes)"
+stamp="src-tauri/binaries/.ffmpeg-build-$TARGET"
+want="$(cat scripts/build-ffmpeg.sh scripts/sidecars.json | sha256sum | cut -d' ' -f1)"
+if [ ! -x "src-tauri/binaries/queue-ffmpeg-$TARGET" ] || [ ! -x "src-tauri/binaries/queue-ffprobe-$TARGET" ] ||
+  [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
+  echo "==> Building ffmpeg for $TARGET (build script or manifest changed; several minutes)"
+  rm -f "$stamp"
   scripts/build-ffmpeg.sh "$TARGET"
+  echo "$want" >"$stamp"
 fi
 node scripts/fetch-sidecars.mjs --target "$TARGET" --check
 
