@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), next
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #41 (native tests in CI + Linux box), PR #57
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,22 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #41 (NFR) native tests on Linux, Windows and macOS, plus the Linux box (PR #57, D-023)
+The owner asked for tests that actually run and pass on all three OSes, using hosted runners and their Ubuntu box. The owner's choices: keep Rust pinned (D-010); extend `build.yml` as #41 rather than add a separate `ci.yml`; set up the box as a runner, with OK for sudo and the runner registration.
+- **CI (`build.yml`):** `check` is now a `test` matrix (`ubuntu-24.04`, `windows-2025`, `macos-26` arm64; `fail-fast: false`) with each OS's own sidecars. It runs `npm run build`, `npm test`, fmt, clippy `-D warnings` and `cargo test --locked`. Bundles need `test`. There's no xvfb (no test needs a display).
+- **Linux box:** `chrisbeast` (Ubuntu 26.04, Ryzen, 16 threads, 192.168.4.83; KVM console at 192.168.4.69).
+  - Packages and the `gh-runner` user (no sudo, rustup) were set up by a one-time root script the owner ran.
+  - Actions runner v2.338.0 (SHA-256 checked) is a systemd service labelled `self-hosted, linux, ryzen`. GitHub shows it online.
+  - The repo is private and runs no fork-PR workflows.
+  - The opt-in `test-box` job (a manual run, or a PR labelled `ci:box`; never forks) passes on the box. It needed `~/.cargo/bin` on PATH, because the service has no login profile.
+- **`scripts/test-linux.sh`:** rsyncs the working tree to the box and runs the same checks. It passes from the Mac. Section C of `docs/QA.md` covers the box.
+- **Bugs the new runs found, all fixed:**
+  1. Windows clippy: `proc.rs` imported Unix-only time types.
+  2. The "Text file busy" flake (open problem 5). It reproduced about 20 times in 15 runs on the 16-thread box. `proc::spawn_tree` now retries ETXTBSY briefly on Unix; 0 failures in 75 runs after the fix.
+  3. Windows: a test stepped 1 ns at the info-freshness cutoff, but Windows' SystemTime counts 100 ns. It now steps 1 µs.
+- **Checks:** PR #57 is green on `test (linux)`, `test (windows)`, `test (macos)` and `test-box`. Local: `cargo test` 220, `npm test` 140/140, actionlint and shellcheck clean.
+- **Not done in this PR:** #41's Windows fake-yt-dlp fixture. The Unix-only subprocess tests still skip on Windows.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
@@ -280,7 +296,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#45** staging-folder cleanup (M2);
    - **#43** Content Security Policy (M5, P1);
    - **#44** yt-dlp GPG signature checks (M5).
-5. Flaky Linux CI: fake-sidecar tests in `download_d2.rs` sometimes fail with `Text file busy (os error 26)`. A script written by one test thread is still open in a process another thread is forking (seen on `main` 2026-10-11 and on PR #52; a re-run passed). Proposed fix: on Linux, retry the spawn a few times on ETXTBSY. Not filed yet.
+5. ~~Flaky Linux CI (`Text file busy`)~~ Fixed in #41: `spawn_tree` retries ETXTBSY.
 6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Not fixed yet.
 
 ## Owner checks in the dev app (macOS)
@@ -289,4 +305,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#11 (D2 format presets: Default / Audio only / Most compatible MP4, D-015): read the issue, PRD and D-015. It includes adding the VP9 decoder and AVI demuxer to the ffmpeg build. The preset control goes in Settings (#36). Then the QA gates. Remaining M2 after that: #12, #13, #41, #42, #45.
+#41 / PR #57: run `codex-qa test "#41"` and `review`, and one `ci:bundle` run (the bundle job's dependencies changed), then ask for the squash-merge. Then decide whether #41 stays open for the Windows fake-yt-dlp fixture or gets a follow-up issue. Next item: #11 (D2 format presets, D-015).
