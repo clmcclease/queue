@@ -49,11 +49,10 @@ test("the ffmpeg build is LGPL-only with networking off", () => {
   assert.match(script, /grep -q '\^License: LGPL'/, "the build must fail if configure does not report LGPL");
 });
 
-test("CI installs and checks sidecars before checks and bundles", () => {
+test("CI installs and checks sidecars before tests and bundles", () => {
   const workflow = read(".github/workflows/build.yml");
   assert.match(workflow, /^  ffmpeg:$/m);
-  assert.match(workflow, /^  check:\n    needs: ffmpeg$/m);
-  assert.match(workflow, /node scripts\/fetch-sidecars\.mjs --check$/m);
+  assert.match(workflow, /^  test:\n    needs: ffmpeg$/m);
   assert.match(workflow, /node scripts\/fetch-sidecars\.mjs --target \$\{\{ matrix\.target \}\} --check$/m);
   assert.match(workflow, /scripts\/build-ffmpeg\.sh "\$t"/);
 });

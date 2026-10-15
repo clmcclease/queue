@@ -40,8 +40,8 @@ A non-Claude model does QA so the code isn't only checked by the model that wrot
 - TypeScript stays on 6.0.3, the line create-tauri-app ships, rather than the new native 7.x compiler. Moving to 7.x is a deliberate later upgrade.
 - Upgrades are explicit changes with their own commit, never silent.
 
-## D-011 CI: checks on every change, OS bundles on main — Confirmed (2026-10-10)
-- `.github/workflows/build.yml` runs the checks (`npm test`, `cargo fmt`, clippy, `cargo test`) once on Linux for every PR and every push to `main`. Pushes to other branches without a PR don't run CI, which avoids running every PR twice (owner confirmed 2026-10-10).
+## D-011 CI: checks on every change, OS bundles on main — Confirmed (2026-10-10; checks on all 3 OSes since D-023)
+- `.github/workflows/build.yml` runs the checks (`npm test`, `cargo fmt`, clippy, `cargo test`) for every PR and every push to `main` (once on Linux until D-023; now on Linux, Windows and macOS). Pushes to other branches without a PR don't run CI, which avoids running every PR twice (owner confirmed 2026-10-10).
 - All 4 bundles build on every push to `main` and upload unsigned workflow artifacts: macOS arm64, macOS x64 (cross-compiled on the arm64 runner), Windows x64, and Linux x64. A PR only bundles when it has the `ci:bundle` label. The repo is private, and macOS minutes bill at 10× and Windows at 2×. The first hosted runs cost about 80 billed minutes per full run with a warm cache and about 110 cold, measured on PR #34.
 - Runner images are pinned (`macos-26`, `windows-2025`, `ubuntu-24.04`), not `-latest`. Actions are pinned to commit SHAs. Node comes from `package.json` `engines` and Rust from `rust-toolchain.toml`.
 - CI changes are tested on a branch with a draft PR before they go to `main`.
@@ -103,3 +103,10 @@ For #10 (D1), and as the base for the settings screen (#36): `settings.json` sit
 
 ## D-021 QA-written tests are added by default — Confirmed (2026-10-13)
 The owner said "always add them from this point forward" about the tests that `codex-qa test` writes. Claude applies the tests patch without its `docs/STATUS.md` edit, once the tests pass against any fixes, and reports which tests were added. This replaces "offer, never merge automatically" in CLAUDE.md and docs/QA.md.
+
+## D-023 Tests run natively on Linux, Windows and macOS; the owner's Linux box as a runner — Confirmed (2026-10-14)
+At the owner's request (#41): the `test` job in `build.yml` runs the full checks on `ubuntu-24.04`, `windows-2025` and `macos-26` (arm64) for every PR and every push to `main`. That's `npm run build`, `npm test`, `cargo fmt`, clippy `-D warnings` and `cargo test --locked`, with `fail-fast: false` and each OS using its own sidecars. This replaces D-011's Linux-only checks; bundles are unchanged.
+- Rust stays pinned in `rust-toolchain.toml` (D-010), not "stable".
+- The owner's Ubuntu box (`chrisbeast`, Ryzen) is a self-hosted runner with the labels `self-hosted, linux, ryzen`. It runs as a dedicated non-root `gh-runner` user in a systemd service. The `test-box` job is opt-in (a manual run, or a PR labelled `ci:box`), so an offline box never leaves checks pending. It never runs fork PRs, and the repo stays private.
+- `scripts/test-linux.sh` syncs the working tree to the box over SSH and runs the same checks there before a push.
+- No xvfb: no test needs a display (the UI tests use jsdom). `QUEUE_LINUX_XVFB=1` wraps the box runs in `xvfb-run` if one ever does.
