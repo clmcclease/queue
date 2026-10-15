@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #39 (D7 Open folder / Show in folder), uncommitted
+**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #39 (D7) Open folder and Show in folder (uncommitted)
+## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
 - **Show in folder** on Done rows: `reveal_download(id)` looks up the row's file with `Queue::saved_file` (Done rows only), checks it still exists ("… isn't there anymore. It may have been moved or deleted."), then calls `reveal::reveal`, which selects the file. On Linux without `FileManager1`, it opens the folder and returns a notice that the UI shows as a toast.
 - **Scope (D-022):** both commands take no path from the UI: the folder is the current download folder, and a reveal takes a row id. `tauri-plugin-opener` (=2.7.0) is a Linux-only dependency, used for one Rust function and never registered, so the webview gets no opener permission. All blocking work runs on worker threads.
@@ -264,11 +264,11 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #10 merge:**
-  - `cargo test` 209, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`), including a real YouTube DASH merge with live progress;
-  - `npm test` 124/124 (at the #36 merge; Rust unchanged since #10); clippy, fmt and build clean.
-- **Hosted CI:** green for every M1 merge on all 4 targets.
-- **Not verified natively:** downloads on Windows and Linux (CI builds and runs the tests there; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
+- **macOS arm64 locally, at the #39 merge:**
+  - `cargo test` 220, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`; last run at #10), including a real YouTube DASH merge with live progress;
+  - `npm test` 138/138; clippy, fmt and build clean.
+- **Hosted CI:** green for every M1 and M2 merge; 4-OS bundles green at the #10 and #39 merges.
+- **Not verified natively:** downloads, the folder picker and Open folder / Show in folder on Windows and Linux (CI builds them and runs the tests; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
 
 ## Open questions and problems
 1. Default local model: **provisionally Qwen3-4B-Instruct-2507** (2.5 GB), with Qwen3.5-2B as the small option (D-016); N9 (#33) confirms it.
@@ -289,4 +289,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#39: committed for PR review with `ci:bundle`. Remaining M2 after that: #11, #12, #13, #41, #42, #45.
+#11 (D2 format presets: Default / Audio only / Most compatible MP4, D-015): read the issue, PRD and D-015. It includes adding the VP9 decoder and AVI demuxer to the ffmpeg build. The preset control goes in Settings (#36). Then the QA gates. Remaining M2 after that: #12, #13, #41, #42, #45.
