@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), next
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), uncommitted
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,21 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #11 (D2) format presets (uncommitted; D-015)
+- **`download::Format`:** `Default` adds no flags. The others add exactly D-015's flags:
+  - `CompatibleVideo`: `-S vcodec:h264,…,aext:m4a --merge-output-format mp4/webm/mkv`;
+  - `Audio`: `-x`;
+  - `CompatibleAudio`: `-f ba/b -S acodec:aac,aext:m4a,vext:mp4 -x`.
+  A test checks that no format ever adds `-t`, `--remux-video`, `--recode-video`, `--audio-format` or a forced `mp4` merge. `run_with_retries_format` carries the format; the existing functions keep `Default`, so their callers are unchanged.
+- **Notice:** `Format::notice` flags a "most compatible" download whose file isn't `.mp4`/`.m4v` (video) or `.m4a`/`.aac`/`.mp3` (audio). The wording is OS-neutral. `Queue::noticed` adds it to the Done row (`Item.notice`, cleared when the row starts again), and the UI shows it in amber.
+- **Settings:** `format` lives in `settings.json`; files from before #11, and unknown values, mean Default. `settings_format` and `settings_set_format` read and save it. Settings has a "Format" radio group (`FormatPicker.tsx`) that's disabled until the saved value is known and reverts if a save fails. Downloads capture the format when they start.
+- **ffmpeg:** `--enable-decoder=vp9` and `--enable-demuxer=avi` are added. macOS arm64 is about +1.2 MB (ffmpeg +15.5%, ffprobe +16.8%), and the build still reports LGPL 2.1+.
+- **Checks (macOS arm64):** `cargo test` 230; clippy/fmt clean; `npm test` 148/148; `fetch-sidecars --check` OK. Real-sidecar tests pass with the new ffmpeg, network included: `download_real_d2` 9 (the new `d11_real_formats…`: Audio keeps the WAV bytes, and the compatible formats fall back with a notice), `retry_d2` 2, `meta_q3` 2. Use `ci:bundle` (the ffmpeg build changed).
+- `codex-qa test "#11"`: **FAIL**, then fixed (`qa/reports/20261015-070419-test-lORt.md`). A `format` value from a newer version made the whole `settings.json` fail to load, which reset a chosen download folder to Downloads. My own test had encoded that. Each setting now falls back to its default on its own (`or_default`), keeping the rest of the file. Codex's tests are added (D-021): `format_d2_11_qa.rs` (6) and `format-d2-11-qa.test.mjs` (6). `cargo test` 236; `npm test` 154/154.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261015-071403-review-JPtt.md`). The notice judged by extension alone, but an `.mp4` can hold AV1, and H.264 can come in `.mkv`. yt-dlp now also writes the chosen `vcodec|acodec` (`--print-to-file after_move:…`, to `queue-codecs.txt` in the work dir). `run_with_retries_saved` returns them, and `Format::notice_for` decides from the real codecs, named H.264, AV1, VP9, AAC, Opus and so on. It falls back to the extension when yt-dlp reports `NA`. New unit tests cover AV1 in MP4, Opus in MP4, H.264 in MKV, no-video sites and unknown codecs. A new real YouTube test checks that "Most compatible video" gives `.mp4` with `avc1` and `mp4a` reported and no notice. `cargo test` 238.
+- `codex-qa review` round 2: **FAIL**, then fixed (`qa/reports/20261015-073254-review-1ZjY.md`). With one codec unknown (`av01|NA`, `NA|opus`), the known problem was ignored and the extension decided. Now each known codec is judged on its own; only when nothing known is wrong does an unknown codec fall back to the extension. New tests: the partial-codec cases, and a fake-yt-dlp retry test showing the successful attempt's `queue-codecs.txt` is used, never the failed attempt's, and is never taken for the download. `cargo test` 239.
+- `codex-qa review` round 3: **PASS WITH NOTES** (`qa/reports/20261015-075336-review-XFNt.md`). Its P3 is fixed: the real format test now uses `run_with_retries_saved` and `notice_for`, like the app, and asserts yt-dlp's report for the WAV page (`vcodec=none`). Not added, from its suggestions: a site offering low-resolution H.264 alongside higher-resolution AV1 (live YouTube covers the H.264 choice), and changing the preset mid-download (the format is captured at start; covered by code inspection).
 
 ## Done: #41 (NFR) native tests on Linux, Windows and macOS; the repo went public (squash-merged from PR #57; D-023, D-024)
 The owner asked for tests that actually run and pass on all three OSes, using hosted runners and their Ubuntu box. The owner's choices: keep Rust pinned (D-010); extend `build.yml` as #41 rather than add a separate `ci.yml`.
@@ -326,4 +341,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#11 (D2 format presets: Default / Audio only / Most compatible MP4, D-015): read the issue, PRD and D-015. It includes adding the VP9 decoder and AVI demuxer to the ffmpeg build, and the preset control goes in Settings (#36). Use `ci:bundle` (ffmpeg changes). Follow-ups from #41: the two P3 test gaps above. Remaining M2 after #11: #12, #13, #42, #45.
+#11: committed for PR review with `ci:bundle` (the owner approved; a hands-on check of the Format setting in the dev app was not reported).

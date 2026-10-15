@@ -293,6 +293,188 @@ fn for_each_line(pipe: impl io::Read, mut on_line: impl FnMut(&str)) {
 
 /// Where yt-dlp gets the video from: a fresh extraction of the URL, or the `-J` info saved
 /// when the row was added (D-017; its media links last about 6 h and are tied to this IP).
+/// What to download (D2, #11, D-015). Only changes yt-dlp's format flags; nothing is re-encoded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Format {
+    /// yt-dlp picks the best format and container itself (D-007): no `-f`, nothing forced.
+    #[default]
+    Default,
+    /// Prefers H.264 + AAC in `.mp4`, which plays almost everywhere. Strict H.264 (D-015): it
+    /// wins even at a lower resolution. Without it, falls back to an honest `.webm`/`.mkv`.
+    CompatibleVideo,
+    /// Audio only: the best native audio, extracted without re-encoding (`.opus`, `.m4a`, ...).
+    Audio,
+    /// Audio only, preferring AAC in `.m4a`; otherwise the best native audio.
+    CompatibleAudio,
+}
+
+impl Format {
+    /// yt-dlp flags for this format. Never `-t mp4`, `--remux-video`, a forced
+    /// `--merge-output-format mp4` or `--audio-format`: remuxing VP9 into MP4 or converting audio
+    /// needs codecs our minimal ffmpeg doesn't have, and the result is silently broken (D-015).
+    pub fn args(self) -> &'static [&'static str] {
+        match self {
+            Format::Default => &[],
+            Format::CompatibleVideo => &[
+                "-S",
+                "vcodec:h264,vext:mp4,lang,quality,res,fps,hdr:12,acodec:aac,aext:m4a",
+                "--merge-output-format",
+                "mp4/webm/mkv",
+            ],
+            Format::Audio => &["-x"],
+            Format::CompatibleAudio => &["-f", "ba/b", "-S", "acodec:aac,aext:m4a,vext:mp4", "-x"],
+        }
+    }
+
+    /// For the "most compatible" formats, a notice when the saved file isn't the compatible
+    /// container after all (the site had no H.264 or AAC). D-015 keeps the honest extension
+    /// rather than re-encoding. Worded for every OS: no player names.
+    pub fn notice(self, saved: &Path) -> Option<String> {
+        let ext = saved
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let (expected, missing): (&[&str], &str) = match self {
+            Format::CompatibleVideo => (&["mp4", "m4v"], "No H.264 version was available"),
+            Format::CompatibleAudio => (&["m4a", "aac", "mp3"], "No AAC version was available"),
+            Format::Default | Format::Audio => return None,
+        };
+        if expected.contains(&ext.as_str()) {
+            return None;
+        }
+        let shown = if ext.is_empty() {
+            "a different format".to_string()
+        } else {
+            format!(".{ext}")
+        };
+        Some(format!(
+            "{missing}, so it's saved as {shown}. Some players can't open it."
+        ))
+    }
+
+    /// Like [`Format::notice`], but decided from the codecs yt-dlp actually chose when they're
+    /// known: an `.mp4` can hold AV1, and H.264 can come in another container. Falls back to the
+    /// extension when yt-dlp didn't report a codec.
+    pub fn notice_for(self, saved: &Path, codecs: &Codecs) -> Option<String> {
+        let ext = saved
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let shown = if ext.is_empty() {
+            "a different format".to_string()
+        } else {
+            format!(".{ext}")
+        };
+        let video = codecs.video.as_deref().map(codec_name);
+        let audio = codecs.audio.as_deref().map(codec_name);
+        match self {
+            Format::Default | Format::Audio => None,
+            Format::CompatibleVideo => {
+                // Each codec yt-dlp did report is judged on its own: a known problem always
+                // gets its notice, even when the other codec is unknown.
+                if let Some(video) = video.filter(|v| *v != "H.264") {
+                    let what = if video == "no" {
+                        "This site had no video".to_string()
+                    } else {
+                        format!("No H.264 version was available, so it has {video} video")
+                    };
+                    return Some(format!(
+                        "{what}; it's saved as {shown}. Some players can't open it."
+                    ));
+                }
+                if let Some(audio) = audio.filter(|a| !matches!(*a, "AAC" | "no")) {
+                    return Some(format!(
+                        "No AAC audio was available, so it has {audio} audio; it's saved as {shown}. Some players can't open it."
+                    ));
+                }
+                match (video, audio) {
+                    // Both known and fine: only the container can still be wrong.
+                    (Some(_), Some(_)) => (!matches!(ext.as_str(), "mp4" | "m4v")).then(|| {
+                        format!(
+                            "It's H.264 but saved as {shown}. Some players can't open that container."
+                        )
+                    }),
+                    // Nothing known is wrong, but something is unknown: the extension decides.
+                    _ => self.notice(saved),
+                }
+            }
+            Format::CompatibleAudio => {
+                let Some(audio) = audio else {
+                    return self.notice(saved);
+                };
+                (!matches!(audio, "AAC" | "MP3")).then(|| {
+                    format!(
+                        "No AAC version was available, so it's {audio} audio saved as {shown}. Some players can't open it."
+                    )
+                })
+            }
+        }
+    }
+}
+
+/// The codecs yt-dlp chose, as it reported them; `None` where it didn't know.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Codecs {
+    pub video: Option<String>,
+    pub audio: Option<String>,
+}
+
+impl Codecs {
+    /// Parses yt-dlp's `vcodec|acodec` line ("NA" or empty means unknown).
+    pub fn parse(line: &str) -> Self {
+        let known = |c: &str| {
+            let c = c.trim();
+            (!c.is_empty() && c != "NA").then(|| c.to_string())
+        };
+        let (video, audio) = line.split_once('|').unwrap_or((line, ""));
+        Codecs {
+            video: known(video),
+            audio: known(audio),
+        }
+    }
+}
+
+/// A readable codec name for notices: "avc1.640028" is H.264, "av01.0.08M.08" is AV1.
+fn codec_name(codec: &str) -> &'static str {
+    let c = codec.to_ascii_lowercase();
+    let starts = |prefixes: &[&str]| prefixes.iter().any(|p| c.starts_with(p));
+    if c == "none" {
+        "no"
+    } else if starts(&["avc", "h264"]) {
+        "H.264"
+    } else if starts(&["hev", "hvc", "h265"]) {
+        "HEVC"
+    } else if starts(&["av01", "av1"]) {
+        "AV1"
+    } else if starts(&["vp09", "vp9"]) {
+        "VP9"
+    } else if starts(&["vp8"]) {
+        "VP8"
+    } else if c == "mp4a.40.34" || starts(&["mp3"]) {
+        "MP3"
+    } else if starts(&["mp4a", "aac"]) {
+        "AAC"
+    } else if starts(&["opus"]) {
+        "Opus"
+    } else if starts(&["vorbis"]) {
+        "Vorbis"
+    } else if starts(&["flac"]) {
+        "FLAC"
+    } else if starts(&["pcm"]) {
+        "PCM"
+    } else {
+        "another"
+    }
+}
+
+/// A finished download: where it was saved, and the codecs yt-dlp chose (#11).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Saved {
+    pub path: String,
+    pub codecs: Codecs,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Source<'a> {
     Url(&'a str),
@@ -305,8 +487,20 @@ pub fn args(sidecar_dir: &Path, work_dir: &Path, url: &str) -> Vec<OsString> {
     args_for(sidecar_dir, work_dir, Source::Url(url))
 }
 
+/// [`args_for_format`] with [`Format::Default`].
 pub fn args_for(sidecar_dir: &Path, work_dir: &Path, source: Source) -> Vec<OsString> {
+    args_for_format(sidecar_dir, work_dir, source, Format::Default)
+}
+
+/// The full yt-dlp argv for `source` downloaded as `format`.
+pub fn args_for_format(
+    sidecar_dir: &Path,
+    work_dir: &Path,
+    source: Source,
+    format: Format,
+) -> Vec<OsString> {
     let mut args = sidecar::ytdlp_base_args(sidecar_dir);
+    args.extend(format.args().iter().map(OsString::from));
     args.extend(
         [
             "--no-playlist",
@@ -333,6 +527,15 @@ pub fn args_for(sidecar_dir: &Path, work_dir: &Path, source: Source) -> Vec<OsSt
     args.push(work_dir.into());
     // yt-dlp records the final path in a UTF-8 file in the work dir (console encodings vary).
     args.extend(["--print-to-file", "after_move:filepath", REPORT].map(OsString::from));
+    // The codecs it chose, so a "most compatible" notice can be exact (#11).
+    args.extend(
+        [
+            "--print-to-file",
+            "after_move:%(vcodec)s|%(acodec)s",
+            CODECS,
+        ]
+        .map(OsString::from),
+    );
     args.extend(["-o", "%(title)s.%(ext)s"].map(OsString::from));
     match source {
         Source::Url(url) => {
@@ -391,6 +594,9 @@ fn readable(line: &str) -> &str {
 /// so it means nothing as an output template.
 pub const REPORT: &str = "queue-result.txt";
 
+/// Where yt-dlp records the chosen `vcodec|acodec` (#11), next to [`REPORT`].
+pub const CODECS: &str = "queue-codecs.txt";
+
 /// yt-dlp's own in-progress files: never a finished download (left over by a failed attempt).
 fn is_partial(name: &str) -> bool {
     name.ends_with(".part") || name.ends_with(".ytdl") || name.contains(".part-Frag")
@@ -405,7 +611,7 @@ fn reported_file(work_dir: &Path) -> Option<PathBuf> {
         fs::canonicalize(&path).ok()?,
     );
     let inside = file.parent() == Some(dir.as_path());
-    let name_ok = file.file_name().is_some_and(|n| n != REPORT);
+    let name_ok = file.file_name().is_some_and(|n| n != REPORT && n != CODECS);
     (inside && name_ok && fs::symlink_metadata(&path).ok()?.is_file()).then_some(path)
 }
 
@@ -418,7 +624,7 @@ pub fn finished_file(work_dir: &Path) -> Result<PathBuf, String> {
         let entry = entry.map_err(unreadable)?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == REPORT || is_partial(&name) {
+        if name == REPORT || name == CODECS || is_partial(&name) {
             continue;
         }
         if !entry.file_type().map_err(unreadable)?.is_file() {
@@ -532,7 +738,16 @@ pub fn run_source(
         fs::create_dir_all(parent).map_err(|e| format!("Couldn't create a working folder: {e}"))?;
     }
     fs::create_dir(work_dir).map_err(|e| format!("Couldn't create a working folder: {e}"))?;
-    let result = run_in(sidecar_dir, work_dir, out_dir, source, &mut |_| {}).map_err(|f| f.reason);
+    let result = run_in(
+        sidecar_dir,
+        work_dir,
+        out_dir,
+        source,
+        Format::Default,
+        &mut |_| {},
+    )
+    .map(|saved| saved.path)
+    .map_err(|f| f.reason);
     let _ = fs::remove_dir_all(work_dir); // partial and intermediate files, success or not
     result
 }
@@ -558,11 +773,13 @@ fn run_in(
     work_dir: &Path,
     out_dir: &Path,
     source: Source,
+    format: Format,
     on_event: &mut dyn FnMut(Event),
-) -> Result<String, Failure> {
+) -> Result<Saved, Failure> {
     let _ = fs::remove_file(work_dir.join(REPORT)); // a previous attempt's report
+    let _ = fs::remove_file(work_dir.join(CODECS));
     let mut cmd = Command::new(Sidecar::YtDlp.path_in(sidecar_dir));
-    cmd.args(args_for(sidecar_dir, work_dir, source))
+    cmd.args(args_for_format(sidecar_dir, work_dir, source, format))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -675,7 +892,19 @@ fn run_in(
         ),
         _ => format!("Couldn't save to {}: {e}", out_dir.display()),
     })?;
-    Ok(dest.to_string_lossy().into_owned())
+    let codecs = fs::read_to_string(work_dir.join(CODECS))
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .map(str::trim)
+                .rfind(|l| !l.is_empty())
+                .map(Codecs::parse)
+        })
+        .unwrap_or_default();
+    Ok(Saved {
+        path: dest.to_string_lossy().into_owned(),
+        codecs,
+    })
 }
 
 /// Waits before retry 2 and retry 3 after a 403 (D-017).
@@ -721,10 +950,63 @@ pub fn run_with_retries_events(
     out_dir: &Path,
     url: &str,
     info: Option<&Path>,
+    wait: impl FnMut(Duration),
+    on_retry: impl FnMut(u32),
+    on_event: impl FnMut(Event),
+) -> Result<String, String> {
+    run_with_retries_format(
+        sidecar_dir,
+        work_dir,
+        out_dir,
+        url,
+        info,
+        Format::Default,
+        wait,
+        on_retry,
+        on_event,
+    )
+}
+
+/// [`run_with_retries_events`] downloading as `format` (#11).
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_retries_format(
+    sidecar_dir: &Path,
+    work_dir: &Path,
+    out_dir: &Path,
+    url: &str,
+    info: Option<&Path>,
+    format: Format,
+    wait: impl FnMut(Duration),
+    on_retry: impl FnMut(u32),
+    on_event: impl FnMut(Event),
+) -> Result<String, String> {
+    run_with_retries_saved(
+        sidecar_dir,
+        work_dir,
+        out_dir,
+        url,
+        info,
+        format,
+        wait,
+        on_retry,
+        on_event,
+    )
+    .map(|saved| saved.path)
+}
+
+/// [`run_with_retries_format`], also returning the codecs yt-dlp chose (for the notice).
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_retries_saved(
+    sidecar_dir: &Path,
+    work_dir: &Path,
+    out_dir: &Path,
+    url: &str,
+    info: Option<&Path>,
+    format: Format,
     mut wait: impl FnMut(Duration),
     mut on_retry: impl FnMut(u32),
     mut on_event: impl FnMut(Event),
-) -> Result<String, String> {
+) -> Result<Saved, String> {
     if let Some(parent) = work_dir.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Couldn't create a working folder: {e}"))?;
     }
@@ -736,7 +1018,14 @@ pub fn run_with_retries_events(
             (1, Some(path)) => Source::Info(path),
             _ => Source::Url(url),
         };
-        result = run_in(sidecar_dir, work_dir, out_dir, source, &mut on_event);
+        result = run_in(
+            sidecar_dir,
+            work_dir,
+            out_dir,
+            source,
+            format,
+            &mut on_event,
+        );
         match &result {
             Err(f) if f.retryable && attempt < attempts => {
                 on_retry(attempt + 1);
@@ -752,6 +1041,234 @@ pub fn run_with_retries_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn formats_add_only_their_own_flags_and_never_remux_or_convert() {
+        let base = args_for(
+            Path::new("/s"),
+            Path::new("/w"),
+            Source::Url("https://e.test/v"),
+        );
+        for (format, flags) in [
+            (Format::Default, vec![]),
+            (
+                Format::CompatibleVideo,
+                vec![
+                    "-S",
+                    "vcodec:h264,vext:mp4,lang,quality,res,fps,hdr:12,acodec:aac,aext:m4a",
+                    "--merge-output-format",
+                    "mp4/webm/mkv",
+                ],
+            ),
+            (Format::Audio, vec!["-x"]),
+            (
+                Format::CompatibleAudio,
+                vec!["-f", "ba/b", "-S", "acodec:aac,aext:m4a,vext:mp4", "-x"],
+            ),
+        ] {
+            let args: Vec<String> = args_for_format(
+                Path::new("/s"),
+                Path::new("/w"),
+                Source::Url("https://e.test/v"),
+                format,
+            )
+            .into_iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+            let extra: Vec<&str> = args
+                .iter()
+                .filter(|a| !base.iter().any(|b| b.to_string_lossy() == a.as_str()))
+                .map(String::as_str)
+                .collect();
+            assert_eq!(extra, flags, "{format:?}");
+            assert_eq!(args.len(), base.len() + flags.len());
+            assert!(
+                args.ends_with(&["--".into(), "https://e.test/v".into()]),
+                "URL stays last, after --"
+            );
+            for banned in ["-t", "--remux-video", "--recode-video", "--audio-format"] {
+                assert!(
+                    !args.iter().any(|a| a == banned),
+                    "{format:?} must not use {banned} (D-015)"
+                );
+            }
+            assert!(
+                !args
+                    .windows(2)
+                    .any(|w| w[0] == "--merge-output-format" && w[1] == "mp4")
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_compatible_formats_flag_an_incompatible_file() {
+        let notice = |f: Format, name: &str| f.notice(Path::new(name));
+        assert_eq!(notice(Format::CompatibleVideo, "/d/a.mp4"), None);
+        assert_eq!(notice(Format::CompatibleVideo, "/d/a (2).MP4"), None);
+        assert_eq!(
+            notice(Format::CompatibleVideo, "/d/日本語.webm").as_deref(),
+            Some(
+                "No H.264 version was available, so it's saved as .webm. Some players can't open it."
+            )
+        );
+        assert!(
+            notice(Format::CompatibleVideo, "/d/a.mkv")
+                .unwrap()
+                .contains(".mkv")
+        );
+        assert_eq!(notice(Format::CompatibleAudio, "/d/a.m4a"), None);
+        assert_eq!(
+            notice(Format::CompatibleAudio, "/d/a.opus").as_deref(),
+            Some(
+                "No AAC version was available, so it's saved as .opus. Some players can't open it."
+            )
+        );
+        assert!(
+            notice(Format::CompatibleAudio, "/d/noext")
+                .unwrap()
+                .contains("a different format")
+        );
+        for f in [Format::Default, Format::Audio] {
+            assert_eq!(
+                notice(f, "/d/a.webm"),
+                None,
+                "{f:?} never claims compatibility"
+            );
+        }
+        assert!(
+            !format!("{:?}", notice(Format::CompatibleVideo, "/d/a.webm")).contains("QuickTime")
+        );
+    }
+
+    #[test]
+    fn the_notice_is_decided_by_the_codecs_yt_dlp_chose() {
+        let c = |v: &str, a: &str| Codecs::parse(&format!("{v}|{a}"));
+        let video = |path: &str, codecs: Codecs| {
+            Format::CompatibleVideo.notice_for(Path::new(path), &codecs)
+        };
+        assert_eq!(
+            video("/d/a.mp4", c("avc1.640028", "mp4a.40.2")),
+            None,
+            "H.264 + AAC in MP4"
+        );
+        let av1 = video("/d/a.mp4", c("av01.0.08M.08", "mp4a.40.2"))
+            .expect("AV1 in an .mp4 still needs a notice");
+        assert!(
+            av1.contains("No H.264") && av1.contains("AV1") && av1.contains(".mp4"),
+            "{av1}"
+        );
+        let vp9 = video("/d/a.webm", c("vp09.00.40.08", "opus")).unwrap();
+        assert!(vp9.contains("VP9") && vp9.contains(".webm"), "{vp9}");
+        let opus = video("/d/a.mp4", c("avc1.4d401e", "opus")).unwrap();
+        assert!(
+            opus.contains("No AAC audio") && opus.contains("Opus"),
+            "{opus}"
+        );
+        let mkv = video("/d/a.mkv", c("avc1.4d401e", "mp4a.40.2")).unwrap();
+        assert!(mkv.contains("H.264 but saved as .mkv"), "{mkv}");
+        assert_eq!(
+            video("/d/a.mp4", c("avc1", "none")),
+            None,
+            "H.264 with no audio track is fine"
+        );
+        assert!(
+            video("/d/a.m4a", c("none", "mp4a.40.2"))
+                .unwrap()
+                .starts_with("This site had no video")
+        );
+        // One codec unknown: the known one still decides when it's a problem (review round 2).
+        assert!(
+            video("/d/a.mp4", c("av01.0.08M.08", "NA"))
+                .unwrap()
+                .contains("AV1")
+        );
+        assert!(video("/d/a.mp4", c("NA", "opus")).unwrap().contains("Opus"));
+        assert_eq!(
+            video("/d/a.mp4", c("avc1.4d401e", "NA")),
+            None,
+            "known-good + unknown: .mp4 decides"
+        );
+        assert!(
+            video("/d/a.webm", c("avc1.4d401e", "NA"))
+                .unwrap()
+                .contains(".webm")
+        );
+        // Unknown codecs: the extension decides, as before.
+        assert_eq!(video("/d/a.mp4", c("NA", "NA")), None);
+        assert!(
+            video("/d/a.webm", Codecs::default())
+                .unwrap()
+                .contains(".webm")
+        );
+
+        let audio = |path: &str, codecs: Codecs| {
+            Format::CompatibleAudio.notice_for(Path::new(path), &codecs)
+        };
+        assert_eq!(audio("/d/a.m4a", c("none", "mp4a.40.2")), None);
+        assert_eq!(audio("/d/a.mp3", c("none", "mp3")), None);
+        let opus = audio("/d/a.opus", c("none", "opus")).unwrap();
+        assert!(opus.contains("Opus audio saved as .opus"), "{opus}");
+        assert!(
+            audio("/d/a.opus", c("none", "NA")).is_some(),
+            "unknown audio: the extension decides"
+        );
+        for f in [Format::Default, Format::Audio] {
+            assert_eq!(
+                f.notice_for(Path::new("/d/a.webm"), &c("vp9", "opus")),
+                None
+            );
+        }
+        for codecs in [c("av01", "opus"), c("vp9", "vorbis"), c("hev1", "flac")] {
+            let n = video("/d/a.mkv", codecs).unwrap();
+            assert!(
+                !n.contains("QuickTime") && !n.contains("Finder"),
+                "OS-neutral: {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn codecs_parse_yt_dlp_lines_and_treat_na_as_unknown() {
+        assert_eq!(
+            Codecs::parse("avc1.640028|mp4a.40.2"),
+            Codecs {
+                video: Some("avc1.640028".into()),
+                audio: Some("mp4a.40.2".into())
+            }
+        );
+        assert_eq!(
+            Codecs::parse("NA|opus"),
+            Codecs {
+                video: None,
+                audio: Some("opus".into())
+            }
+        );
+        assert_eq!(
+            Codecs::parse(" none | NA "),
+            Codecs {
+                video: Some("none".into()),
+                audio: None
+            }
+        );
+        assert_eq!(Codecs::parse(""), Codecs::default());
+        assert_eq!(codec_name("mp4a.40.34"), "MP3");
+        assert_eq!(codec_name("AVC1.4D401E"), "H.264");
+        assert_eq!(codec_name("something-new"), "another");
+    }
+
+    #[test]
+    fn formats_serialize_as_camel_case_for_the_ui_and_settings() {
+        for (f, name) in [
+            (Format::Default, "default"),
+            (Format::CompatibleVideo, "compatibleVideo"),
+            (Format::Audio, "audio"),
+            (Format::CompatibleAudio, "compatibleAudio"),
+        ] {
+            assert_eq!(serde_json::to_value(f).unwrap(), name);
+            assert_eq!(serde_json::from_value::<Format>(name.into()).unwrap(), f);
+        }
+        assert!(serde_json::from_value::<Format>("mp4".into()).is_err());
+    }
 
     #[test]
     fn a_full_mailbox_keeps_order_and_a_hang_up_releases_a_blocked_reader() {

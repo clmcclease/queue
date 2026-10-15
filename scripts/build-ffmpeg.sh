@@ -46,11 +46,11 @@ flags=(
   --disable-everything --disable-autodetect --disable-network --disable-doc --disable-ffplay
   --disable-debug --enable-small --enable-zlib --disable-x86asm  # remux only; no need for nasm
   --enable-protocol=file,pipe
-  --enable-demuxer=mov,matroska,mp3,aac,ogg,flac,wav,mpegts,image2,image_png_pipe,image_jpeg_pipe,image_webp_pipe,concat,ffmetadata,webvtt,srt,ass
+  --enable-demuxer=mov,matroska,mp3,aac,ogg,flac,wav,mpegts,image2,image_png_pipe,image_jpeg_pipe,image_webp_pipe,concat,ffmetadata,webvtt,srt,ass,avi
   --enable-muxer=mp4,ipod,mov,matroska,matroska_audio,webm,ogg,opus,mp3,adts,flac,wav,image2,ffmetadata,webvtt,srt,ass
   --enable-parser=aac,h264,hevc,av1,vp8,vp9,opus,vorbis,mpegaudio,flac,mjpeg,png,webp
   --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,vp9_superframe,extract_extradata
-  --enable-decoder=mjpeg,png,webp,aac,mp3,opus,vorbis,flac,pcm_s16le,webvtt,srt,subrip,ass,ssa,mov_text
+  --enable-decoder=mjpeg,png,webp,aac,mp3,opus,vorbis,flac,pcm_s16le,webvtt,srt,subrip,ass,ssa,mov_text,vp9
   --enable-encoder=mjpeg,png,flac,pcm_s16le,webvtt,srt,subrip,ass,ssa,mov_text
   --enable-filter=scale,format,aformat,aresample,null,anull,crop
 )

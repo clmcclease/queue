@@ -69,6 +69,54 @@ fn d4_real_loopback_download_streams_parseable_progress_and_keeps_both_copies() 
     );
 }
 
+/// #11 / D2: the audio and "most compatible" formats with the real yt-dlp. The WAV fixture has
+/// no video, no H.264 and no AAC: Audio keeps it as is (no re-encode), and the compatible
+/// formats fall back honestly with a notice instead of failing or converting.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn d11_real_formats_download_without_reencoding_and_flag_honest_fallbacks() {
+    for (format, notice) in [
+        (download::Format::Audio, false),
+        (download::Format::CompatibleAudio, true),
+        (download::Format::CompatibleVideo, true),
+    ] {
+        let f = LocalDownload::new(&format!("format {format:?}"));
+        let work = f.root.join("work-format");
+        // The production path: the codecs yt-dlp reports, then notice_for (as complete_download).
+        let saved = download::run_with_retries_saved(
+            &f.bin,
+            &work,
+            &f.out,
+            &f.url,
+            None,
+            format,
+            |_| panic!("loopback fixture must not retry"),
+            |_| panic!("loopback fixture must not retry"),
+            |_| {},
+        )
+        .unwrap_or_else(|e| panic!("{format:?}: {e}"));
+        // yt-dlp's own report for this audio-only page: no video, audio codec unknown.
+        assert_eq!(
+            saved.codecs.video.as_deref(),
+            Some("none"),
+            "{format:?}: {saved:?}"
+        );
+        let path = PathBuf::from(&saved.path);
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            silence_wav(),
+            "{format:?}: the same bytes, not re-encoded"
+        );
+        assert_eq!(path.extension().unwrap(), "wav");
+        assert_eq!(
+            format.notice_for(&path, &saved.codecs).is_some(),
+            notice,
+            "{format:?}: {saved:?}"
+        );
+        assert!(!work.exists());
+    }
+}
+
 impl LocalDownload {
     fn new(title: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
@@ -409,4 +457,54 @@ fn d2_real_youtube_merge_lands_in_out_dir_and_leaves_no_temp_files() {
         1,
         "only the finished file, no .part/.temp/.fNNN: {names:?}"
     );
+}
+
+/// #11 / D-015 with the real site: "Most compatible video" on a YouTube video that has H.264
+/// gives H.264 + AAC in .mp4, with no notice; the codecs come from yt-dlp's own report.
+/// Set QUEUE_QA_NETWORK=1 as well as QUEUE_QA_REAL_SIDECARS.
+#[test]
+#[ignore = "requires pinned sidecars and network (QUEUE_QA_NETWORK=1)"]
+fn d11_real_youtube_compatible_video_is_h264_aac_mp4() {
+    if std::env::var_os("QUEUE_QA_NETWORK").is_none() {
+        return;
+    }
+    let f = LocalDownload::new("unused");
+    let work = f.root.join("work-yt-compatible");
+    let saved = download::run_with_retries_saved(
+        &f.bin,
+        &work,
+        &f.out,
+        "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        None,
+        download::Format::CompatibleVideo,
+        std::thread::sleep,
+        |_| {},
+        |_| {},
+    )
+    .unwrap();
+    let path = PathBuf::from(&saved.path);
+    assert_eq!(path.extension().unwrap(), "mp4", "{saved:?}");
+    assert!(
+        saved
+            .codecs
+            .video
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("avc1"),
+        "{saved:?}"
+    );
+    assert!(
+        saved
+            .codecs
+            .audio
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("mp4a"),
+        "{saved:?}"
+    );
+    assert_eq!(
+        download::Format::CompatibleVideo.notice_for(&path, &saved.codecs),
+        None
+    );
+    assert!(!work.exists());
 }

@@ -173,6 +173,42 @@ fn download_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     })
 }
 
+/// A copy of the current settings.
+fn current_settings(app: &AppHandle) -> Result<settings::Settings, String> {
+    app.state::<Settings>()
+        .current
+        .lock()
+        .map(|s| s.clone())
+        .map_err(|_| "settings lock poisoned".to_string())
+}
+
+/// The download format (D2, #11).
+#[tauri::command]
+fn settings_format(app: AppHandle) -> Result<download::Format, String> {
+    Ok(current_settings(&app)?.format)
+}
+
+/// Saves the download format (#11). Downloads already running keep the one they started with.
+#[tauri::command]
+fn settings_set_format(
+    app: AppHandle,
+    format: download::Format,
+) -> Result<download::Format, String> {
+    let state = app.state::<Settings>();
+    let mut current = state
+        .current
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?;
+    let mut next = current.clone();
+    next.format = format;
+    if let Some(file) = &state.file {
+        next.save(file)
+            .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+    }
+    *current = next;
+    Ok(format)
+}
+
 /// The download folder as the UI shows it. `error` says why it can't be used right now (a
 /// chosen folder that's gone), while `path` still names it.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -290,6 +326,8 @@ struct DownloadJob {
     sidecar_dir: std::path::PathBuf,
     work_dir: std::path::PathBuf,
     out_dir: std::path::PathBuf,
+    /// The format chosen in Settings when the download started (#11).
+    format: download::Format,
 }
 
 /// Marks a queued item Downloading (one at a time, see `Queue::start`) and prepares its paths:
@@ -300,6 +338,7 @@ fn begin_download(
     id: u64,
 ) -> Result<(Item, DownloadJob), String> {
     let out_dir = download_dir(app)?;
+    let format = current_settings(app)?.format;
     let sidecar_dir = sidecar::dir().map_err(|e| format!("Couldn't locate yt-dlp: {e}"))?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -320,6 +359,7 @@ fn begin_download(
         sidecar_dir,
         work_dir,
         out_dir,
+        format,
     };
     Ok((item, job))
 }
@@ -335,12 +375,13 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
         }
     };
     // Progress arrives already throttled (download::PROGRESS_EVERY); state changes always do.
-    let outcome = download::run_with_retries_events(
+    let outcome = download::run_with_retries_saved(
         &job.sidecar_dir,
         &job.work_dir,
         &job.out_dir,
         &job.url,
         job.info.as_deref(),
+        job.format,
         std::thread::sleep,
         |attempt| emit(lock(&state).ok().and_then(|mut q| q.retrying(id, attempt))),
         |event| match event {
@@ -352,8 +393,22 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
             }
         },
     );
+    // A "most compatible" format the site didn't have gets an honest notice (D-015), decided
+    // from the codecs yt-dlp chose.
+    let notice = outcome.as_ref().ok().and_then(|saved| {
+        job.format
+            .notice_for(std::path::Path::new(&saved.path), &saved.codecs)
+    });
+    let outcome = outcome.map(|saved| saved.path);
     let (updated, info) = match lock(&state) {
-        Ok(mut q) => (q.finish(id, outcome), q.take_info(id)),
+        Ok(mut q) => {
+            let finished = q.finish(id, outcome);
+            let updated = match notice {
+                Some(notice) => q.noticed(id, notice).or(finished),
+                None => finished,
+            };
+            (updated, q.take_info(id))
+        }
         Err(_) => (None, None),
     };
     if let Some(path) = info {
@@ -495,6 +550,8 @@ pub fn run() {
             queue_runner_state,
             settings_download_folder,
             settings_choose_download_folder,
+            settings_format,
+            settings_set_format,
             open_download_folder,
             reveal_download
         ])

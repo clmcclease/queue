@@ -39,9 +39,16 @@ function StatusLabel({ item }: { item: QueueItem }) {
       return <span className="text-neutral-500 dark:text-neutral-400">Processing…</span>;
     case "done":
       return (
-        <span className="text-green-700 dark:text-green-400" title={status.path}>
-          ✓ {fileName(status.path)}
-        </span>
+        <>
+          <span className="text-green-700 dark:text-green-400" title={status.path}>
+            ✓ {fileName(status.path)}
+          </span>
+          {item.notice && (
+            <span data-role="notice" className="block whitespace-normal text-amber-700 dark:text-amber-400">
+              {item.notice}
+            </span>
+          )}
+        </>
       );
     case "failed":
       return (

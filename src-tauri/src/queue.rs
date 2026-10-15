@@ -41,6 +41,9 @@ pub struct Item {
     pub rev: u64,
     /// Download attempt while downloading (1, then 2–3 after a 403 retry; D-017), else 0.
     pub attempt: u32,
+    /// Something to know about a Done row's file, e.g. a "most compatible" format that wasn't
+    /// available (D-015, #11). Cleared when the row starts again.
+    pub notice: Option<String>,
     /// Duplicate identity from [`link::parse`]; internal only.
     #[serde(skip)]
     key: String,
@@ -101,6 +104,7 @@ impl Queue {
             progress: None,
             rev: 1,
             attempt: 0,
+            notice: None,
             key: link.key,
             info: None,
         };
@@ -147,6 +151,7 @@ impl Queue {
         item.status = Status::Downloading;
         item.attempt = 1;
         item.progress = None;
+        item.notice = None;
         item.rev += 1;
         Ok(item.clone())
     }
@@ -292,6 +297,17 @@ impl Queue {
         }
     }
 
+    /// Adds a notice to a Done row (#11), e.g. that the compatible format wasn't available.
+    pub fn noticed(&mut self, id: u64, notice: String) -> Option<Item> {
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if !matches!(item.status, Status::Done { .. }) {
+            return None;
+        }
+        item.notice = Some(notice);
+        item.rev += 1;
+        Some(item.clone())
+    }
+
     /// Whether a download holds the one slot (Q4: one at a time).
     pub fn is_busy(&self) -> bool {
         self.items
@@ -432,6 +448,33 @@ mod tests {
             q.add("https://youtu.be/jNQXAC9IVRw"),
             Err(AddError::Duplicate { id, .. }) if id == old
         ));
+    }
+
+    #[test]
+    fn a_notice_goes_only_on_done_rows_and_clears_when_the_row_starts_again() {
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://e.test/a");
+        assert_eq!(q.noticed(id, "no".into()), None, "not done yet");
+        q.start(id).unwrap();
+        assert_eq!(q.noticed(id, "no".into()), None);
+        let done = q.finish(id, Ok("/d/a.webm".into())).unwrap();
+        let noted = q
+            .noticed(id, "No H.264 version was available".into())
+            .unwrap();
+        assert!(noted.rev > done.rev);
+        assert_eq!(
+            noted.notice.as_deref(),
+            Some("No H.264 version was available")
+        );
+        let json = serde_json::to_value(&noted).unwrap();
+        assert_eq!(json["notice"], "No H.264 version was available");
+        let failed = ready(&mut q, "https://e.test/b");
+        q.start(failed).unwrap();
+        q.finish(failed, Err("x".into())).unwrap();
+        assert_eq!(q.noticed(failed, "n".into()), None);
+        q.retry(failed).unwrap();
+        q.start(failed).unwrap();
+        assert_eq!(q.items()[1].notice, None);
     }
 
     #[test]

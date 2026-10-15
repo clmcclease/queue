@@ -54,6 +54,7 @@ function ambient(handler) {
   return (command, args) => {
     if (command === "queue_runner_state") return false;
     if (command === "settings_download_folder") return DEFAULT_FOLDER;
+    if (command === "settings_format") return "default";
     return handler(command, args);
   };
 }
@@ -1321,4 +1322,74 @@ test("D7: when only the folder could be opened, the notice shows as a toast, not
   await clickIn(0, SHOW_FILE);
   assert.equal(text('[data-role="toast"]'), "Opened the folder, but your file manager couldn't select 日本語.webm.");
   assert.equal(container.querySelector('[role="alert"]'), null);
+});
+
+// #11 / D2: the download format, in Settings, and the honest notice on a finished row.
+const formatRadios = () => [...settingsPanel().querySelectorAll('input[type="radio"][name="format"]')];
+const checkedFormat = () => formatRadios().find((r) => r.checked)?.value ?? null;
+
+test("D2: Settings offers four formats, shows the saved one, and saves a new choice", async () => {
+  const calls = [];
+  await mount((command, args) => {
+    calls.push([command, args]);
+    if (command === "queue_list") return [];
+    if (command === "settings_set_format") return args.format;
+  });
+  await act(async () => gear().click());
+  assert.deepEqual(formatRadios().map((r) => r.value), ["default", "compatibleVideo", "audio", "compatibleAudio"]);
+  assert.equal(checkedFormat(), "default");
+  const labels = [...settingsPanel().querySelectorAll('[data-role="format"] label')].map((l) => l.textContent);
+  assert.ok(labels.some((t) => t.startsWith("Most compatible video (MP4)")));
+  assert.ok(labels.every((t) => !/QuickTime|Finder/.test(t)), "OS-neutral wording");
+  await act(async () => formatRadios()[2].click());
+  assert.deepEqual(calls.at(-1), ["settings_set_format", { format: "audio" }]);
+  assert.equal(checkedFormat(), "audio");
+});
+
+test("D2: a failed save puts the previous format back and shows the reason literally", async () => {
+  await mount((command) => {
+    if (command === "queue_list") return [];
+    if (command === "settings_set_format") throw "Couldn't save your settings: <b>denied</b>";
+  });
+  await act(async () => gear().click());
+  await act(async () => formatRadios()[1].click());
+  assert.equal(checkedFormat(), "default");
+  assert.equal(text('[data-role="format-error"]'), "Couldn't save your settings: <b>denied</b>");
+  assert.equal(settingsPanel().querySelectorAll("p b").length, 0);
+});
+
+test("D2: the choices stay disabled until the saved format is known, then reflect it", async () => {
+  const pending = deferred();
+  mockIPC((command, args) => {
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder") return DEFAULT_FOLDER;
+    if (command === "settings_format") return pending.promise;
+    if (command === "settings_set_format") return args.format;
+    return null;
+  }, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  await act(async () => gear().click());
+  assert.ok(formatRadios().every((r) => r.disabled), "nothing to choose until it's known");
+  assert.equal(checkedFormat(), null);
+  await act(async () => pending.resolve("compatibleAudio"));
+  assert.equal(checkedFormat(), "compatibleAudio");
+  assert.ok(formatRadios().every((r) => !r.disabled));
+  await act(async () => formatRadios()[1].click());
+  assert.equal(checkedFormat(), "compatibleVideo");
+});
+
+test("D2: a finished row shows its notice literally; rows without one show nothing extra", async () => {
+  const rowsIn = [
+    { id: 1, url: "https://example.test/a", status: { state: "done", path: "/d/a.webm" }, rev: 3, meta: null, attempt: 0,
+      notice: "No H.264 version was available, so it's saved as .webm. Some players can't open it. <i>x</i>" },
+    { id: 2, url: "https://example.test/b", status: { state: "done", path: "/d/b.mp4" }, rev: 3, meta: null, attempt: 0, notice: null },
+  ];
+  await mount((command) => (command === "queue_list" ? rowsIn : null));
+  const notices = [...container.querySelectorAll('[data-role="notice"]')].map((n) => n.textContent);
+  assert.deepEqual(notices, [rowsIn[0].notice]);
+  assert.equal(container.querySelectorAll("li i").length, 0);
 });
