@@ -1,4 +1,0 @@
-# Custom labels of the owner's self-hosted runner (the Linux box, #41).
-self-hosted-runner:
-  labels:
-    - ryzen

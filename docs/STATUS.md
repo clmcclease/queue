@@ -61,25 +61,30 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #41 (NFR) native tests on Linux, Windows and macOS, plus the Linux box (PR #57, D-023)
-The owner asked for tests that actually run and pass on all three OSes, using hosted runners and their Ubuntu box. The owner's choices: keep Rust pinned (D-010); extend `build.yml` as #41 rather than add a separate `ci.yml`; set up the box as a runner, with OK for sudo and the runner registration.
-- **CI (`build.yml`):** `check` is now a `test` matrix (`ubuntu-24.04`, `windows-2025`, `macos-26` arm64; `fail-fast: false`) with each OS's own sidecars. It runs `npm run build`, `npm test`, fmt, clippy `-D warnings` and `cargo test --locked`. Bundles need `test`. There's no xvfb (no test needs a display).
-- **Linux box:** `chrisbeast` (Ubuntu 26.04, Ryzen, 16 threads, 192.168.4.83; KVM console at 192.168.4.69).
-  - Packages and the `gh-runner` user (no sudo, rustup) were set up by a one-time root script the owner ran.
-  - Actions runner v2.338.0 (SHA-256 checked) is a systemd service labelled `self-hosted, linux, ryzen`. GitHub shows it online.
-  - The repo is private and runs no fork-PR workflows.
-  - The opt-in `test-box` job (a manual run, or a PR labelled `ci:box`; never forks) passes on the box. It needed `~/.cargo/bin` on PATH, because the service has no login profile.
-- **`scripts/test-linux.sh`:** rsyncs the working tree to the box and runs the same checks. It passes from the Mac. Section C of `docs/QA.md` covers the box.
+## In progress: #41 (NFR) native tests on Linux, Windows and macOS (PR #57, D-023); going public
+The owner asked for tests that actually run and pass on all three OSes, using hosted runners and their Ubuntu box. The owner's choices: keep Rust pinned (D-010); extend `build.yml` as #41 rather than add a separate `ci.yml`.
+- **CI (`build.yml`):** `check` is now a `test` matrix (`ubuntu-24.04`, `windows-2025`, `macos-26` arm64; `fail-fast: false`) with each OS's own sidecars. It runs `npm run build`, `npm test`, fmt, clippy `-D warnings`, `cargo test --locked` and the real-sidecar loopback tests. Bundles need `test`.
+- **Green before billing stopped it:** `test (linux)`, `test (windows)`, `test (macos)` and a self-hosted box job on commit `434d58e`.
 - **Bugs the new runs found, all fixed:**
   1. Windows clippy: `proc.rs` imported Unix-only time types.
   2. The "Text file busy" flake (open problem 5). It reproduced about 20 times in 15 runs on the 16-thread box. `proc::spawn_tree` now retries ETXTBSY briefly on Unix; 0 failures in 75 runs after the fix.
   3. Windows: a test stepped 1 ns at the info-freshness cutoff, but Windows' SystemTime counts 100 ns. It now steps 1 µs.
-- **Checks:** PR #57 is green on `test (linux)`, `test (windows)`, `test (macos)` and `test-box`. Local: `cargo test` 220, `npm test` 140/140, actionlint and shellcheck clean.
-- **Spending limit hit (2026-10-14):** after the bundle run, GitHub refused to start jobs: "recent account payments have failed or your spending limit needs to be increased". The owner chose "Linux on the box, rest gated". A `plan` job (`scripts/ci-plan.sh`, tested by `ci.test.mjs`) now puts Linux on the box when it's online (or labelled `ci:box`), with hosted Linux otherwise. Windows and macOS, and the macOS ffmpeg build, run only on `main`, manual runs, and PRs labelled `ci:native` or `ci:bundle`. Detecting the box needs a `RUNNER_STATUS_TOKEN` secret, which the owner creates; without it, hosted Linux runs.
 - `codex-qa test "#41"`: **FAIL**, then fixed (`qa/reports/20261014-201623-test-u22j.md`). Two parts of #41 were missing:
-  1. CI never ran the real-sidecar loopback tests. They now run in `test`, in `test-box` and in `scripts/test-linux.sh`, as `cargo test --test download_real_d2 -- --ignored` with each OS's own sidecars; the YouTube test skips itself without `QUEUE_QA_NETWORK`.
-  2. There was no Windows download fixture. Codex's tests are added (D-021): `native_download_41_qa.rs` builds a tiny Rust fake yt-dlp (`tests/support/native_sidecar_41.rs`) with `rustc`. Its 5 portable tests cover Unicode argv and paths, collisions, malformed or oversized pipes, a 403 retry, metadata timeouts and an orphaned descendant. It adds 2 Linux-only ETXTBSY tests, plus a CI check that the loopback step exists.
-  The box also caught a bug in `ci-plan.sh`: appending to `/dev/stdout` fails on Linux when stdout is a socket. Fixed. On the box, `scripts/test-linux.sh` passes, including all loopback tests and both ETXTBSY tests. Locally: `cargo test` 225, `npm test` 142/142. The Windows run of the new fixture waits for CI (billing).
+  1. CI never ran the real-sidecar loopback tests. They now run in `test` and in `scripts/test-linux.sh`.
+  2. There was no Windows download fixture. Codex's tests are added (D-021): `native_download_41_qa.rs` builds a tiny Rust fake yt-dlp (`tests/support/native_sidecar_41.rs`) with `rustc`. Its 5 portable tests cover Unicode argv and paths, collisions, pipes, a 403 retry, timeouts and an orphaned descendant. It adds 2 Linux-only ETXTBSY tests, plus a CI check that the loopback step exists.
+- **Actions minutes ran out:** about 3,100 billed minutes in 6 days against the private plan's 2,000. Mostly macOS bundles (about 48%) and the macOS ffmpeg job (about 16%), both at 10×. GitHub stopped starting jobs.
+- **Going public (2026-10-14, the owner's decision; D-023):**
+  - **History scan:** gitleaks over all 56 commits, including GitHub's pre-squash `refs/pull/*`, found no leaks. No binaries were ever committed, and the only email addresses are the owner's and noreply ones.
+  - **Box runner removed:** unregistered on GitHub (0 runners). The owner runs `sudo bash ~/queue-box-runner-remove.sh` on the box to remove the service and the `gh-runner` user; the build packages stay for `scripts/test-linux.sh`.
+  - **CI simplified:** the `test-box` job, the cost-gating `plan` job (`ci-plan.sh`) and `.github/actionlint.yaml` are removed; the full matrix runs on every PR. A config test asserts there's no self-hosted runner, no `pull_request_target` and no secrets.
+  - **LAN details** removed from the current docs (they remain in history; they're private, unreachable addresses).
+- **Linux box:** `chrisbeast` (Ubuntu 26.04, Ryzen, 16 threads) runs `scripts/test-linux.sh` over SSH; section C of `docs/QA.md` covers it. Passes, including the loopback and ETXTBSY tests.
+- **Local checks:** `cargo test` 225, `npm test` 141/141, actionlint and shellcheck clean.
+- **Still to do before flipping:**
+  1. A license for Queue (`Cargo.toml` says `UNLICENSED`) and third-party notices (ffmpeg LGPL-2.1 with a source pointer, deno MIT, Tauri and other dependencies).
+  2. `SECURITY.md` and a contribution note.
+  3. The README's responsible-use wording.
+  4. "Require approval for outside contributors" for fork workflows.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
@@ -309,4 +314,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#41 / PR #57: the owner fixes Actions billing and optionally adds `RUNNER_STATUS_TOKEN`. Then one `ci:bundle` run, `codex-qa test "#41"` and `review`, then ask for the squash-merge. Then decide whether #41 stays open for the Windows fake-yt-dlp fixture or gets a follow-up issue. Next item: #11 (D2 format presets, D-015).
+Going public: the owner picks a license. Then add LICENSE, third-party notices, `SECURITY.md`, a contribution note and the README's responsible-use wording. The owner flips the visibility, and PR #57's CI runs on free runners. Then the `codex-qa review` gate and the squash-merge for #41. Next item: #11 (D2 format presets, D-015).

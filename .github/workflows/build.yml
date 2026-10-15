@@ -1,10 +1,7 @@
-# Cross-platform build (#29, #41). Tests run natively, but paid minutes are spent only where
-# needed (D-023, scripts/ci-plan.sh):
-# - Linux checks run on the owner's self-hosted box when it's online, else on hosted Linux.
-# - Windows and macOS checks (macOS bills 10x, Windows 2x) run on pushes to main, manual runs,
-#   and PRs labelled ci:native or ci:bundle.
-# - Pushes to main (and PRs labelled ci:bundle) also bundle for each OS and upload unsigned
-#   artifacts. Signing is #24.
+# Cross-platform build (#29, #41). The full checks and tests run natively on Linux, Windows and
+# macOS (arm64) for every PR and every push to main (D-023); the repo is public, so standard
+# runners cost nothing. Pushes to main (and PRs labelled ci:bundle) also bundle for each OS and
+# upload unsigned artifacts. Signing is #24.
 # Sidecars (#2, D-012): ffmpeg/ffprobe are built from source once per target (cached by script and
 # manifest hash); each job then downloads them and fetches the pinned yt-dlp and deno.
 name: build
@@ -29,37 +26,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # What this run needs (scripts/ci-plan.sh): which OSes to test, whether the box takes Linux,
-  # and which ffmpeg builds that requires.
-  plan:
-    runs-on: ubuntu-24.04
-    outputs:
-      box: ${{ steps.plan.outputs.box }}
-      native: ${{ steps.plan.outputs.native }}
-      tests: ${{ steps.plan.outputs.tests }}
-      ffmpeg: ${{ steps.plan.outputs.ffmpeg }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/ci-plan.sh
-          sparse-checkout-cone-mode: false
-      - id: plan
-        env:
-          EVENT: ${{ github.event_name }}
-          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-          RUNNER_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          scripts/ci-plan.sh
-          cat "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
-
   ffmpeg:
-    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.ffmpeg) }}
+        include:
+          - runner: macos-26
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+            key: macos
+          - runner: ubuntu-24.04
+            targets: x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+            key: linux-windows
     name: ffmpeg (${{ matrix.key }})
     runs-on: ${{ matrix.runner }}
     steps:
@@ -87,16 +64,23 @@ jobs:
           name: ffmpeg-${{ matrix.key }}
           path: out/
 
-  # The same checks on each planned OS, so OS-specific behavior (paths, process trees, file
-  # managers, filesystem case and Unicode rules) is tested where it runs. One OS failing doesn't
-  # hide the others.
+  # The same checks on each OS, so OS-specific behavior (paths, process trees, file managers,
+  # filesystem case and Unicode rules) is tested where it runs. One OS failing doesn't hide the others.
   test:
-    needs: [plan, ffmpeg]
-    if: needs.plan.outputs.tests != '[]'
+    needs: ffmpeg
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.tests) }}
+        include:
+          - os: linux
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: macos
+            runner: macos-26
+            target: aarch64-apple-darwin
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
     steps:
@@ -146,59 +130,9 @@ jobs:
           QUEUE_QA_REAL_SIDECARS: ${{ github.workspace }}/src-tauri/binaries
         run: cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
 
-  # The Linux checks on the owner's box (self-hosted runner, labels self-hosted/linux/ryzen):
-  # free, and real hardware. Only when the plan found it online (or the PR is labelled ci:box),
-  # so an offline box never leaves checks pending; never for fork PRs, since a self-hosted runner
-  # executes the repo's code. The box has the Tauri build packages, so there's no apt step.
-  test-box:
-    needs: [plan, ffmpeg]
-    if: needs.plan.outputs.box == 'true'
-    runs-on: [self-hosted, linux, ryzen]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: package.json
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: ffmpeg-*
-          merge-multiple: true
-          path: ffmpeg-out
-      - name: Install sidecars and check yt-dlp sees them
-        run: |
-          mkdir -p src-tauri/binaries
-          cp ffmpeg-out/x86_64-unknown-linux-gnu/* src-tauri/binaries/
-          chmod +x src-tauri/binaries/queue-*
-          node scripts/fetch-sidecars.mjs --target x86_64-unknown-linux-gnu --check
-      # The runner service doesn't read a login profile, so rustup's ~/.cargo/bin isn't on PATH.
-      - name: Install Rust (rust-toolchain.toml)
-        run: |
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" toolchain install
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - run: cargo fmt --check
-        working-directory: src-tauri
-      - run: cargo clippy --locked --all-targets -- -D warnings
-        working-directory: src-tauri
-      - run: cargo test --locked
-        working-directory: src-tauri
-      # The real pinned yt-dlp and ffmpeg against a loopback HTTP server (no external network;
-      # the one YouTube test skips itself without QUEUE_QA_NETWORK).
-      - name: Real-sidecar loopback tests
-        working-directory: src-tauri
-        shell: bash
-        env:
-          QUEUE_QA_REAL_SIDECARS: ${{ github.workspace }}/src-tauri/binaries
-        run: cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
-
   bundle:
-    needs: [plan, test, test-box]
-    # After every planned test passed (skipped ones are fine), and only on main or ci:bundle PRs.
-    if: >-
-      !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') &&
-      (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:bundle'))
+    needs: test
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:bundle')
     strategy:
       fail-fast: false
       matrix:
