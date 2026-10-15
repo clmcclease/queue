@@ -60,4 +60,15 @@ scripts/      codex-qa and (later) build helpers
 
 ## Legal
 
-Queue is for personal use. It does not get around DRM. You are responsible for following the terms of service of the sites you download from.
+Queue downloads with [yt-dlp](https://github.com/yt-dlp/yt-dlp). Use it only for content you
+have the right to download: your own uploads, openly licensed works, or anything the site's
+terms allow. Queue does not get around DRM, paywalls or other access controls. You are
+responsible for following the terms of service of the sites you download from and the law where
+you live.
+
+## License
+
+Queue is licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at
+your option. Its installers also include yt-dlp (Unlicense), deno (MIT) and an LGPL-only FFmpeg
+build; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Security reports: [SECURITY.md](SECURITY.md).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).

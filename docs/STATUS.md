@@ -80,11 +80,15 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
   - **LAN details** removed from the current docs (they remain in history; they're private, unreachable addresses).
 - **Linux box:** `chrisbeast` (Ubuntu 26.04, Ryzen, 16 threads) runs `scripts/test-linux.sh` over SSH; section C of `docs/QA.md` covers it. Passes, including the loopback and ETXTBSY tests.
 - **Local checks:** `cargo test` 225, `npm test` 141/141, actionlint and shellcheck clean.
-- **Still to do before flipping:**
-  1. A license for Queue (`Cargo.toml` says `UNLICENSED`) and third-party notices (ffmpeg LGPL-2.1 with a source pointer, deno MIT, Tauri and other dependencies).
-  2. `SECURITY.md` and a contribution note.
-  3. The README's responsible-use wording.
-  4. "Require approval for outside contributors" for fork workflows.
+- **License and public-facing files (D-024):** MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`; `Cargo.toml`, `package.json` and the lockfile's root entry). Also added:
+  - `THIRD_PARTY_NOTICES.md`: yt-dlp Unlicense, deno MIT, and the LGPL FFmpeg build with its exact source and build script;
+  - `SECURITY.md`, which asks for private vulnerability reports;
+  - `CONTRIBUTING.md`: issues welcome, and an issue before any PR;
+  - the README's responsible-use and License sections.
+- **Remaining, after the owner flips the repo to public:**
+  1. Turn on "require approval for outside contributors" for fork workflows, and private vulnerability reporting.
+  2. Let PR #57's CI run on free runners (the first Windows run of the portable fixture).
+  3. `codex-qa review`, then the squash-merge.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
@@ -314,4 +318,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-Going public: the owner picks a license. Then add LICENSE, third-party notices, `SECURITY.md`, a contribution note and the README's responsible-use wording. The owner flips the visibility, and PR #57's CI runs on free runners. Then the `codex-qa review` gate and the squash-merge for #41. Next item: #11 (D2 format presets, D-015).
+Going public: the owner flips the visibility (and removes the box runner service with `queue-box-runner-remove.sh`). Then turn on fork-workflow approval and private vulnerability reporting, and let PR #57's CI run on free runners. Then the `codex-qa review` gate and the squash-merge for #41. Next item: #11 (D2 format presets, D-015).
