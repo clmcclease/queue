@@ -19,7 +19,6 @@ LABELS="${LABELS:-[]}"
 FORK="${FORK:-false}"
 REPO="${REPO:-}"
 API="${API:-https://api.github.com}"
-OUT="${GITHUB_OUTPUT:-/dev/stdout}"
 
 has_label() { grep -Fq "\"$1\"" <<<"$LABELS"; }
 
@@ -57,9 +56,12 @@ tests="[$rows]"
 ffmpeg="[$ff_linux]"
 if [ "$native" = true ]; then ffmpeg="[$ff_macos,$ff_linux]"; fi
 
-{
+outputs() {
   echo "box=$box"
   echo "native=$native"
   echo "tests=$tests"
   echo "ffmpeg=$ffmpeg"
-} >>"$OUT"
+}
+# Plain stdout when run by hand or by the tests: appending to /dev/stdout fails on Linux when
+# stdout is a socket.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then outputs >>"$GITHUB_OUTPUT"; else outputs; fi

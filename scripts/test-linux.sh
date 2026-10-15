@@ -63,5 +63,7 @@ cd src-tauri
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 run cargo test --locked
+echo "==> Real-sidecar loopback tests"
+QUEUE_QA_REAL_SIDECARS="$PWD/binaries" run cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
 echo "==> All Linux checks passed on $(hostname)"
 REMOTE

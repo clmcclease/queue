@@ -137,6 +137,14 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
+      # The real pinned yt-dlp and ffmpeg against a loopback HTTP server (no external network;
+      # the one YouTube test skips itself without QUEUE_QA_NETWORK).
+      - name: Real-sidecar loopback tests
+        working-directory: src-tauri
+        shell: bash
+        env:
+          QUEUE_QA_REAL_SIDECARS: ${{ github.workspace }}/src-tauri/binaries
+        run: cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
 
   # The Linux checks on the owner's box (self-hosted runner, labels self-hosted/linux/ryzen):
   # free, and real hardware. Only when the plan found it online (or the PR is labelled ci:box),
@@ -176,6 +184,14 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
+      # The real pinned yt-dlp and ffmpeg against a loopback HTTP server (no external network;
+      # the one YouTube test skips itself without QUEUE_QA_NETWORK).
+      - name: Real-sidecar loopback tests
+        working-directory: src-tauri
+        shell: bash
+        env:
+          QUEUE_QA_REAL_SIDECARS: ${{ github.workspace }}/src-tauri/binaries
+        run: cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
 
   bundle:
     needs: [plan, test, test-box]
