@@ -4,6 +4,8 @@
 // validates YAML and GitHub expressions. No network or native builds here.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
@@ -31,47 +33,67 @@ const test_ = block("  test:");
 const bundle = block("  bundle:");
 const steps = (job) => job.split(/^      - /m).slice(1);
 
-test("D-011/D-023 checks run on every push to main and every PR, not on bare branch pushes", () => {
+test("D-011/D-023 a run happens on every push to main and every PR, not on bare branch pushes", () => {
   const push = block("  push:");
   assert.match(push, /^    branches: \[main\]$/m, "only main pushes trigger; PR branches run via pull_request");
   assert.doesNotMatch(push, /^    (?:branches-ignore|paths|paths-ignore|tags|tags-ignore):/m);
-  assert.doesNotMatch(test_, /^    if:/m);
+  assert.doesNotMatch(block("  plan:"), /^    if:/m, "the plan always runs");
 });
 
-test("D-023: the full checks and tests run natively on Linux, Windows and macOS, independently", () => {
-  const rows = [...test_.matchAll(/          - os: (\S+)\n            runner: (\S+)\n            target: (\S+)/g)]
-    .map(([, os, runner, target]) => [os, runner, target]);
-  assert.deepEqual(rows, [
-    ["linux", "ubuntu-24.04", "x86_64-unknown-linux-gnu"],
-    ["windows", "windows-2025", "x86_64-pc-windows-msvc"],
-    ["macos", "macos-26", "aarch64-apple-darwin"],
-  ]);
+// Runs scripts/ci-plan.sh (bash; it also has to work with macOS's bash 3.2) and parses its outputs.
+function plan(env) {
+  const run = spawnSync("bash", [fileURLToPath(new URL("scripts/ci-plan.sh", root))], {
+    encoding: "utf8", timeout: 10000,
+    env: { PATH: process.env.PATH, GITHUB_OUTPUT: "", ...env },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const out = Object.fromEntries(run.stdout.trim().split("\n").map((line) => line.split(/=(.*)/s).slice(0, 2)));
+  return { box: out.box, native: out.native, tests: JSON.parse(out.tests).map((r) => r.os), ffmpeg: JSON.parse(out.ffmpeg).map((r) => r.key), rows: JSON.parse(out.tests) };
+}
+
+test("D-023: the plan tests Windows/macOS only on main, manual runs and ci:native/ci:bundle PRs", { skip: process.platform === "win32" && "ci-plan.sh is bash" }, () => {
+  for (const [event, labels, tests, ffmpeg] of [
+    ["pull_request", [], ["linux"], ["linux-windows"]],
+    ["pull_request", ["bug"], ["linux"], ["linux-windows"]],
+    ["pull_request", ["ci:native"], ["linux", "windows", "macos"], ["macos", "linux-windows"]],
+    ["pull_request", ["ci:bundle"], ["linux", "windows", "macos"], ["macos", "linux-windows"]],
+    ["pull_request", ["ci:bundle-extra"], ["linux"], ["linux-windows"]],
+    ["push", [], ["linux", "windows", "macos"], ["macos", "linux-windows"]],
+    ["workflow_dispatch", [], ["linux", "windows", "macos"], ["macos", "linux-windows"]],
+  ]) {
+    const p = plan({ EVENT: event, LABELS: JSON.stringify(labels) });
+    assert.deepEqual([p.tests, p.ffmpeg, p.box], [tests, ffmpeg, "false"], `${event} ${JSON.stringify(labels)}`);
+  }
+  assert.deepEqual(plan({ EVENT: "push" }).rows, [
+    { os: "linux", runner: "ubuntu-24.04", target: "x86_64-unknown-linux-gnu" },
+    { os: "windows", runner: "windows-2025", target: "x86_64-pc-windows-msvc" },
+    { os: "macos", runner: "macos-26", target: "aarch64-apple-darwin" },
+  ], "pinned runners and each OS's own target");
+});
+
+test("D-023: Linux moves to the box only when it's known to be up, and never for forks", { skip: process.platform === "win32" && "ci-plan.sh is bash" }, () => {
+  const labelled = plan({ EVENT: "pull_request", LABELS: '["ci:box"]' });
+  assert.deepEqual([labelled.box, labelled.tests], ["true", []], "ci:box puts Linux on the box");
+  const fork = plan({ EVENT: "pull_request", LABELS: '["ci:box","ci:native"]', FORK: "true" });
+  assert.deepEqual([fork.box, fork.tests], ["false", ["linux", "windows", "macos"]], "fork PRs never reach the box");
+  // A token but no reachable API: counts as offline, so hosted Linux runs (nothing is left pending).
+  const unreachable = plan({ EVENT: "pull_request", RUNNER_TOKEN: "x", REPO: "o/r", API: "http://127.0.0.1:9" });
+  assert.deepEqual([unreachable.box, unreachable.tests], ["false", ["linux"]]);
+});
+
+test("the workflow takes its matrices from the plan, and the box job runs the same checks", () => {
+  assert.match(block("  plan:"), /^          RUNNER_TOKEN: \$\{\{ secrets\.RUNNER_STATUS_TOKEN \}\}$/m);
+  assert.match(block("  ffmpeg:"), /^        include: \$\{\{ fromJSON\(needs\.plan\.outputs\.ffmpeg\) \}\}$/m);
+  assert.match(test_, /^        include: \$\{\{ fromJSON\(needs\.plan\.outputs\.tests\) \}\}$/m);
+  assert.match(test_, /^    if: needs\.plan\.outputs\.tests != '\[\]'$/m, "no empty matrix");
   assert.match(test_, /^      fail-fast: false$/m, "one OS failing must not cancel the others");
   assert.match(test_, /^    runs-on: \$\{\{ matrix\.runner \}\}$/m);
   assert.match(test_, /node scripts\/fetch-sidecars\.mjs --target \$\{\{ matrix\.target \}\} --check$/m,
     "each OS installs and checks its own sidecars");
   assert.match(test_, /^          key: test-\$\{\{ matrix\.os \}\}$/m, "per-OS Rust cache");
-});
-
-test("the self-hosted box job is opt-in, never runs fork PRs, and runs the same checks", () => {
   const box = block("  test-box:");
   assert.match(box, /^    runs-on: \[self-hosted, linux, ryzen\]$/m);
-  const condition = box.match(/^    if: >-\n((?:      .+\n?)+)/m)?.[1].replace(/\s+/g, " ").trim();
-  assert.ok(condition, "the box job needs an opt-in guard");
-  const expression = condition.replaceAll("github.event.pull_request.labels.*.name", "labelNames");
-  for (const [eventName, head, labelNames, expected] of [
-    ["workflow_dispatch", null, [], true],
-    ["push", null, [], false],
-    ["pull_request", "clmcclease/queue", [], false],
-    ["pull_request", "clmcclease/queue", ["ci:box"], true],
-    ["pull_request", "someone/fork", ["ci:box"], false],
-  ]) {
-    assert.equal(runInNewContext(expression, {
-      github: { event_name: eventName, repository: "clmcclease/queue", event: { pull_request: { head: { repo: { full_name: head } } } } },
-      labelNames,
-      contains: (values, value) => values.includes(value),
-    }, { timeout: 1000 }), expected, `${eventName} ${head} ${JSON.stringify(labelNames)}`);
-  }
+  assert.match(box, /^    if: needs\.plan\.outputs\.box == 'true'$/m);
   for (const command of ["npm test", "cargo clippy --locked --all-targets -- -D warnings", "cargo test --locked"]) {
     assert.ok(steps(box).some((entry) => entry.split("\n")[0] === `run: ${command}`), `box job runs ${command}`);
   }
@@ -100,28 +122,30 @@ test("all four desktop targets use pinned compatible runners and independent mat
   assert.match(bundle, /^    runs-on: \$\{\{ matrix\.runner \}\}$/m);
 });
 
-test("bundles depend on the tests and PR bundling is gated by ci:bundle", () => {
-  assert.match(bundle, /^    needs: test$/m);
-  const condition = bundle.match(/^    if: (.+)$/m)?.[1];
-  assert.ok(condition, "bundling must have an event guard");
-  // The guard uses JS-compatible boolean operators plus GitHub's label projection.
-  // actionlint validates the original expression. Exercise its event/label cases
-  // in an isolated context so equivalent guards can satisfy the contract.
-  const expression = condition.replace(/^\$\{\{\s*|\s*\}\}$/g, "")
-    .replaceAll("github.event.pull_request.labels.*.name", "labelNames");
-  for (const [eventName, labelNames, expected] of [
-    ["push", [], true],
-    ["workflow_dispatch", [], true],
-    ["pull_request", [], false],
-    ["pull_request", ["bug", "ci:bundle-extra"], false],
-    ["pull_request", ["ci:bundle"], true],
-    ["pull_request", ["bug", "ci:bundle"], true],
+test("bundles need every planned test to pass and PR bundling is gated by ci:bundle", () => {
+  assert.match(bundle, /^    needs: \[plan, test, test-box\]$/m);
+  const condition = bundle.match(/^    if: >-\n((?:      .+\n?)+)/m)?.[1].replace(/\s+/g, " ").trim();
+  assert.ok(condition, "bundling must have a guard");
+  const expression = condition
+    .replaceAll("github.event.pull_request.labels.*.name", "labelNames")
+    .replaceAll("needs.*.result", "results")
+    .replaceAll("!cancelled()", "!runCancelled");
+  for (const [eventName, labelNames, results, expected] of [
+    ["push", [], ["success", "success", "skipped"], true],
+    ["push", [], ["success", "skipped", "success"], true],
+    ["workflow_dispatch", [], ["success", "success", "skipped"], true],
+    ["push", [], ["success", "failure", "skipped"], false],
+    ["push", [], ["success", "success", "cancelled"], false],
+    ["pull_request", [], ["success", "success", "skipped"], false],
+    ["pull_request", ["bug", "ci:bundle-extra"], ["success", "success", "skipped"], false],
+    ["pull_request", ["ci:bundle"], ["success", "success", "skipped"], true],
+    ["pull_request", ["bug", "ci:bundle"], ["success", "failure", "skipped"], false],
   ]) {
     assert.equal(runInNewContext(expression, {
-      github: { event_name: eventName, ref: "refs/heads/main", event: {} },
-      labelNames,
+      github: { event_name: eventName, event: {} },
+      labelNames, results, runCancelled: false,
       contains: (values, value) => values.includes(value),
-    }, { timeout: 1000 }), expected, `${eventName} with ${JSON.stringify(labelNames)}`);
+    }, { timeout: 1000 }), expected, `${eventName} ${JSON.stringify(labelNames)} ${results}`);
   }
   assert.match(workflow, /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
     "main push bundles must not be canceled by a subsequent push");

@@ -38,7 +38,7 @@ The box needs:
 - the Tauri build packages (`libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config xvfb`), plus `curl`, `rsync`, `xz-utils` and `zlib1g-dev` for the ffmpeg build;
 - `rustup`, and `mise` for the pinned Node.
 
-The same box is a self-hosted Actions runner (`self-hosted, linux, ryzen`) under the `gh-runner` user. CI's `test-box` job runs there only on a manual run or a PR labelled `ci:box`.
+The same box is a self-hosted Actions runner (`self-hosted, linux, ryzen`) under the `gh-runner` user. CI's Linux checks run there when it's online (`scripts/ci-plan.sh`; needs the `RUNNER_STATUS_TOKEN` secret) or when a PR is labelled `ci:box`. Otherwise they run on hosted Linux. Windows and macOS checks run on `main` and on PRs labelled `ci:native` or `ci:bundle`; add `ci:native` before merging anything OS-specific.
 
 ## Rules
 

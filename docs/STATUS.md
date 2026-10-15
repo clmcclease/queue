@@ -75,6 +75,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
   2. The "Text file busy" flake (open problem 5). It reproduced about 20 times in 15 runs on the 16-thread box. `proc::spawn_tree` now retries ETXTBSY briefly on Unix; 0 failures in 75 runs after the fix.
   3. Windows: a test stepped 1 ns at the info-freshness cutoff, but Windows' SystemTime counts 100 ns. It now steps 1 µs.
 - **Checks:** PR #57 is green on `test (linux)`, `test (windows)`, `test (macos)` and `test-box`. Local: `cargo test` 220, `npm test` 140/140, actionlint and shellcheck clean.
+- **Spending limit hit (2026-10-14):** after the bundle run, GitHub refused to start jobs: "recent account payments have failed or your spending limit needs to be increased". The owner chose "Linux on the box, rest gated". A `plan` job (`scripts/ci-plan.sh`, tested by `ci.test.mjs`) now puts Linux on the box when it's online (or labelled `ci:box`), with hosted Linux otherwise. Windows and macOS, and the macOS ffmpeg build, run only on `main`, manual runs, and PRs labelled `ci:native` or `ci:bundle`. Detecting the box needs a `RUNNER_STATUS_TOKEN` secret, which the owner creates; without it, hosted Linux runs.
 - **Not done in this PR:** #41's Windows fake-yt-dlp fixture. The Unix-only subprocess tests still skip on Windows.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
@@ -305,4 +306,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#41 / PR #57: run `codex-qa test "#41"` and `review`, and one `ci:bundle` run (the bundle job's dependencies changed), then ask for the squash-merge. Then decide whether #41 stays open for the Windows fake-yt-dlp fixture or gets a follow-up issue. Next item: #11 (D2 format presets, D-015).
+#41 / PR #57: the owner fixes Actions billing and optionally adds `RUNNER_STATUS_TOKEN`. Then one `ci:bundle` run, `codex-qa test "#41"` and `review`, then ask for the squash-merge. Then decide whether #41 stays open for the Windows fake-yt-dlp fixture or gets a follow-up issue. Next item: #11 (D2 format presets, D-015).
