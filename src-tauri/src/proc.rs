@@ -8,7 +8,8 @@
 //!   is terminated or its handle closes.
 use std::io::{self, Read};
 use std::process::{Child, Command};
-use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::time::{Duration, Instant}; // the SIGTERM grace period and spawn retries
 
 /// A spawned child plus whatever is needed to stop everything it started.
 pub struct Tree {
@@ -24,7 +25,7 @@ pub fn spawn_tree(cmd: &mut Command) -> io::Result<Tree> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
         Ok(Tree {
-            child: cmd.spawn()?,
+            child: spawn_retrying_busy(cmd)?,
         })
     }
     #[cfg(windows)]
@@ -42,6 +43,24 @@ pub fn spawn_tree(cmd: &mut Command) -> io::Result<Tree> {
             return Err(e);
         }
         Ok(Tree { child, job })
+    }
+}
+
+/// Spawns `cmd`, retrying briefly on ETXTBSY ("Text file busy"). An executable that was just
+/// written (a test's fake sidecar, or yt-dlp after it updates itself, #21) can still be open for
+/// writing in a process another thread is forking at that moment; exec fails until that fork
+/// execs and closes it, which takes milliseconds. Cargo retries the same way.
+#[cfg(unix)]
+fn spawn_retrying_busy(cmd: &mut Command) -> io::Result<Child> {
+    let mut attempt = 0;
+    loop {
+        match cmd.spawn() {
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && attempt < 10 => {
+                attempt += 1;
+                std::thread::sleep(Duration::from_millis(5 * attempt));
+            }
+            result => return result,
+        }
     }
 }
 

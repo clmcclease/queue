@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-12 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), next
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #11 (D2 format presets), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,44 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## Done: #41 (NFR) native tests on Linux, Windows and macOS; the repo went public (squash-merged from PR #57; D-023, D-024)
+The owner asked for tests that actually run and pass on all three OSes, using hosted runners and their Ubuntu box. The owner's choices: keep Rust pinned (D-010); extend `build.yml` as #41 rather than add a separate `ci.yml`.
+- **CI (`build.yml`):** `check` is now a `test` matrix (`ubuntu-24.04`, `windows-2025`, `macos-26` arm64; `fail-fast: false`) with each OS's own sidecars. It runs `npm run build`, `npm test`, fmt, clippy `-D warnings`, `cargo test --locked` and the real-sidecar loopback tests. Bundles need `test`.
+- **Green before billing stopped it:** `test (linux)`, `test (windows)`, `test (macos)` and a self-hosted box job on commit `434d58e`.
+- **Bugs the new runs found, all fixed:**
+  1. Windows clippy: `proc.rs` imported Unix-only time types.
+  2. The "Text file busy" flake (open problem 5). It reproduced about 20 times in 15 runs on the 16-thread box. `proc::spawn_tree` now retries ETXTBSY briefly on Unix; 0 failures in 75 runs after the fix.
+  3. Windows: a test stepped 1 ns at the info-freshness cutoff, but Windows' SystemTime counts 100 ns. It now steps 1 µs.
+- `codex-qa test "#41"`: **FAIL**, then fixed (`qa/reports/20261014-201623-test-u22j.md`). Two parts of #41 were missing:
+  1. CI never ran the real-sidecar loopback tests. They now run in `test` and in `scripts/test-linux.sh`.
+  2. There was no Windows download fixture. Codex's tests are added (D-021): `native_download_41_qa.rs` builds a tiny Rust fake yt-dlp (`tests/support/native_sidecar_41.rs`) with `rustc`. Its 5 portable tests cover Unicode argv and paths, collisions, pipes, a 403 retry, timeouts and an orphaned descendant. It adds 2 Linux-only ETXTBSY tests, plus a CI check that the loopback step exists.
+- **Actions minutes ran out:** about 3,100 billed minutes in 6 days against the private plan's 2,000. Mostly macOS bundles (about 48%) and the macOS ffmpeg job (about 16%), both at 10×. GitHub stopped starting jobs.
+- **Going public (2026-10-14, the owner's decision; D-023):**
+  - **History scan:** gitleaks over all 56 commits, including GitHub's pre-squash `refs/pull/*`, found no leaks. No binaries were ever committed, and the only email addresses are the owner's and noreply ones.
+  - **Box runner removed:** unregistered on GitHub (0 runners). The owner runs `sudo bash ~/queue-box-runner-remove.sh` on the box to remove the service and the `gh-runner` user; the build packages stay for `scripts/test-linux.sh`.
+  - **CI simplified:** the `test-box` job, the cost-gating `plan` job (`ci-plan.sh`) and `.github/actionlint.yaml` are removed; the full matrix runs on every PR. A config test asserts there's no self-hosted runner, no `pull_request_target` and no secrets.
+  - **LAN details** removed from the current docs (they remain in history; they're private, unreachable addresses).
+- **Linux box:** `chrisbeast` (Ubuntu 26.04, Ryzen, 16 threads) runs `scripts/test-linux.sh` over SSH; section C of `docs/QA.md` covers it. Passes, including the loopback and ETXTBSY tests.
+- **Local checks:** `cargo test` 225, `npm test` 141/141, actionlint and shellcheck clean.
+- **License and public-facing files (D-024):** MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`; `Cargo.toml`, `package.json` and the lockfile's root entry). Also added:
+  - `THIRD_PARTY_NOTICES.md`: yt-dlp (Unlicense source; the shipped binary is GPLv3+), deno MIT, and the LGPL FFmpeg build with its exact source and build script. This rewrite of an existing file first dropped the GPLv3+ note and the FFmpeg trademark line; both are restored;
+  - `SECURITY.md`, which asks for private vulnerability reports;
+  - `CONTRIBUTING.md`: issues welcome, and an issue before any PR;
+  - the README's responsible-use and License sections.
+- **Public (2026-10-14):** the owner flipped it. Set: fork-PR workflows need approval for all outside contributors; private vulnerability reporting; secret scanning with push protection; Dependabot alerts and security updates (no open alerts). The box runner service and user were removed (`queue-box-runner-remove.sh`, run by the owner).
+- **CI on free runners:** `test (windows)` first failed 2 of 8 real-sidecar tests with WSAECONNABORTED (10053). On Windows, a socket accepted from the fixture's non-blocking listener is non-blocking too, so a read could hit WouldBlock and drop the connection. Fixed by setting it blocking. Run on `99cb845`: green on all three test jobs and all 4 bundles.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261014-215725-review-MExm.md`), both in `scripts/test-linux.sh`:
+  1. The box never rebuilt a stale ffmpeg. It now stores a fingerprint of `build-ffmpeg.sh` and `sidecars.json` and rebuilds when it changes or a binary is missing.
+  2. ssh split quoted arguments. Host, folder and xvfb values are now validated as plain (openrsync has no `--protect-args`), and the ssh arguments are quoted with `printf %q`. `qa/tests/test-linux.test.mjs` covers this. Verified on the box.
+- `codex-qa review` round 2: **FAIL** (P1), then fixed (`qa/reports/20261014-220204-review-pUlL.md`). `QUEUE_LINUX_DIR=.` passed validation, which would have pointed `rsync --delete` at the box's whole home folder. Two layers now prevent it:
+  1. Every path segment must start with a letter or digit.
+  2. Before any sync, a box-side guard resolves the folder with `realpath`. It must be strictly inside the home, and if it already has files it must carry `.queue-test-checkout`, which the script creates.
+  Tested on the box: a symlink to the home and an unrelated folder with files were both refused, with nothing touched. A normal run passes. `npm test` 144/144.
+- `codex-qa review` round 3: **PASS WITH NOTES** (`qa/reports/20261014-220617-review-sZab.md`). Two P3s, both about test strength, are left as follow-ups:
+  1. The orphan-timeout test doesn't assert that the descendant actually exited.
+  2. `test-linux.test.mjs` checks the remote guard's text rather than running it (it was verified by hand on the box).
+- **Final CI on `3293625`:** green on `test (linux/windows/macos)` and all 4 bundles.
 
 ## Done: #39 (D7) Open folder and Show in folder (squash-merged from PR #56; 4-OS bundles green)
 - **Open folder** (next to "Saving to"): `open_download_folder` opens the current download folder with `reveal::open_folder` (see the review rounds below for each OS). A chosen folder that's gone gives D-020's "isn't available" reason.
@@ -264,11 +302,10 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #39 merge:**
-  - `cargo test` 220, plus 12 opt-in real-sidecar tests (`QUEUE_QA_REAL_SIDECARS="$PWD/binaries" [QUEUE_QA_NETWORK=1] cargo test --locked --test download_real_d2 --test retry_d2 --test meta_q3 -- --ignored --test-threads=1`, from `src-tauri`; last run at #10), including a real YouTube DASH merge with live progress;
-  - `npm test` 138/138; clippy, fmt and build clean.
-- **Hosted CI:** green for every M1 and M2 merge; 4-OS bundles green at the #10 and #39 merges.
-- **Not verified natively:** downloads, the folder picker and Open folder / Show in folder on Windows and Linux (CI builds them and runs the tests; the Rust download tests run on Linux only), and the native webviews on Windows and Linux.
+- **macOS arm64 locally, at the #41 merge:** `cargo test` 225, `npm test` 144/144, real-sidecar loopback 8/8; clippy, fmt, actionlint and shellcheck clean.
+- **Owner's Linux box (`scripts/test-linux.sh`):** all checks, including the loopback and ETXTBSY tests.
+- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #41 merge.
+- **Not verified natively:** UI behavior (folder picker, Open folder / Show in folder, webviews) on Windows and Linux; CI only runs the automated tests there.
 
 ## Open questions and problems
 1. Default local model: **provisionally Qwen3-4B-Instruct-2507** (2.5 GB), with Qwen3.5-2B as the small option (D-016); N9 (#33) confirms it.
@@ -280,7 +317,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
    - **#45** staging-folder cleanup (M2);
    - **#43** Content Security Policy (M5, P1);
    - **#44** yt-dlp GPG signature checks (M5).
-5. Flaky Linux CI: fake-sidecar tests in `download_d2.rs` sometimes fail with `Text file busy (os error 26)`. A script written by one test thread is still open in a process another thread is forking (seen on `main` 2026-10-11 and on PR #52; a re-run passed). Proposed fix: on Linux, retry the spawn a few times on ETXTBSY. Not filed yet.
+5. ~~Flaky Linux CI (`Text file busy`)~~ Fixed in #41: `spawn_tree` retries ETXTBSY.
 6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Not fixed yet.
 
 ## Owner checks in the dev app (macOS)
@@ -289,4 +326,4 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 
 ## Next bounded action
-#11 (D2 format presets: Default / Audio only / Most compatible MP4, D-015): read the issue, PRD and D-015. It includes adding the VP9 decoder and AVI demuxer to the ffmpeg build. The preset control goes in Settings (#36). Then the QA gates. Remaining M2 after that: #12, #13, #41, #42, #45.
+#11 (D2 format presets: Default / Audio only / Most compatible MP4, D-015): read the issue, PRD and D-015. It includes adding the VP9 decoder and AVI demuxer to the ffmpeg build, and the preset control goes in Settings (#36). Use `ci:bundle` (ffmpeg changes). Follow-ups from #41: the two P3 test gaps above. Remaining M2 after #11: #12, #13, #42, #45.

@@ -48,16 +48,16 @@ fn cache_freshness_boundaries_and_non_file_fallback() {
     let fetched_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     queue.set_info(id, path.clone(), fetched_at);
     let cutoff = queue_lib::queue::INFO_FRESH_FOR;
+    // The smallest step every OS's clock can represent: Windows' SystemTime counts 100 ns
+    // units, so "1 ns before the cutoff" would round to the cutoff itself.
+    let tick = Duration::from_micros(1);
     assert_eq!(queue.fresh_info(id, fetched_at), Some(path.clone()));
     assert_eq!(
-        queue.fresh_info(id, fetched_at + cutoff - Duration::from_nanos(1)),
+        queue.fresh_info(id, fetched_at + cutoff - tick),
         Some(path.clone())
     );
     assert_eq!(queue.fresh_info(id, fetched_at + cutoff), None);
-    assert_eq!(
-        queue.fresh_info(id, fetched_at - Duration::from_nanos(1)),
-        None
-    );
+    assert_eq!(queue.fresh_info(id, fetched_at - tick), None);
     assert_eq!(queue.fresh_info(999, fetched_at), None);
     fs::remove_file(&path).unwrap();
     fs::create_dir(&path).unwrap();

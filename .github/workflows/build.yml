@@ -1,6 +1,7 @@
-# Cross-platform build (#29). Checks run once on Linux for every PR and every push to main.
-# Pushes to main (and PRs labelled ci:bundle) also bundle for each OS and upload
-# unsigned artifacts. macOS minutes bill at 10x, so plain PRs skip bundling. Signing is #24.
+# Cross-platform build (#29, #41). The full checks and tests run natively on Linux, Windows and
+# macOS (arm64) for every PR and every push to main (D-023); the repo is public, so standard
+# runners cost nothing. Pushes to main (and PRs labelled ci:bundle) also bundle for each OS and
+# upload unsigned artifacts. Signing is #24.
 # Sidecars (#2, D-012): ffmpeg/ffprobe are built from source once per target (cached by script and
 # manifest hash); each job then downloads them and fetches the pinned yt-dlp and deno.
 name: build
@@ -63,9 +64,25 @@ jobs:
           name: ffmpeg-${{ matrix.key }}
           path: out/
 
-  check:
+  # The same checks on each OS, so OS-specific behavior (paths, process trees, file managers,
+  # filesystem case and Unicode rules) is tested where it runs. One OS failing doesn't hide the others.
+  test:
     needs: ffmpeg
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: macos
+            runner: macos-26
+            target: aarch64-apple-darwin
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -73,6 +90,7 @@ jobs:
           node-version-file: package.json
           cache: npm
       - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
@@ -82,16 +100,18 @@ jobs:
           merge-multiple: true
           path: ffmpeg-out
       - name: Install sidecars and check yt-dlp sees them
+        shell: bash
         run: |
           mkdir -p src-tauri/binaries
-          cp ffmpeg-out/x86_64-unknown-linux-gnu/* src-tauri/binaries/
+          cp ffmpeg-out/${{ matrix.target }}/* src-tauri/binaries/
           chmod +x src-tauri/binaries/queue-*
-          node scripts/fetch-sidecars.mjs --check
+          node scripts/fetch-sidecars.mjs --target ${{ matrix.target }} --check
       - name: Install Rust (rust-toolchain.toml)
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri -> target
+          key: test-${{ matrix.os }}
       - run: npm ci
       - run: npm run build
       - run: npm test
@@ -101,9 +121,17 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
+      # The real pinned yt-dlp and ffmpeg against a loopback HTTP server (no external network;
+      # the one YouTube test skips itself without QUEUE_QA_NETWORK).
+      - name: Real-sidecar loopback tests
+        working-directory: src-tauri
+        shell: bash
+        env:
+          QUEUE_QA_REAL_SIDECARS: ${{ github.workspace }}/src-tauri/binaries
+        run: cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
 
   bundle:
-    needs: check
+    needs: test
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:bundle')
     strategy:
       fail-fast: false
@@ -155,15 +183,10 @@ jobs:
           cp ffmpeg-out/${{ matrix.target }}/* src-tauri/binaries/
           chmod +x src-tauri/binaries/queue-*
           node scripts/fetch-sidecars.mjs --target ${{ matrix.target }} --check
-      # proc.rs's Windows Job Object path (suspended spawn, tree kill) only runs here.
-      - name: Process-tree tests (Windows)
-        if: runner.os == 'Windows'
-        working-directory: src-tauri
-        run: cargo test --locked --test proc_tree
       - run: npm ci
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         with:
           args: --target ${{ matrix.target }}
           uploadWorkflowArtifacts: true
-      # The webview and filesystem differ per OS, so run the frontend/config tests on each one.
+      # Also covers macOS x64 (Rosetta), which has no test job of its own.
       - run: npm test

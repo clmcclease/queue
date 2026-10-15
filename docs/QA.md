@@ -31,6 +31,13 @@ codex -m gpt-6.1-sol -c model_reasoning_effort='"high"' -s read-only
 
 Use `-s workspace-write --worktree` if you want it to write tests without touching the main checkout. Any findings worth keeping go into a GitHub issue or `docs/STATUS.md`, so they aren't lost between terminals.
 
+## C. Linux before pushing: the Linux box (#41, D-023)
+`scripts/test-linux.sh` syncs this working tree (uncommitted changes included) to the box over SSH and runs CI's `test (linux)` steps there. Set `QUEUE_LINUX_HOST` to use another host (default `chrisbeast`), or `QUEUE_LINUX_XVFB=1` to run the tests under `xvfb-run`. The box keeps its own Linux sidecars (ffmpeg is built on the first run), `node_modules` and Rust cache.
+
+The box needs:
+- the Tauri build packages (`libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config xvfb`), plus `curl`, `rsync`, `xz-utils` and `zlib1g-dev` for the ffmpeg build;
+- `rustup`, and `mise` for the pinned Node.
+
 ## Rules
 
 - QA never commits, pushes, or edits the main checkout.
