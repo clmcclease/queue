@@ -5,6 +5,8 @@ import SettingsPanel from "./components/SettingsPanel";
 import UrlBar from "./components/UrlBar";
 import {
   addItem,
+  addManySummary,
+  type AddManyResult,
   downloadItem,
   isAddError,
   listItems,
@@ -172,6 +174,26 @@ export default function App() {
     }
   }
 
+  // Q8: several pasted links, added one at a time in order (each fetches its info as usual).
+  async function addMany(urls: string[]) {
+    const result: AddManyResult = { total: urls.length, added: 0, duplicates: 0, invalid: [], failed: [] };
+    for (const url of urls) {
+      try {
+        const item = await addItem(url);
+        setItems((prev) => mergeItems(prev, [item], removed.current));
+        result.added++;
+      } catch (e) {
+        if (isAddError(e) && e.kind === "duplicate") result.duplicates++;
+        else if (isAddError(e)) result.invalid.push(url);
+        else result.failed.push(String(e));
+      }
+    }
+    const { toast, error } = addManySummary(result);
+    setHighlight(null);
+    showToast(toast);
+    setError(error);
+  }
+
   async function download(id: number) {
     try {
       const item = await downloadItem(id);
@@ -241,7 +263,7 @@ export default function App() {
       <div inert={settingsOpen} className="flex min-h-0 flex-1 flex-col">
         <div className="flex gap-2">
           <div className="min-w-0 flex-1">
-            <UrlBar onAdd={add} />
+            <UrlBar onAdd={add} onAddMany={addMany} />
           </div>
           <button
             type="button"

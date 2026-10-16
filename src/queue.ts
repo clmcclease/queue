@@ -144,3 +144,47 @@ export function progressText(progress: Progress | null | undefined, attempt = 1)
   const text = parts.join(" · ");
   return progress && progress.part > 1 ? `${text} (part ${progress.part})` : text;
 }
+
+/**
+ * Q8 (#13): the links in pasted text, one per non-blank line, trimmed. `null` for a single line,
+ * which is pasted into the field as usual.
+ */
+export function splitLinks(text: string): string[] | null {
+  const lines = text
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return lines.length > 1 ? lines : null;
+}
+
+/** How adding several pasted links went (Q8). */
+export interface AddManyResult {
+  total: number;
+  added: number;
+  duplicates: number;
+  /** Lines that weren't links, as pasted. */
+  invalid: string[];
+  /** Other errors, e.g. the backend didn't answer. */
+  failed: string[];
+}
+
+/** Q8: the summary toast after adding several links, and an error naming the lines that need fixing. */
+export function addManySummary(r: AddManyResult): { toast: string; error: string | null } {
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const notes = [
+    r.duplicates && `${r.duplicates} already in the queue`,
+    r.invalid.length && `${r.invalid.length} not a link`,
+    r.failed.length && `${r.failed.length} couldn't be added`,
+  ].filter(Boolean);
+  const toast =
+    r.added === r.total
+      ? `Added ${plural(r.added, "link")}.`
+      : `Added ${r.added} of ${plural(r.total, "link")}${notes.length ? `: ${notes.join(", ")}` : ""}.`;
+  const shown = r.invalid.slice(0, 3).map((line) => `"${line.length > 60 ? `${line.slice(0, 57)}...` : line}"`);
+  const more = r.invalid.length > shown.length ? ` and ${r.invalid.length - shown.length} more` : "";
+  const errors = [
+    r.invalid.length ? `Not a link: ${shown.join(", ")}${more}.` : null,
+    r.failed.length ? r.failed[0] : null,
+  ].filter((e): e is string => e !== null);
+  return { toast, error: errors.length ? errors.join(" ") : null };
+}
