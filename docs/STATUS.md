@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #12 (Q7 persist the queue across restarts), next
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #59 (Q2 bug: re-add a finished link), uncommitted
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #59 (Q2 bug) re-adding a link whose download finished (uncommitted)
+- **Owner report (2026-10-15):** downloaded a music video with Audio only (`.opus`), then re-added the link to get Most compatible audio (`.m4a`). It was refused as a duplicate, because a Done row still blocked its link (only Failed rows were exempt, since #5).
+- **Owner's decision:** a finished row isn't "in the queue" (PRD Q2). `Item::is_active()` (Fetching, Queued, Downloading, Processing) now decides duplicates in `Queue::add` and the retry guard. A finished link starts a new row with the current Format; a name clash saves as `Title (2).ext` (N2), never overwriting.
+- **Tests changed to the new rule:**
+  - `queue_q2.rs`: `done_rows_still_block…` becomes `only_active_rows_block_duplicates…`, now also covering Processing;
+  - `queue_q6_qa.rs`: a finished copy no longer blocks a retry.
+  New unit tests: a finished row doesn't block its link (written another way) while an active copy does; and a retry is allowed beside a finished copy.
+- **Checks:** `cargo test` 241; clippy/fmt clean; `npm test` 154/154 (macOS arm64).
+- `codex-qa test "#59"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261015-190439-test-Xfo0.md`). Its tests are added (D-021): `readd_q2_59_qa.rs` (5) and `readd-q2-59-qa.test.mjs` (2). `cargo test` 246, `npm test` 156/156.
+- `codex-qa review`: **PASS WITH NOTES**, with no findings (`qa/reports/20261015-190957-review-CbX4.md`). Suggested tests, none blocking: a backend-level re-add that checks the second download gets the new format's flags (format capture is already tested in #11), and a failing re-added item during Download all.
 
 ## Done: #11 (D2) format presets (squash-merged from PR #58; D-015; 4-OS bundles green)
 - **`download::Format`:** `Default` adds no flags. The others add exactly D-015's flags:
@@ -340,6 +351,8 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-13: live progress, "Processing…" and Retry worked on real downloads.
 - 2026-10-13: #10's Change… opened the native picker. A download landed in the chosen (iCloud Drive) folder, and the choice was remembered after a relaunch.
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
+- 2026-10-15: #11's Format setting worked: Best quality gave `.webm`, Most compatible video gave `.mp4`, and Audio only gave `.opus`. Re-adding that link for Most compatible audio was refused, which is bug #59.
+- 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#12 (Q7, P1: persist the queue across restarts): read the issue and PRD Q7, then decide with the owner what survives a restart (rows and their states; in-flight downloads resume or go back to Queued). Settings already persist (D-020). Remaining M2 after #12: #13 (paste many links), #42 (failure-path tests), #45 (stale staging cleanup), and the #41 follow-ups.
+#59: committed for PR review (no `ci:bundle`). Then #12 (Q7 persist the queue across restarts).
