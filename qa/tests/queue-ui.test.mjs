@@ -1445,3 +1445,68 @@ test("Q7: a save that starts failing shows the warning at once, and it clears wh
   await act(async () => emit("queue://storage", null));
   assert.equal(container.querySelector('[data-role="unsaved"]'), null);
 });
+
+// #13 / Q8: paste several links at once, one per line.
+async function pasteText(text) {
+  const event = new window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { getData: (type) => (type === "text/plain" ? text : "") } });
+  await act(async () => field().dispatchEvent(event));
+  return event;
+}
+
+test("Q8: splitLinks splits on any line ending and leaves a single line alone", async () => {
+  const { splitLinks } = await server.ssrLoadModule("/src/queue.ts");
+  assert.deepEqual(splitLinks("https://a.test/1\nhttps://a.test/2"), ["https://a.test/1", "https://a.test/2"]);
+  assert.deepEqual(splitLinks("  https://a.test/1 \r\n\r\n\thttps://a.test/2\rhttps://a.test/3\n"), ["https://a.test/1", "https://a.test/2", "https://a.test/3"]);
+  assert.equal(splitLinks("https://a.test/1"), null);
+  assert.equal(splitLinks("https://a.test/1\n\n  \n"), null, "one link plus blank lines is a normal paste");
+  assert.equal(splitLinks(""), null);
+});
+
+test("Q8: the summary counts what happened and names lines that aren't links", async () => {
+  const { addManySummary } = await server.ssrLoadModule("/src/queue.ts");
+  assert.deepEqual(addManySummary({ total: 3, added: 3, duplicates: 0, invalid: [], failed: [] }), { toast: "Added 3 links.", error: null });
+  assert.deepEqual(addManySummary({ total: 1, added: 1, duplicates: 0, invalid: [], failed: [] }).toast, "Added 1 link.");
+  const mixed = addManySummary({ total: 5, added: 2, duplicates: 1, invalid: ["foo", "bar baz"], failed: [] });
+  assert.equal(mixed.toast, "Added 2 of 5 links: 1 already in the queue, 2 not a link.");
+  assert.equal(mixed.error, 'Not a link: "foo", "bar baz".');
+  const many = addManySummary({ total: 5, added: 0, duplicates: 0, invalid: ["a", "b", "c", "d", "x".repeat(80)], failed: [] });
+  assert.equal(many.error, 'Not a link: "a", "b", "c" and 2 more.');
+  const long = addManySummary({ total: 2, added: 1, duplicates: 0, invalid: ["y".repeat(80)], failed: [] });
+  assert.match(long.error, /"y{57}\.\.\."/);
+  const failed = addManySummary({ total: 2, added: 1, duplicates: 0, invalid: [], failed: ["IPC down"] });
+  assert.deepEqual(failed, { toast: "Added 1 of 2 links: 1 couldn't be added.", error: "IPC down" });
+});
+
+test("Q8: pasting several lines adds one row per link, in order, with a summary", async () => {
+  const added = [];
+  await mount((command, args) => {
+    if (command === "queue_list") return [];
+    if (command !== "queue_add") return null;
+    const url = args.url.trim();
+    if (url === "not a link <b>x</b>") throw { kind: "invalid", message: "That isn't a link." };
+    if (url === "https://example.test/dup") throw { kind: "duplicate", message: "That link is already in the queue.", id: 99 };
+    added.push(url);
+    return { id: added.length, url, status: { state: "fetching" }, rev: 1, meta: null, attempt: 0 };
+  });
+  await type("typed but not submitted");
+  const event = await pasteText("https://example.test/a\n\nnot a link <b>x</b>\nhttps://example.test/dup\r\nhttps://example.test/b\n");
+  assert.equal(event.defaultPrevented, true, "the lines aren't joined into the field");
+  assert.deepEqual(added, ["https://example.test/a", "https://example.test/b"]);
+  assert.deepEqual(rows(), ["https://example.test/a", "https://example.test/b"]);
+  assert.equal(text('[data-role="toast"]'), "Added 2 of 4 links: 1 already in the queue, 1 not a link.");
+  assert.equal(container.querySelector('[role="alert"]').textContent, 'Not a link: "not a link <b>x</b>".');
+  assert.equal(container.querySelectorAll("p b").length, 0, "literal text");
+  assert.equal(field().value, "typed but not submitted", "what was typed stays");
+});
+
+test("Q8: a single-line paste goes into the field as usual", async () => {
+  const calls = [];
+  await mount((command) => {
+    calls.push(command);
+    return command === "queue_list" ? [] : null;
+  });
+  const event = await pasteText("https://example.test/one\n");
+  assert.equal(event.defaultPrevented, false);
+  assert.ok(!calls.includes("queue_add"));
+});
