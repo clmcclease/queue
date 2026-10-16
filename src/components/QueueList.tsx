@@ -28,7 +28,12 @@ function StatusLabel({ item }: { item: QueueItem }) {
     case "fetching":
       return <span className="text-neutral-500 dark:text-neutral-400">Fetching info…</span>;
     case "queued":
-      return null;
+      // E.g. a download cut off when Queue closed (#12); it waits for Download.
+      return item.notice ? (
+        <span data-role="notice" className="block whitespace-normal text-amber-700 dark:text-amber-400">
+          {item.notice}
+        </span>
+      ) : null;
     case "downloading":
       return (
         <span className="text-neutral-500 dark:text-neutral-400">

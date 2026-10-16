@@ -17,6 +17,8 @@ import {
   onRunnerChanged,
   runAll,
   runnerState,
+  onStorageChanged,
+  storageProblem,
   type QueueItem,
 } from "./queue";
 import { useDownloadFolder } from "./useDownloadFolder";
@@ -30,6 +32,8 @@ export default function App() {
   // registration failure is kept separately: a later successful command must not hide it.
   const [listening, setListening] = useState(false);
   const [disconnected, setDisconnected] = useState<string | null>(null);
+  // The queue can't be saved this session (#12); shown until restart.
+  const [unsaved, setUnsaved] = useState<string | null>(null);
   // "Download all" (Q4) runs in the backend; this mirrors it for the button.
   const [running, setRunning] = useState(false);
   // Duplicate links (Q2): a short toast and a brief highlight on the row that already has it.
@@ -69,6 +73,29 @@ export default function App() {
   }
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  useEffect(() => {
+    // Listen first, then read the current state; an event is at least as new as the read.
+    let cancelled = false;
+    let eventSeen = false;
+    let stop: (() => void) | undefined;
+    onStorageChanged((problem) => {
+      eventSeen = true;
+      setUnsaved(problem);
+    })
+      .then((unlisten) => (cancelled ? unlisten() : (stop = unlisten)))
+      .catch(() => {})
+      .finally(() =>
+        storageProblem().then(
+          (problem) => !cancelled && !eventSeen && setUnsaved(problem ?? null),
+          () => {},
+        ),
+      );
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -245,6 +272,11 @@ export default function App() {
             {running ? "Downloading all…" : "Download all"}
           </button>
         </div>
+        {unsaved && (
+          <p role="alert" data-role="unsaved" className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {unsaved}
+          </p>
+        )}
         {disconnected && (
           <p role="alert" data-role="disconnected" className="mt-2 text-sm text-red-600 dark:text-red-400">
             Can't receive download updates ({disconnected}). Restart Queue to download.

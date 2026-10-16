@@ -55,6 +55,7 @@ function ambient(handler) {
     if (command === "queue_runner_state") return false;
     if (command === "settings_download_folder") return DEFAULT_FOLDER;
     if (command === "settings_format") return "default";
+    if (command === "queue_storage_problem") return null;
     return handler(command, args);
   };
 }
@@ -1392,4 +1393,55 @@ test("D2: a finished row shows its notice literally; rows without one show nothi
   const notices = [...container.querySelectorAll('[data-role="notice"]')].map((n) => n.textContent);
   assert.deepEqual(notices, [rowsIn[0].notice]);
   assert.equal(container.querySelectorAll("li i").length, 0);
+});
+
+// #12 / Q7: the queue comes back after a restart; an interrupted download waits, with a note.
+test("Q7: a restored interrupted row is queued with its note and starts only on Download", async () => {
+  const note = "Interrupted when Queue closed. Download it again when you're ready.";
+  const rowsIn = [
+    { id: 4, url: "https://example.test/cut", status: { state: "queued" }, rev: 1, meta: null, attempt: 0, notice: note },
+    { id: 5, url: "https://example.test/fine", status: { state: "queued" }, rev: 1, meta: null, attempt: 0, notice: null },
+  ];
+  const calls = [];
+  await mount((command, args) => {
+    calls.push(command);
+    if (command === "queue_list") return rowsIn;
+    if (command === "queue_download") return { ...rowsIn[0], status: { state: "downloading" }, rev: 2, attempt: 1, notice: null };
+  });
+  assert.deepEqual([...container.querySelectorAll('[data-role="notice"]')].map((n) => n.textContent), [note]);
+  assert.ok(!calls.includes("queue_download") && !calls.includes("queue_run_all"), "nothing starts by itself");
+  await clickIn(0, "Download");
+  assert.equal(container.querySelectorAll('[data-role="notice"]').length, 0, "the note goes once it starts");
+});
+
+test("Q7: when the queue can't be saved this session, the window says so, literally", async () => {
+  const problem = "Another copy of Queue is still using the saved list, so changes made now won't be saved. Quit and reopen Queue. <b>x</b>";
+  mockIPC((command) => {
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder") return DEFAULT_FOLDER;
+    if (command === "queue_storage_problem") return problem;
+    return null;
+  }, { shouldMockEvents: true });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  assert.equal(text('[data-role="unsaved"]'), problem);
+  assert.equal(container.querySelectorAll("p b").length, 0);
+});
+
+test("Q7: no warning when the queue is saved normally", async () => {
+  await mount((command) => (command === "queue_list" ? [] : null));
+  assert.equal(container.querySelector('[data-role="unsaved"]'), null);
+});
+
+test("Q7: a save that starts failing shows the warning at once, and it clears when saving works again", async () => {
+  await mount((command) => (command === "queue_list" ? [] : null));
+  assert.equal(container.querySelector('[data-role="unsaved"]'), null);
+  const problem = "Queue couldn't save the list (No space left on device), so recent changes would be lost if it quit now. It keeps trying.";
+  await act(async () => emit("queue://storage", problem));
+  assert.equal(text('[data-role="unsaved"]'), problem);
+  await act(async () => emit("queue://storage", null));
+  assert.equal(container.querySelector('[data-role="unsaved"]'), null);
 });

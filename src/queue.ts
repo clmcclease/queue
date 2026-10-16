@@ -74,6 +74,11 @@ export const retryItem = (id: number) => invoke<QueueItem>("queue_retry", { id }
 /** "Download all" (Q4): resolves false if a run was already in progress. */
 export const runAll = () => invoke<boolean>("queue_run_all");
 export const runnerState = () => invoke<boolean>("queue_runner_state");
+/** Why the queue won't be saved this session (#12, e.g. another copy still holds it), or null. */
+export const storageProblem = () => invoke<string | null>("queue_storage_problem");
+/** A save started failing (the reason) or works again (null). */
+export const onStorageChanged = (handler: (problem: string | null) => void): Promise<UnlistenFn> =>
+  listen<string | null>("queue://storage", (event) => handler(event.payload));
 /** "Download all" starting or finishing. */
 export const onRunnerChanged = (handler: (running: boolean) => void): Promise<UnlistenFn> =>
   listen<{ running: boolean }>("queue://runner", (event) => handler(event.payload.running));
