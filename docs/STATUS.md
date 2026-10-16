@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #12 (Q7 persist the queue across restarts), uncommitted
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #13 (Q8 paste many links at once), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #12 (Q7) the queue survives restarts (uncommitted; D-025)
+## Done: #12 (Q7) the queue survives restarts (squash-merged from PR #61; D-025; 4-OS bundles green)
 - **Owner's choices:** keep finished and failed rows. An interrupted download comes back Queued with a note and waits; nothing starts by itself.
 - **`queue.rs`:**
   - `to_json` and `from_json` handle a `SavedQueue {version: 1, items}`, keeping id, link, status, video info and notice. `from_json` rebuilds each duplicate key from the link, turns Downloading or Processing into Queued with `INTERRUPTED`, drops invalid links and repeated ids, and keeps ids counting.
@@ -354,9 +354,9 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #59 merge:** `cargo test` 246, `npm test` 156/156 (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
+- **macOS arm64 locally, at the #12 merge:** `cargo test` 267, `npm test` 162/162 (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
 - **Owner's Linux box (`scripts/test-linux.sh`):** all checks, including the loopback and ETXTBSY tests.
-- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #59 merge.
+- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #12 merge.
 - **Not verified natively:** UI behavior (folder picker, Open folder / Show in folder, webviews) on Windows and Linux; CI only runs the automated tests there.
 
 ## Open questions and problems
@@ -380,4 +380,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#12: committed for PR review with `ci:bundle` (the single-instance plugin is native per OS).
+#13 (Q8, P1: paste many links at once): read the issue and PRD Q8, then implement one row per link pasted on separate lines, with per-line invalid and duplicate feedback. Then the QA gates. Remaining M2 after #13: #42 (failure-path tests), #45 (stale staging cleanup), and the #41 follow-ups. Then the M2 audit.
