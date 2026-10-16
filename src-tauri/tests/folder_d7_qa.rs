@@ -159,6 +159,7 @@ fn d7_real_collision_result_stays_attached_to_its_row_after_folder_changes() {
         q.finish(id, Ok(saved.to_str().unwrap().into())).unwrap();
         let settings = Settings {
             download_dir: Some(next.clone()),
+            ..Default::default()
         };
         assert_eq!(
             settings

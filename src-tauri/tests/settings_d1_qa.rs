@@ -55,6 +55,7 @@ fn d1_repeated_saves_remember_exact_unicode_and_metacharacter_paths() {
         fs::create_dir(&dir).unwrap();
         let settings = Settings {
             download_dir: Some(dir.clone()),
+            ..Default::default()
         };
         settings.save(&path).unwrap();
         let reloaded = Settings::load(&path);
@@ -88,12 +89,14 @@ fn d1_failed_write_preserves_previously_remembered_choice() {
     let path = dir.join(FILE);
     let first = Settings {
         download_dir: Some(f.0.join("first")),
+        ..Default::default()
     };
     first.save(&path).unwrap();
     // A read-only settings folder deterministically prevents writing the temp file.
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
     let second = Settings {
         download_dir: Some(f.0.join("second")),
+        ..Default::default()
     };
     let result = second.save(&path);
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
@@ -112,6 +115,7 @@ fn d1_interrupted_save_temp_file_does_not_override_completed_settings() {
     let path = f.0.join(FILE);
     let settings = Settings {
         download_dir: Some(f.0.join("original")),
+        ..Default::default()
     };
     settings.save(&path).unwrap();
     // Left over by a save that crashed mid-write: never loaded, and it can't block later saves.
@@ -136,6 +140,7 @@ fn d1_chosen_file_or_missing_folder_never_falls_back_or_gets_created() {
     for path in [&file, &missing] {
         let settings = Settings {
             download_dir: Some(path.clone()),
+            ..Default::default()
         };
         let err = settings
             .download_dir(|| panic!("must not silently fall back"))
@@ -156,6 +161,7 @@ fn d1_dangling_folder_symlink_is_unavailable_without_recreating_its_target() {
     std::os::unix::fs::symlink(&target, &link).unwrap();
     let settings = Settings {
         download_dir: Some(link.clone()),
+        ..Default::default()
     };
     assert!(
         settings
@@ -176,6 +182,7 @@ fn d1_chosen_folder_disappearing_after_start_is_not_recreated_at_completion() {
     fs::create_dir(&out).unwrap();
     let settings = Settings {
         download_dir: Some(out.clone()),
+        ..Default::default()
     };
     // begin_download captures this path; the volume can disappear while yt-dlp runs.
     let captured = settings

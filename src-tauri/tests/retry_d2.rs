@@ -87,6 +87,51 @@ fn a_403_is_retried_with_backoff_and_then_succeeds() {
     assert_eq!(retries, [2]);
 }
 
+/// #11 review: each attempt's codec report is its own. A failed attempt's `queue-codecs.txt`
+/// (VP9/Opus) must not decide the notice for the retry that succeeds (H.264/AAC), and the codec
+/// report is never mistaken for the downloaded file.
+#[test]
+fn codecs_come_from_the_successful_attempt_and_never_count_as_the_file() {
+    let f = Fake::new(&format!(
+        "if [ $N -eq 1 ]; then printf 'vp09.00.40.08|opus\\n' > \"$P/{codecs}\"; {FORBIDDEN}; fi\n\
+         printf media > \"$P/Title.mp4\"\n\
+         [ -e \"$P/{codecs}\" ] && {{ echo 'ERROR: stale codecs from attempt 1' >&2; exit 1; }}\n\
+         printf 'avc1.640028|mp4a.40.2\\n' > \"$P/{codecs}\"",
+        codecs = download::CODECS
+    ));
+    let work = f.root.join("work");
+    let saved = download::run_with_retries_saved(
+        &f.root,
+        &work,
+        &f.out,
+        "https://example.test/v",
+        None,
+        download::Format::CompatibleVideo,
+        |_| {},
+        |_| {},
+        |_| {},
+    )
+    .unwrap();
+    assert!(saved.path.ends_with("Title.mp4"), "{saved:?}");
+    assert_eq!(
+        saved.codecs,
+        download::Codecs::parse("avc1.640028|mp4a.40.2"),
+        "the retry's own report"
+    );
+    assert_eq!(
+        download::Format::CompatibleVideo
+            .notice_for(std::path::Path::new(&saved.path), &saved.codecs),
+        None
+    );
+    assert!(!work.exists());
+    let attempt2 = f.args(2);
+    assert!(
+        attempt2
+            .windows(2)
+            .any(|w| w[0] == "after_move:%(vcodec)s|%(acodec)s" && w[1] == download::CODECS)
+    );
+}
+
 #[test]
 fn persistent_403s_give_up_after_three_attempts_with_the_reason() {
     let f = Fake::new(FORBIDDEN);

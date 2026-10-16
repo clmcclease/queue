@@ -41,6 +41,8 @@ export interface QueueItem {
   progress?: Progress | null;
   /** Download attempt: 1, then 2–3 when retrying after a 403 (D-017); 0 when not downloading. */
   attempt: number;
+  /** About a Done row's file, e.g. a "most compatible" format that wasn't available (#11). */
+  notice?: string | null;
   /** Bumped by the backend on every change; higher wins when replies arrive out of order. */
   rev: number;
 }

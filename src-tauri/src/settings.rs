@@ -14,7 +14,22 @@ pub const FILE: &str = "settings.json";
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     /// Where finished downloads go; `None` means the OS Downloads folder.
+    #[serde(deserialize_with = "or_default")]
     pub download_dir: Option<PathBuf>,
+    /// What to download (D2, #11); yt-dlp decides by default.
+    #[serde(deserialize_with = "or_default")]
+    pub format: crate::download::Format,
+}
+
+/// Reads one setting, or its default if it can't be understood (e.g. a format from a newer
+/// version). Only that setting falls back: the others in the file are kept.
+fn or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(T::deserialize(value).unwrap_or_default())
 }
 
 impl Settings {
@@ -116,11 +131,46 @@ mod tests {
     }
 
     #[test]
+    fn the_format_is_remembered_and_old_or_unknown_values_mean_default() {
+        let dir = temp("format");
+        let path = dir.join(FILE);
+        let audio = Settings {
+            format: crate::download::Format::CompatibleAudio,
+            ..Default::default()
+        };
+        audio.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), audio);
+        fs::write(&path, br#"{"downloadDir": "/x"}"#).unwrap();
+        assert_eq!(
+            Settings::load(&path).format,
+            crate::download::Format::Default,
+            "files from before #11"
+        );
+        fs::write(&path, br#"{"downloadDir": "/chosen", "format": "8k-hdr"}"#).unwrap();
+        assert_eq!(
+            Settings::load(&path),
+            Settings {
+                download_dir: Some(PathBuf::from("/chosen")),
+                ..Default::default()
+            },
+            "an unknown format falls back alone; the chosen folder is kept"
+        );
+        fs::write(&path, br#"{"downloadDir": 42, "format": "audio"}"#).unwrap();
+        assert_eq!(
+            Settings::load(&path).format,
+            crate::download::Format::Audio,
+            "and the other way round"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn saved_settings_round_trip_with_unicode_paths_and_leave_no_temp_file() {
         let dir = temp("roundtrip");
         let path = dir.join("nested").join(FILE);
         let settings = Settings {
             download_dir: Some(dir.join("Vidéos 日本語 🎵")),
+            ..Default::default()
         };
         settings.save(&path).unwrap();
         assert_eq!(Settings::load(&path), settings);
@@ -145,6 +195,7 @@ mod tests {
         let choices: Vec<_> = (0..16)
             .map(|n| Settings {
                 download_dir: Some(dir.join(format!("folder {n} {}", "x".repeat(4096)))),
+                ..Default::default()
             })
             .collect();
         std::thread::scope(|scope| {
@@ -178,6 +229,7 @@ mod tests {
         );
         let chosen = Settings {
             download_dir: Some(dir.clone()),
+            ..Default::default()
         };
         assert_eq!(chosen.download_dir(default).unwrap(), dir);
         fs::remove_dir_all(&dir).unwrap();
