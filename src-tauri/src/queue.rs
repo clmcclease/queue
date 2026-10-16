@@ -53,6 +53,15 @@ pub struct Item {
 }
 
 impl Item {
+    /// Still in the queue: not finished and not failed. Only active rows make a link a
+    /// duplicate (Q2, #59).
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.status,
+            Status::Fetching | Status::Queued | Status::Downloading | Status::Processing
+        )
+    }
+
     /// Forgets (and returns) the saved info file, e.g. of a row just removed from the queue.
     pub fn take_info(&mut self) -> Option<PathBuf> {
         self.info.take().map(|(p, _)| p)
@@ -76,8 +85,9 @@ pub struct Queue {
 }
 
 impl Queue {
-    /// Appends a row for a valid, new link (Q2). A link matching a row that hasn't failed is a
-    /// duplicate; a failed row doesn't block adding its link again (or it can be retried, Q6).
+    /// Appends a row for a valid link (Q2). A link is a duplicate only while its row is still
+    /// active (fetching, queued, downloading or processing): a finished or failed row doesn't
+    /// block adding it again, e.g. to download it in another format (#59).
     pub fn add(&mut self, input: &str) -> Result<Item, AddError> {
         if input.trim().is_empty() {
             return Err(AddError::Invalid {
@@ -88,7 +98,7 @@ impl Queue {
         if let Some(existing) = self
             .items
             .iter()
-            .find(|i| i.key == link.key && !matches!(i.status, Status::Failed { .. }))
+            .find(|i| i.key == link.key && i.is_active())
         {
             return Err(AddError::Duplicate {
                 message: "That link is already in the queue.".into(),
@@ -262,7 +272,7 @@ impl Queue {
         if self
             .items
             .iter()
-            .any(|i| i.id != id && i.key == key && !matches!(i.status, Status::Failed { .. }))
+            .any(|i| i.id != id && i.key == key && i.is_active())
         {
             return Err("That link is already in the queue again.".into());
         }
@@ -549,6 +559,40 @@ mod tests {
         assert_eq!(q.items().len(), 1);
         q.add("https://youtu.be/aaaaaaaaaaa").unwrap();
         assert_eq!(q.items().len(), 2);
+    }
+
+    #[test]
+    fn a_finished_row_does_not_block_its_link_but_an_active_copy_does() {
+        let mut q = Queue::default();
+        let done = ready(&mut q, "https://www.youtube.com/watch?v=jNQXAC9IVRw");
+        q.start(done).unwrap();
+        q.finish(done, Ok("/d/a.opus".into())).unwrap();
+        // The same video, written differently, in another format: a new row (#59).
+        let again = q.add("https://youtu.be/jNQXAC9IVRw").unwrap().id;
+        assert_ne!(again, done);
+        assert!(
+            matches!(
+                q.add("https://www.youtube.com/watch?v=jNQXAC9IVRw"),
+                Err(AddError::Duplicate { id, .. }) if id == again
+            ),
+            "the new, active row is the duplicate now"
+        );
+        assert!(
+            matches!(q.items()[0].status, Status::Done { .. }),
+            "the finished row is untouched"
+        );
+    }
+
+    #[test]
+    fn retry_is_allowed_beside_a_finished_copy_of_the_link() {
+        let mut q = Queue::default();
+        let failed = ready(&mut q, "https://e.test/a");
+        q.start(failed).unwrap();
+        q.finish(failed, Err("x".into())).unwrap();
+        let done = ready(&mut q, "https://e.test/a");
+        q.start(done).unwrap();
+        q.finish(done, Ok("/d/a.webm".into())).unwrap();
+        assert_eq!(q.retry(failed).unwrap().status, Status::Queued);
     }
 
     #[test]

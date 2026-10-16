@@ -84,7 +84,10 @@ fn q6_retry_duplicate_guard_covers_all_active_states_and_can_be_unblocked_by_rem
             q.processing(newer).unwrap();
         }
         if state >= 4 {
+            // #59: a finished copy isn't active, so it no longer blocks the retry.
             q.finish(newer, Ok("saved.webm".into())).unwrap();
+            assert_eq!(q.retry(old).unwrap().status, Status::Queued);
+            continue;
         }
         let before = q.items().to_vec();
         assert!(q.retry(old).unwrap_err().contains("already in the queue"));

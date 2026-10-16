@@ -190,14 +190,20 @@ fn query_escape_spellings_for_the_same_value_are_duplicates() {
     );
 }
 
+/// #59 (owner, 2026-10-15): only an active row makes a link a duplicate. A finished row no
+/// longer blocks it (e.g. to download it again in another format); before #59 it did.
 #[test]
-fn done_rows_still_block_duplicates_and_failed_rows_do_not_mask_a_new_row() {
+fn only_active_rows_block_duplicates_and_a_finished_link_can_be_added_again() {
     let mut queue = Queue::default();
     let url = "https://example.test/video";
     let first = queue.add(url).unwrap();
+    assert_duplicate(&mut queue, url, first.id); // fetching
     queue.fetched(first.id, Ok(Meta::default())).unwrap(); // #6
+    assert_duplicate(&mut queue, url, first.id); // queued
     queue.start(first.id).unwrap();
-    assert_duplicate(&mut queue, url, first.id);
+    assert_duplicate(&mut queue, url, first.id); // downloading
+    queue.processing(first.id).unwrap();
+    assert_duplicate(&mut queue, url, first.id); // processing
     queue.finish(first.id, Err("unavailable".into())).unwrap();
     let second = queue.add(url).unwrap();
     assert_duplicate(&mut queue, url, second.id);
@@ -206,8 +212,10 @@ fn done_rows_still_block_duplicates_and_failed_rows_do_not_mask_a_new_row() {
     queue
         .finish(second.id, Ok("C:\\Downloads\\CON.webm".into()))
         .unwrap();
-    assert_duplicate(&mut queue, url, second.id);
-    assert_eq!(queue.items().len(), 2);
+    let third = queue.add(url).unwrap();
+    assert!(third.id > second.id, "a finished link starts a new row");
+    assert_duplicate(&mut queue, url, third.id);
+    assert_eq!(queue.items().len(), 3);
 }
 
 #[test]
