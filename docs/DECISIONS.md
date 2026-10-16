@@ -117,3 +117,15 @@ At the owner's request (#41), the `test` job in `build.yml` runs the full checks
 
 ## D-024 License: MIT OR Apache-2.0 — Confirmed (2026-10-14)
 For the public repo (D-023), the owner chose the usual Rust and Tauri dual license: `LICENSE-MIT` and `LICENSE-APACHE`, with `license = "MIT OR Apache-2.0"` in `Cargo.toml` and `package.json`. The bundled sidecars keep their own licenses: yt-dlp's source is Unlicense, but its official PyInstaller binary is GPLv3+; deno is MIT; and FFmpeg is an LGPL-2.1-or-later build from the official source. As separate programs, they don't change Queue's license. `THIRD_PARTY_NOTICES.md` names them and points to the exact FFmpeg source and build script. Release installers will carry the license texts and a generated dependency-license list (#24). `SECURITY.md` asks for private vulnerability reports. `CONTRIBUTING.md` welcomes issues and asks for an issue before any PR. The README states responsible use: no DRM or access-control circumvention.
+
+## D-025 The queue is saved to queue.json and restored on launch — Confirmed (2026-10-15)
+For #12 (Q7), the queue lives in `queue.json` in the app data folder, written atomically by the same writer as `settings.json` (D-020).
+- **What's saved:** each row's id, link, state, video info, and finished path or failure reason, plus its notice. Live progress, retry attempts and the saved `-J` info aren't, so a restored row extracts again.
+- **When:** a background saver writes within 0.5 s of any change worth saving (live progress doesn't count), plus once more when the app exits. The JSON is made under the queue lock and written outside it.
+- **On launch (owner's choices):**
+  - Finished and failed rows are kept, with their files, notices and Retry.
+  - A download that was running when Queue closed comes back **Queued**, with the note "Interrupted when Queue closed. Download it again when you're ready." It waits for Download or Download all; nothing starts by itself.
+  - Rows still fetching their info fetch it again. The duplicate check is rebuilt from each saved link. Rows whose link no longer validates are dropped, and new ids continue after the highest saved one.
+  - A damaged `queue.json` is moved aside to `queue.json.bad`, or a unique `queue.json.bad-<time>` if that name is taken, and the queue starts empty. If it can't be moved, or an existing file can't be read at all, queue saving is off for that session, so it's never overwritten.
+  - Ids never wrap: adding at the limit fails with a message, and saved rows with impossible ids are dropped.
+- **One running copy (owner's choice):** the official `tauri-plugin-single-instance` (=2.5.1) brings the open window to the front when Queue is launched again, matching the PRD's single window. As a backstop, only the copy holding an exclusive OS lock on `queue.lock` (`std::fs::File::try_lock`, held for the whole run) saves the queue. Startup waits up to 10 s for that lock before loading, since a quitting copy may still be finishing its final save. If the queue can't be saved for any reason, the window says so; it's never silent.

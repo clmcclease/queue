@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #12 (Q7 persist the queue across restarts), next
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #13 (Q8 paste many links at once), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,31 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## Done: #12 (Q7) the queue survives restarts (squash-merged from PR #61; D-025; 4-OS bundles green)
+- **Owner's choices:** keep finished and failed rows. An interrupted download comes back Queued with a note and waits; nothing starts by itself.
+- **`queue.rs`:**
+  - `to_json` and `from_json` handle a `SavedQueue {version: 1, items}`, keeping id, link, status, video info and notice. `from_json` rebuilds each duplicate key from the link, turns Downloading or Processing into Queued with `INTERRUPTED`, drops invalid links and repeated ids, and keeps ids counting.
+  - `load` moves a damaged file aside to `queue.json.bad`.
+  - A `changes` counter goes up on every saved-worthy change except progress.
+  - `fetching()` lists the rows to fetch again.
+- **`settings.rs`:** the atomic writer is now the shared `write_atomic`.
+- **`lib.rs`:** the queue is loaded in `setup` from `app_data_dir/queue.json`, and restored Fetching rows go to the metadata worker. A saver thread runs `save_queue` every 0.5 s when `changes` moved, building the JSON under the lock and writing outside it, plus a final save on `RunEvent::Exit`.
+- **UI:** a queued row shows its notice, which clears when it starts.
+- **Checks:** `cargo test` 251; clippy/fmt clean; `npm run build` OK; `npm test` 157/157 (macOS arm64).
+- **Owner check (dev app, 2026-10-15):** quit mid-download, and `queue.json` held the row as downloading. After relaunch the finished video was still listed, as chosen.
+- `codex-qa test "#12"`: **FAIL**, then fixed (`qa/reports/20261015-195325-test-mDTX.md`):
+  1. If moving a damaged `queue.json` aside failed (e.g. `queue.json.bad` was a folder), the next save destroyed the only copy. Now `set_aside` uses `queue.json.bad`, or a unique `queue.json.bad-<time>` if that's taken. If even that fails, `load_checked` reports the file isn't safe to save over, and `lib.rs` disables queue saving for that session.
+  2. A saved id of `u64::MAX` made the next add overflow and panic. Now ids use `checked_add` (adding fails with "The queue is full…"), and restored rows with id 0 or `u64::MAX` are dropped.
+  Codex's tests are added (D-021): `persistence_q7_12_qa.rs` (12) and `persistence-q7-12-qa.test.mjs` (2). One check was loosened, so a second damaged file goes to a unique `.bad-` name instead of overwriting the first. `cargo test` 263, `npm test` 159/159.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261015-200125-review-wzOV.md`). Any read error counted as "no file, safe to save", so an existing `queue.json` that couldn't be read (permissions, a disk error) would be replaced on the first change. Now only `NotFound` means empty and writable; any other read error starts empty with saving off. New unix test: an unreadable file is never saved over. Changes made during a save are covered by the change counter: the saver records the count it snapshotted, so later changes are written on the next 0.5 s tick and at exit. `cargo test` 264.
+- `codex-qa review` round 2: **FAIL** (P1), then fixed (`qa/reports/20261015-200445-review-RE6K.md`). Two running copies, such as a dev build and an installed app sharing app data, could overwrite each other's `queue.json`. The owner chose "one copy only":
+  - The official `tauri-plugin-single-instance` (=2.5.1, 16 days old; the 2.5.3 and 2.5.4 releases were too new) is registered first. Launching again brings the open window to the front.
+  - As a backstop, `lock_queue` holds an exclusive `std::fs::File::try_lock` on `queue.lock` for the whole run, and without it the queue is never saved.
+  Checked live on macOS: a second launch of the dev binary exited by itself with code 0, leaving one process. New test: `only_one_running_copy_can_hold_the_queue_lock`. `cargo test` 265.
+- `codex-qa review` round 3: **FAIL**, then fixed (`qa/reports/20261015-201834-review-08cD.md`). Tauri releases the single-instance guard before the app's final save, so a relaunch in that moment got no `queue.lock` and silently ran a session that never saved. Now startup waits up to 10 s for the lock (`lock_queue_waiting`) before loading, so it reads the exiting copy's final save. If it still can't get the lock, or a damaged or unreadable file blocks saving, the window shows a red alert that this session won't be saved (`queue_storage_problem`, `data-role="unsaved"`). Never silent. New tests: the wait, giving up, and the alert shown literally or absent. `cargo test` 266, `npm test` 161/161.
+- `codex-qa review` round 4: **FAIL**, then fixed (`qa/reports/20261015-202346-review-Z9y7.md`). A save that failed after startup (disk full, folder became read-only) was swallowed silently. Now `persist()` reports it: the storage problem can change during a session, and a failed write sets "Queue couldn't save the list (reason)… It keeps trying." and emits `queue://storage`. The saved count doesn't move, so the next 0.5 s tick retries with every pending change, and the next good write clears the warning (emitting `null`). The window listens and shows or clears the alert live. New tests: Rust `a_failed_save_is_reported_retried_and_cleared_once_saving_works`, with an injected writer; UI warning shown, then cleared. `cargo test` 267, `npm test` 162/162.
+- `codex-qa review` round 5: **PASS WITH NOTES**, with no findings (`qa/reports/20261015-202727-review-WSZ5.md`). Suggested tests, none blocking: a change made during a paused save lands in the next save; quitting before the first 0.5 s tick keeps the change; a slow startup status read can't hide a newer warning.
 
 ## Done: #59 (Q2 bug) re-adding a link whose download finished (squash-merged from PR #60)
 - **Owner report (2026-10-15):** downloaded a music video with Audio only (`.opus`), then re-added the link to get Most compatible audio (`.m4a`). It was refused as a duplicate, because a Done row still blocked its link (only Failed rows were exempt, since #5).
@@ -329,9 +354,9 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #59 merge:** `cargo test` 246, `npm test` 156/156 (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
+- **macOS arm64 locally, at the #12 merge:** `cargo test` 267, `npm test` 162/162 (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
 - **Owner's Linux box (`scripts/test-linux.sh`):** all checks, including the loopback and ETXTBSY tests.
-- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #59 merge.
+- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #12 merge.
 - **Not verified natively:** UI behavior (folder picker, Open folder / Show in folder, webviews) on Windows and Linux; CI only runs the automated tests there.
 
 ## Open questions and problems
@@ -355,4 +380,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#12 (Q7, P1: persist the queue across restarts): read the issue and PRD Q7, then decide with the owner what survives a restart (rows and their states; downloads that were in progress resume or go back to Queued). Settings already persist (D-020). Remaining M2 after #12: #13 (paste many links), #42 (failure-path tests), #45 (stale staging cleanup), and the #41 follow-ups.
+#13 (Q8, P1: paste many links at once): read the issue and PRD Q8, then implement one row per link pasted on separate lines, with per-line invalid and duplicate feedback. Then the QA gates. Remaining M2 after #13: #42 (failure-path tests), #45 (stale staging cleanup), and the #41 follow-ups. Then the M2 audit.

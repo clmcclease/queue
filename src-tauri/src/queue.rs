@@ -1,6 +1,6 @@
 //! The download queue (Q1 #3, Q2 #5, D2 #4). Plain data with no Tauri types, so it's
 //! unit-testable and the UI only sees it through commands and events.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::link;
 use crate::meta::Meta;
@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 /// media links expire about 6 h after extraction (D-017).
 pub const INFO_FRESH_FOR: Duration = Duration::from_secs(5 * 60 * 60);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum Status {
     /// Metadata (`yt-dlp -J`) is being fetched (Q3).
@@ -82,6 +82,8 @@ pub enum AddError {
 pub struct Queue {
     next_id: u64,
     items: Vec<Item>,
+    /// Bumped by every change worth saving (#12); live progress doesn't count.
+    changes: u64,
 }
 
 impl Queue {
@@ -105,7 +107,14 @@ impl Queue {
                 id: existing.id,
             });
         }
-        self.next_id += 1;
+        // Ids only grow and are never reused; a saved queue can't push them past the limit
+        // into a panic (#12).
+        let Some(id) = self.next_id.checked_add(1) else {
+            return Err(AddError::Invalid {
+                message: "The queue is full. Remove some rows to add more.".into(),
+            });
+        };
+        self.next_id = id;
         let item = Item {
             id: self.next_id,
             url: link.text,
@@ -119,6 +128,7 @@ impl Queue {
             info: None,
         };
         self.items.push(item.clone());
+        self.changes += 1;
         Ok(item)
     }
 
@@ -141,6 +151,7 @@ impl Queue {
             Err(reason) => item.status = Status::Failed { reason },
         }
         item.rev += 1;
+        self.changes += 1;
         Some(item.clone())
     }
 
@@ -163,6 +174,7 @@ impl Queue {
         item.progress = None;
         item.notice = None;
         item.rev += 1;
+        self.changes += 1;
         Ok(item.clone())
     }
 
@@ -186,6 +198,7 @@ impl Queue {
         item.status = Status::Processing;
         item.progress = None;
         item.rev += 1;
+        self.changes += 1;
         Some(item.clone())
     }
 
@@ -199,6 +212,7 @@ impl Queue {
         item.attempt = attempt;
         item.progress = None;
         item.rev += 1;
+        self.changes += 1;
         Some(item.clone())
     }
 
@@ -235,6 +249,7 @@ impl Queue {
         }
         item.status = Status::Failed { reason };
         item.rev += 1;
+        self.changes += 1;
         Some(item.clone())
     }
 
@@ -253,6 +268,7 @@ impl Queue {
         ) {
             return Err("A download in progress can't be removed yet.".into());
         }
+        self.changes += 1;
         Ok(self.items.remove(index))
     }
 
@@ -289,6 +305,7 @@ impl Queue {
         item.progress = None;
         item.attempt = 0;
         item.rev += 1;
+        self.changes += 1;
         Ok(item.clone())
     }
 
@@ -315,6 +332,7 @@ impl Queue {
         }
         item.notice = Some(notice);
         item.rev += 1;
+        self.changes += 1;
         Some(item.clone())
     }
 
@@ -338,8 +356,144 @@ impl Queue {
         };
         item.attempt = 0;
         item.rev += 1;
+        self.changes += 1;
         Some(item.clone())
     }
+}
+
+/// The note on a row whose download was cut off when Queue closed (#12).
+pub const INTERRUPTED: &str = "Interrupted when Queue closed. Download it again when you're ready.";
+
+/// What `queue.json` keeps of a row (#12): enough to show it again. Live progress, retry attempts
+/// and saved `-J` info don't survive a restart; the link's duplicate key is rebuilt from `url`.
+#[derive(Serialize, Deserialize)]
+struct SavedItem {
+    id: u64,
+    url: String,
+    status: Status,
+    meta: Option<Meta>,
+    notice: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedQueue {
+    version: u32,
+    items: Vec<SavedItem>,
+}
+
+impl Queue {
+    /// Counts changes worth saving, so a saver can tell when to write (#12).
+    pub fn changes(&self) -> u64 {
+        self.changes
+    }
+
+    /// The queue as `queue.json` (#12).
+    pub fn to_json(&self) -> Vec<u8> {
+        let saved = SavedQueue {
+            version: 1,
+            items: self
+                .items
+                .iter()
+                .map(|i| SavedItem {
+                    id: i.id,
+                    url: i.url.clone(),
+                    status: i.status.clone(),
+                    meta: i.meta.clone(),
+                    notice: i.notice.clone(),
+                })
+                .collect(),
+        };
+        serde_json::to_vec_pretty(&saved).expect("plain data always serializes")
+    }
+
+    /// Rebuilds a queue saved by [`Queue::to_json`]. A download that was running when Queue
+    /// closed comes back Queued with [`INTERRUPTED`] and waits for the user (owner's choice);
+    /// a row still fetching its info stays Fetching (the caller fetches it again). Rows whose
+    /// link no longer validates are dropped. Ids keep counting from the highest one.
+    pub fn from_json(bytes: &[u8]) -> Result<Queue, String> {
+        let saved: SavedQueue =
+            serde_json::from_slice(bytes).map_err(|e| format!("unreadable queue: {e}"))?;
+        let mut queue = Queue::default();
+        for row in saved.items {
+            let Ok(link) = link::parse(&row.url) else {
+                continue;
+            };
+            if row.id == 0 || row.id == u64::MAX {
+                continue; // not an id Queue hands out; keeping it would break the next add
+            }
+            let (status, notice) = match row.status {
+                Status::Downloading | Status::Processing => {
+                    (Status::Queued, Some(INTERRUPTED.to_string()))
+                }
+                Status::Queued if row.meta.is_none() => (Status::Fetching, None),
+                status => (status, row.notice),
+            };
+            queue.next_id = queue.next_id.max(row.id);
+            queue.items.push(Item {
+                id: row.id,
+                url: row.url,
+                status,
+                meta: row.meta,
+                progress: None,
+                rev: 1,
+                attempt: 0,
+                notice,
+                key: link.key,
+                info: None,
+            });
+        }
+        queue.items.sort_by_key(|i| i.id);
+        queue.items.dedup_by_key(|i| i.id);
+        Ok(queue)
+    }
+
+    /// Rows that need their info fetched again after a restart (#12).
+    pub fn fetching(&self) -> Vec<(u64, String)> {
+        self.items
+            .iter()
+            .filter(|i| i.status == Status::Fetching)
+            .map(|i| (i.id, i.url.clone()))
+            .collect()
+    }
+
+    /// Loads `queue.json`; see [`Queue::load_checked`].
+    pub fn load(path: &std::path::Path) -> Queue {
+        Queue::load_checked(path).0
+    }
+
+    /// Loads `queue.json`, and says whether it's safe to save over it. A missing file is an
+    /// empty queue; one that exists but can't be read is too, but not safe to save over. A damaged one is moved aside (to `queue.json.bad`, or a unique
+    /// `queue.json.bad-<time>` if that's taken) and the queue starts empty. If it can't be moved,
+    /// saving isn't safe: the next save would destroy the only copy, so the caller must not save.
+    pub fn load_checked(path: &std::path::Path) -> (Queue, bool) {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            // No queue saved yet: start empty and save freely.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Queue::default(), true),
+            // It exists but can't be read (permissions, a folder, a disk error): start empty,
+            // but never save over it.
+            Err(_) => return (Queue::default(), false),
+        };
+        match Queue::from_json(&bytes) {
+            Ok(queue) => (queue, true),
+            Err(_) => (Queue::default(), set_aside(path).is_ok()),
+        }
+    }
+}
+
+/// Moves a damaged queue file out of the way without overwriting anything.
+fn set_aside(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let plain = path.with_extension("json.bad");
+    let target = if std::fs::symlink_metadata(&plain).is_err() {
+        plain
+    } else {
+        let stamp = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        path.with_extension(format!("json.bad-{stamp}"))
+    };
+    std::fs::rename(path, &target)?;
+    Ok(target)
 }
 
 /// "Download all" (Q4): downloads the next Queued row (lowest id first) until none are left.
@@ -504,6 +658,176 @@ mod tests {
         q.finish(failed, Err("no".into())).unwrap();
         assert!(q.saved_file(failed).is_err());
         assert!(q.saved_file(99).unwrap_err().contains("no longer"));
+    }
+
+    #[test]
+    fn a_saved_queue_comes_back_with_interrupted_downloads_queued_and_waiting() {
+        let mut q = Queue::default();
+        let fetching = q.add("https://e.test/fetching").unwrap().id;
+        let queued = ready(&mut q, "https://e.test/queued");
+        let done = ready(&mut q, "https://e.test/done");
+        q.start(done).unwrap();
+        q.finish(done, Ok("/d/日本語 (2).m4a".into())).unwrap();
+        q.noticed(done, "No AAC version was available".into())
+            .unwrap();
+        let failed = ready(&mut q, "https://e.test/failed");
+        q.start(failed).unwrap();
+        q.finish(failed, Err("Video unavailable".into())).unwrap();
+        let running = ready(&mut q, "https://e.test/running");
+        q.start(running).unwrap();
+        q.progressed(
+            running,
+            crate::download::Progress {
+                percent: Some(40.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        q.processing(running).unwrap();
+
+        let back = Queue::from_json(&q.to_json()).unwrap();
+        let by_id = |id| back.items().iter().find(|i| i.id == id).unwrap();
+        assert_eq!(by_id(fetching).status, Status::Fetching);
+        assert_eq!(
+            back.fetching(),
+            vec![(fetching, "https://e.test/fetching".to_string())]
+        );
+        assert_eq!(by_id(queued).status, Status::Queued);
+        assert_eq!(
+            by_id(done).status,
+            Status::Done {
+                path: "/d/日本語 (2).m4a".into()
+            }
+        );
+        assert_eq!(
+            by_id(done).notice.as_deref(),
+            Some("No AAC version was available")
+        );
+        assert_eq!(
+            by_id(failed).status,
+            Status::Failed {
+                reason: "Video unavailable".into()
+            }
+        );
+        let r = by_id(running);
+        assert_eq!(
+            r.status,
+            Status::Queued,
+            "interrupted: queued, not restarted (owner's choice)"
+        );
+        assert_eq!(r.notice.as_deref(), Some(INTERRUPTED));
+        assert_eq!((r.progress.clone(), r.attempt), (None, 0));
+        assert!(
+            !back.is_busy(),
+            "nothing holds the download slot after a restart"
+        );
+        assert_eq!(
+            back.items().iter().map(|i| i.id).collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn a_restored_queue_keeps_duplicates_ids_and_starts_cleanly() {
+        let mut q = Queue::default();
+        let a = ready(&mut q, "https://www.youtube.com/watch?v=jNQXAC9IVRw");
+        let mut back = Queue::from_json(&q.to_json()).unwrap();
+        assert!(
+            matches!(
+                back.add("https://youtu.be/jNQXAC9IVRw"),
+                Err(AddError::Duplicate { id, .. }) if id == a
+            ),
+            "the duplicate key is rebuilt from the link"
+        );
+        assert_eq!(
+            back.add("https://e.test/next").unwrap().id,
+            a + 1,
+            "ids keep counting"
+        );
+        assert_eq!(back.start(a).unwrap().status, Status::Downloading);
+    }
+
+    #[test]
+    fn a_saved_row_with_an_invalid_link_or_a_repeated_id_is_dropped() {
+        let json = br#"{"version":1,"items":[
+            {"id":7,"url":"https://e.test/ok","status":{"state":"queued"},"meta":{"title":"T","channel":null,"duration":null,"thumbnail":null,"site":null},"notice":null},
+            {"id":8,"url":"not a link","status":{"state":"queued"},"meta":null,"notice":null},
+            {"id":7,"url":"https://e.test/dup-id","status":{"state":"failed","reason":"x"},"meta":null,"notice":null}
+        ]}"#;
+        let q = Queue::from_json(json).unwrap();
+        assert_eq!(q.items().len(), 1);
+        assert_eq!(q.items()[0].url, "https://e.test/ok");
+        assert!(Queue::from_json(b"{not json").is_err());
+        assert!(Queue::from_json(br#"{"version":1,"items":[{"id":1}]}"#).is_err());
+    }
+
+    #[test]
+    fn progress_is_not_a_change_worth_saving_but_state_changes_are() {
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://e.test/a");
+        let before = q.changes();
+        q.start(id).unwrap();
+        let started = q.changes();
+        assert!(started > before);
+        q.progressed(id, crate::download::Progress::default())
+            .unwrap();
+        assert_eq!(q.changes(), started, "live progress isn't saved");
+        q.finish(id, Ok("/d/a.webm".into())).unwrap();
+        assert!(q.changes() > started);
+        let before = q.changes();
+        q.remove(id).unwrap();
+        assert!(q.changes() > before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_queue_file_is_never_saved_over() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("queue-q7-unreadable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("queue.json");
+        let mut q = Queue::default();
+        ready(&mut q, "https://e.test/precious");
+        std::fs::write(&path, q.to_json()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = std::fs::read(&path).is_ok(); // e.g. running as root
+        let (loaded, writable) = Queue::load_checked(&path);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        if !readable {
+            assert!(loaded.items().is_empty());
+            assert!(
+                !writable,
+                "an existing file we can't read must not be replaced"
+            );
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), q.to_json(), "untouched");
+        assert!(
+            Queue::load_checked(&dir.join("missing.json")).1,
+            "a missing file is fine to create"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_damaged_queue_file_is_moved_aside_and_the_queue_starts_empty() {
+        let dir = std::env::temp_dir().join(format!("queue-q7-load-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("queue.json");
+        assert!(Queue::load(&path).items().is_empty(), "no file: empty");
+        std::fs::write(&path, b"{\"version\":1,\"items\":[").unwrap();
+        assert!(Queue::load(&path).items().is_empty());
+        assert!(!path.exists());
+        assert_eq!(
+            std::fs::read(path.with_extension("json.bad")).unwrap(),
+            b"{\"version\":1,\"items\":["
+        );
+        let mut q = Queue::default();
+        ready(&mut q, "https://e.test/a");
+        crate::settings::write_atomic(&path, &q.to_json()).unwrap();
+        assert_eq!(Queue::load(&path).items().len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

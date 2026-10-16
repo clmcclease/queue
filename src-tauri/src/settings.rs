@@ -45,31 +45,8 @@ impl Settings {
     /// Writes the settings file atomically (a temp file, then a rename over the old one), so a
     /// crash mid-write leaves the previous settings intact.
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)?;
-        }
         let json = serde_json::to_vec_pretty(self).map_err(io::Error::other)?;
-        // A temp name of its own (process id, a counter, the time), claimed with `create_new`:
-        // two Queue windows saving at once never write into each other's file.
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        let tmp = path.with_extension(format!(
-            "json.{}-{}-{stamp}.tmp",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        let written = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-            .and_then(|mut f| f.write_all(&json).and_then(|()| f.sync_all()))
-            .and_then(|()| fs::rename(&tmp, path));
-        if written.is_err() {
-            let _ = fs::remove_file(&tmp);
-        }
-        written
+        write_atomic(path, &json)
     }
 
     /// The folder downloads go to: the chosen one, which must still exist (an unplugged drive
@@ -85,6 +62,35 @@ impl Settings {
             None => default(),
         }
     }
+}
+
+/// Writes `bytes` to `path` atomically (a temp file, then a rename over the old one), so a crash
+/// mid-write leaves the previous file intact. Shared by the settings (D-020) and the queue (#12).
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    // A temp name of its own (process id, a counter, the time), claimed with `create_new`:
+    // two Queue windows saving at once never write into each other's file.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let tmp = path.with_extension(format!(
+        "json.{}-{}-{stamp}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+        .and_then(|()| fs::rename(&tmp, path));
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// Why downloads can't go to `dir` right now: it's gone (D-020: never recreated).

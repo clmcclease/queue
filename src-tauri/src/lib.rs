@@ -318,6 +318,108 @@ async fn reveal_download(app: AppHandle, id: u64) -> Result<Option<String>, Stri
     .await
 }
 
+/// The queue's file in the app data folder (#12).
+const QUEUE_FILE: &str = "queue.json";
+
+/// How often the queue is saved if it changed.
+const SAVE_EVERY: Duration = Duration::from_millis(500);
+
+/// Where the queue is saved, and the change count it was last saved at.
+struct QueueFile {
+    path: Option<std::path::PathBuf>,
+    saved: Mutex<u64>,
+    /// The exclusive lock on `queue.lock`, held until the app exits.
+    _lock: Option<std::fs::File>,
+    /// Why the queue isn't being saved, for the UI; `None` when all is well. Set at startup if
+    /// saving is off for the session, or by a failed save (and cleared by the next good one).
+    problem: Mutex<Option<String>>,
+}
+
+/// How long startup waits for another copy to release the queue (its final save).
+const LOCK_WAIT: Duration = Duration::from_secs(10);
+
+/// [`lock_queue`], retrying for up to `wait` while another copy still holds the lock.
+fn lock_queue_waiting(queue_file: &std::path::Path, wait: Duration) -> Option<std::fs::File> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if let Some(lock) = lock_queue(queue_file) {
+            return Some(lock);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Why the queue won't be saved this session (#12), or `None` when it will be.
+#[tauri::command]
+fn queue_storage_problem(file: tauri::State<'_, QueueFile>) -> Option<String> {
+    file.problem.lock().ok().and_then(|p| p.clone())
+}
+
+/// Emitted with the storage problem (a string, or null once saving works again).
+const STORAGE_EVENT: &str = "queue://storage";
+
+/// Takes the exclusive lock on the queue (`queue.lock` next to `queue.json`), or `None` if
+/// another running copy of Queue holds it.
+fn lock_queue(queue_file: &std::path::Path) -> Option<std::fs::File> {
+    let path = queue_file.with_extension("lock");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok()?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .ok()?;
+    file.try_lock().ok()?;
+    Some(file)
+}
+
+/// Saves the queue if it changed since the last save (#12). The JSON is made under the queue
+/// lock; the write happens after it's released, so downloads never wait on the disk. `saved`
+/// is held across the write, so two saves can't overtake each other.
+fn save_queue(app: &AppHandle) {
+    let file = app.state::<QueueFile>();
+    let queue = app.state::<Mutex<Queue>>();
+    if let Some(problem) = persist(&file, &queue, settings::write_atomic) {
+        let _ = app.emit(STORAGE_EVENT, problem);
+    }
+}
+
+/// One save of the queue if it changed (see [`save_queue`]); `write` is injectable for tests.
+/// A failed write leaves the saved count alone, so the next tick retries it, and reports the
+/// problem; the next good write clears it. Returns the problem when it changed, to emit.
+fn persist(
+    file: &QueueFile,
+    queue: &Mutex<Queue>,
+    write: impl Fn(&std::path::Path, &[u8]) -> std::io::Result<()>,
+) -> Option<Option<String>> {
+    let path = file.path.as_ref()?;
+    let mut saved = file.saved.lock().ok()?;
+    let (changes, json) = match lock(queue) {
+        Ok(q) if q.changes() != *saved => (q.changes(), q.to_json()),
+        _ => return None,
+    };
+    let now = match write(path, &json) {
+        Ok(()) => {
+            *saved = changes;
+            None
+        }
+        Err(e) => Some(format!(
+            "Queue couldn't save the list ({e}), so recent changes would be lost if it quit now. It keeps trying."
+        )),
+    };
+    let mut problem = file.problem.lock().ok()?;
+    if *problem == now {
+        return None;
+    }
+    *problem = now.clone();
+    Some(now)
+}
+
 /// Everything a started download needs, captured while the queue was locked.
 struct DownloadJob {
     id: u64,
@@ -517,7 +619,16 @@ fn queue_runner_state(runner: tauri::State<'_, Runner>) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(Mutex::new(Queue::default()))
+        // One running copy (D-025, #12): launching Queue again brings the open window to the
+        // front instead of starting a second copy that would overwrite the same queue.json.
+        // Registered first, as the plugin requires.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(Runner(Mutex::new(false)))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -534,10 +645,51 @@ pub fn run() {
                 file,
                 current: Mutex::new(current),
             });
+            // The queue from the last run (#12). Downloads cut off when Queue closed come back
+            // Queued and wait for the user; rows still fetching their info fetch it again.
+            let queue_file = app.path().app_data_dir().ok().map(|d| d.join(QUEUE_FILE));
+            // A backstop to the single instance: only the copy holding an exclusive OS lock on
+            // queue.lock (for its whole run) writes the queue. Taken before loading, waiting out
+            // a copy that's still finishing its final save, so we load what it saved.
+            let lock = queue_file
+                .as_deref()
+                .and_then(|f| lock_queue_waiting(f, LOCK_WAIT));
+            let (queue, writable) = queue_file
+                .as_deref()
+                .map(Queue::load_checked)
+                .unwrap_or_default();
+            let problem = match (&queue_file, lock.is_some(), writable) {
+                (None, ..) => Some("Queue couldn't find its data folder, so this list won't be saved.".to_string()),
+                (Some(_), false, _) => Some("Another copy of Queue is still using the saved list, so changes made now won't be saved. Quit and reopen Queue.".to_string()),
+                (Some(_), true, false) => Some("Queue couldn't read or set aside its saved list, so changes made now won't be saved. The old file is untouched.".to_string()),
+                _ => None,
+            };
+            let writable = writable && lock.is_some();
+            let refetch = queue.fetching();
+            let saved = queue.changes();
+            app.manage(Mutex::new(queue));
+            app.manage(QueueFile {
+                // A damaged file that couldn't be moved aside, or a queue another running copy
+                // owns, is never saved over (D-025).
+                path: queue_file.filter(|_| writable),
+                _lock: lock,
+                problem: Mutex::new(problem),
+                saved: Mutex::new(saved),
+            });
             let (jobs, queued) = mpsc::channel();
+            for job in refetch {
+                let _ = jobs.send(job);
+            }
             app.manage(Fetcher(Mutex::new(jobs)));
             let handle = app.handle().clone();
             std::thread::spawn(move || fetch_worker(handle, queued));
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(SAVE_EVERY);
+                    save_queue(&handle);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -548,6 +700,7 @@ pub fn run() {
             queue_retry,
             queue_run_all,
             queue_runner_state,
+            queue_storage_problem,
             settings_download_folder,
             settings_choose_download_folder,
             settings_format,
@@ -555,8 +708,14 @@ pub fn run() {
             open_download_folder,
             reveal_download
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // One last save on the way out, so nothing from the final half second is lost.
+            if let tauri::RunEvent::Exit = event {
+                save_queue(app);
+            }
+        });
 }
 
 #[cfg(test)]
@@ -578,6 +737,102 @@ mod tests {
         assert_eq!(updated, None);
         assert!(!saved.exists(), "no orphaned info file");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_one_running_copy_can_hold_the_queue_lock() {
+        let dir = std::env::temp_dir().join(format!("queue-q7-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let queue_file = dir.join("queue.json");
+        let first = lock_queue(&queue_file).expect("the first copy gets the lock");
+        assert!(
+            lock_queue(&queue_file).is_none(),
+            "a second copy can't save the queue"
+        );
+        assert!(dir.join("queue.lock").is_file());
+        drop(first);
+        assert!(
+            lock_queue(&queue_file).is_some(),
+            "free again once the first copy exits"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn startup_waits_for_a_copy_that_is_still_saving_then_takes_the_lock() {
+        let dir = std::env::temp_dir().join(format!("queue-q7-wait-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let queue_file = dir.join("queue.json");
+        let exiting = lock_queue(&queue_file).unwrap();
+        let released = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300)); // its final save
+            drop(exiting);
+        });
+        let started = std::time::Instant::now();
+        assert!(lock_queue_waiting(&queue_file, Duration::from_secs(5)).is_some());
+        assert!(started.elapsed() >= Duration::from_millis(250), "it waited");
+        released.join().unwrap();
+        let held = lock_queue(&queue_file).expect("free after the other copy exited");
+        let started = std::time::Instant::now();
+        assert!(
+            lock_queue_waiting(&queue_file, Duration::from_millis(300)).is_none(),
+            "gives up"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(held);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_failed_save_is_reported_retried_and_cleared_once_saving_works() {
+        let queue = Mutex::new(Queue::default());
+        let file = QueueFile {
+            path: Some(std::path::PathBuf::from("/q/queue.json")),
+            saved: Mutex::new(0),
+            _lock: None,
+            problem: Mutex::new(None),
+        };
+        let disk_full = |_: &std::path::Path, _: &[u8]| -> std::io::Result<()> {
+            Err(std::io::Error::other("No space left on device"))
+        };
+        let written = std::cell::RefCell::new(Vec::new());
+        let works = |_: &std::path::Path, bytes: &[u8]| -> std::io::Result<()> {
+            written.borrow_mut().push(bytes.to_vec());
+            Ok(())
+        };
+        assert_eq!(
+            persist(&file, &queue, works),
+            None,
+            "nothing changed, nothing to save"
+        );
+        queue.lock().unwrap().add("https://e.test/a").unwrap();
+        let reported = persist(&file, &queue, disk_full).expect("the failure is reported");
+        assert!(
+            reported
+                .as_deref()
+                .unwrap()
+                .contains("No space left on device")
+        );
+        assert_eq!(*file.saved.lock().unwrap(), 0, "not marked saved");
+        assert_eq!(
+            persist(&file, &queue, disk_full),
+            None,
+            "same problem: no repeat event"
+        );
+        queue.lock().unwrap().add("https://e.test/b").unwrap(); // a change while failing
+        assert_eq!(
+            persist(&file, &queue, works),
+            Some(None),
+            "cleared once a save works"
+        );
+        let last = Queue::from_json(written.borrow().last().unwrap()).unwrap();
+        assert_eq!(
+            last.items().len(),
+            2,
+            "the retry saved every pending change"
+        );
+        assert_eq!(*file.saved.lock().unwrap(), queue.lock().unwrap().changes());
+        assert_eq!(persist(&file, &queue, works), None);
     }
 
     #[test]
