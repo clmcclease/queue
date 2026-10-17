@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #45 (D2 stale staging cleanup), next
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #45 (D2 stale staging cleanup), uncommitted
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,14 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## In progress: #45 (D2) clean up staging left by an interrupted download (uncommitted; D-014)
+- `download::stale_work_dirs(cache)` lists earlier runs' leftovers in the app cache: `downloads/item-*` work dirs (D-014) and `info/session-*` saved `-J` folders (D-017, never reused after a restart). Only real folders with those names are listed, never files or symlinks (`DirEntry::file_type` doesn't follow links).
+- In `lib.rs` setup, only when this copy holds the queue lock (so another copy's running download is never touched), the list is taken before this run creates its own folders and deleted on a background thread.
+- **Checks:** `cargo test` 268 (new test: matching folders, Unicode names, plain files, other folders, and a symlink whose target survives); clippy/fmt clean (macOS arm64). Live: after the dev app restarted with this code, `~/Library/Caches/dev.mcclease.queue/downloads` and `info` were empty, both modified at the restart. The earlier contents weren't captured.
+- `codex-qa test "#45"`: **FAIL**, then fixed (`qa/reports/20261015-220139-test-OrFe.md`). If `<cache>/downloads` or `<cache>/info` was itself a symlink, `read_dir` followed it and the cleanup deleted matching folders elsewhere. Now each container must be a real folder (`symlink_metadata`), or it's skipped. Codex's 8 tests are added (D-021), `stale_staging_d2_45_qa.rs`, including both regressions. `cargo test` 276.
+- `codex-qa review` round 1: **FAIL** (P2, a TOCTOU race; `qa/reports/20261015-220649-review-BWJW.md`): `downloads` could be swapped for a symlink between listing and deleting. **Owner's decision: re-check and accept.** `download::remove_stale` re-validates the folder and its parent as real folders right before `remove_dir_all`, and setup uses it. New test: a container swapped for a symlink after listing is refused, and the outside data survives. The remaining sub-millisecond window, needing a process that can already write the user's cache, is an accepted limitation (D-014). The full fix (per-OS handle-based no-follow deletion) was declined as disproportionate. `cargo test` 277.
+- `codex-qa review` round 2: **PASS WITH NOTES** (`qa/reports/20261015-221003-review-Yop9.md`). Its P3 is fixed: the QA integration tests now delete with `download::remove_stale`, the production path. Suggested tests, none blocking: startup without the queue lock, a candidate itself swapped for a symlink, and Windows junctions.
 
 ## Done: #13 (Q8) paste several links at once (squash-merged from PR #62)
 - **UrlBar:** an `onPaste` handler catches text with more than one non-blank line (any line ending). It stops the field from joining the lines into one bad link and calls `onAddMany(lines)`. A single-line paste is unchanged, and anything typed in the field stays.
@@ -388,4 +396,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#45 (D2, P2: clean up staging folders left by an interrupted download, D-014): read the issue. Interrupted downloads (quit or crash, #12) leave `app_cache_dir/downloads/item-*` work dirs behind. Remaining M2 after #45: #42 (failure-path tests) and the #41 follow-ups, then the M2 `codex-qa audit`.
+#45: committed for PR review (no `ci:bundle`). Remaining M2: #42 and the #41 follow-ups, then the M2 audit.
