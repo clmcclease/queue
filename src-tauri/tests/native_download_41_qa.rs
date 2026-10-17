@@ -187,32 +187,120 @@ fn native_403_reextracts_after_unicode_saved_info_and_reuses_staging() {
     assert!(!f.0.join("work").exists());
 }
 
+/// Long enough for a freshly copied fixture to start, even on a Windows runner that scans each
+/// new executable (#65: 300 ms timed out before it ran). Both fixtures run for 30 s, so finishing
+/// within `PROMPT` still proves the timeout stopped them.
+const START: Duration = Duration::from_secs(3);
+const PROMPT: Duration = Duration::from_secs(10);
+
 #[test]
 fn native_metadata_timeout_stops_a_running_executable_promptly() {
     let f = Fake::new("timeout", "unused");
     let started = Instant::now();
-    let reason =
-        meta::fetch(&f.0, "https://example.test/v", Duration::from_millis(300)).unwrap_err();
+    let reason = meta::fetch(&f.0, "https://example.test/v", START).unwrap_err();
     assert!(reason.contains("took longer"), "{reason}");
     assert!(
         f.0.join("started").exists(),
         "fixture actually ran before timing out"
     );
-    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(started.elapsed() < PROMPT);
 }
 
 #[test]
 fn native_metadata_timeout_covers_descendants_holding_the_output_pipe() {
     let f = Fake::new("orphan", "unused");
     let started = Instant::now();
-    let reason =
-        meta::fetch(&f.0, "https://example.test/v", Duration::from_millis(500)).unwrap_err();
+    let reason = meta::fetch(&f.0, "https://example.test/v", START).unwrap_err();
     assert!(reason.contains("took longer"), "{reason}");
     assert_eq!(f.args(1).last().unwrap(), "https://example.test/v");
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < PROMPT,
         "descendant held output beyond the deadline"
     );
+    // The descendant itself must be gone, not just its pipe: its heartbeat (every 50 ms) stops.
+    let beat = || fs::read_to_string(f.0.join("heartbeat")).ok();
+    assert!(beat().is_some(), "the descendant ran before the timeout");
+    std::thread::sleep(Duration::from_millis(300));
+    let settled = beat();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(beat(), settled, "the descendant outlived the timeout");
+}
+
+// #65 QA: check the process itself as well as the heartbeat. A stopped writer alone could
+// otherwise be mistaken for an exited descendant. These scenarios deliberately start slowly.
+fn process_has_exited(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: signal 0 probes the recorded fixture PID without sending it a signal.
+        if unsafe { libc::kill(i32::try_from(pid).unwrap(), 0) } == -1 {
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::ESRCH)
+            );
+            return true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // An orphan can be a zombie until the runner's PID 1 reaps it; it has exited.
+            if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
+                return stat
+                    .rsplit_once(") ")
+                    .is_some_and(|(_, rest)| rest.starts_with('Z'));
+            }
+        }
+        false
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError},
+            System::Threading::{
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
+        };
+        // SAFETY: query only; the owned handle is closed before returning.
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                assert_eq!(GetLastError(), ERROR_INVALID_PARAMETER);
+                return true;
+            }
+            let mut exit_code = 0;
+            let ok = GetExitCodeProcess(process, &mut exit_code);
+            CloseHandle(process);
+            assert_ne!(ok, 0, "couldn't query fixture PID {pid}");
+            exit_code != 259 // STILL_ACTIVE
+        }
+    }
+}
+
+#[test]
+fn native_slow_starting_timeout_fixtures_run_and_their_processes_exit() {
+    for (scenario, pid_file) in [
+        ("slow-timeout", "leader.pid"),
+        ("slow-orphan", "descendant.pid"),
+    ] {
+        let f = Fake::new(scenario, "unused");
+        let started = Instant::now();
+        let reason = meta::fetch(&f.0, "https://example.test/v", START).unwrap_err();
+        assert!(reason.contains("took longer"), "{scenario}: {reason}");
+        assert!(
+            started.elapsed() < PROMPT,
+            "{scenario}: timeout wasn't prompt"
+        );
+        let pid = fs::read_to_string(f.0.join(pid_file))
+            .unwrap_or_else(|e| panic!("{scenario} never started: {e}"))
+            .parse::<u32>()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !process_has_exited(pid) {
+            assert!(
+                Instant::now() < deadline,
+                "{scenario}: PID {pid} still running"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
 }
 
 // Linux refuses to exec a binary with an open writer; macOS doesn't. These deterministically

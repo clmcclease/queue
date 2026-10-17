@@ -10,11 +10,16 @@ use std::{
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
+    let root = env::current_exe().unwrap().parent().unwrap().to_owned();
     if args.first().is_some_and(|s| s == "--hold-pipe") {
-        thread::sleep(Duration::from_secs(30));
+        fs::write(root.join("descendant.pid"), process::id().to_string()).unwrap();
+        // A heartbeat for 30 s: the test checks it stops, proving this descendant was killed.
+        for beat in 0..600u32 {
+            fs::write(root.join("heartbeat"), beat.to_string()).unwrap();
+            thread::sleep(Duration::from_millis(50));
+        }
         return;
     }
-    let root = env::current_exe().unwrap().parent().unwrap().to_owned();
     let scenario = fs::read_to_string(root.join("scenario.txt")).unwrap();
     let attempt_path = root.join("attempt.txt");
     let attempt = fs::read_to_string(&attempt_path)
@@ -24,12 +29,17 @@ fn main() {
         + 1;
     fs::write(&attempt_path, attempt.to_string()).unwrap();
     fs::write(root.join(format!("args-{attempt}.txt")), args.join("\n")).unwrap();
-    if scenario == "timeout" {
+    // #65 QA: mimic startup work that exceeds the old 300/500 ms deadlines.
+    if scenario.starts_with("slow-") {
+        thread::sleep(Duration::from_millis(900));
+    }
+    if scenario == "timeout" || scenario == "slow-timeout" {
+        fs::write(root.join("leader.pid"), process::id().to_string()).unwrap();
         fs::write(root.join("started"), b"ready").unwrap();
         thread::sleep(Duration::from_secs(30));
         return;
     }
-    if scenario == "orphan" {
+    if scenario == "orphan" || scenario == "slow-orphan" {
         // Inherit the parent's pipes, testing the same process group / Windows Job Object.
         let _child = Command::new(env::current_exe().unwrap())
             .arg("--hold-pipe")

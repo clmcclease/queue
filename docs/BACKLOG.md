@@ -33,6 +33,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #41 | NFR | P1 | infra | **Native macOS/Windows download tests in CI** — Run the download tests (and opt-in real-sidecar loopback tests) in the per-OS bundle jobs, and add a Windows executable fixture. M1 audit. |
 | #42 | D2 | P2 | download | **Download failure-path regression tests** — Forced cross-volume `place`, mid-copy and sync failures, and StrictMode listener cleanup. M1 audit. |
 | #45 | D2 | P2 | download | **Clean up staging folders left by an interrupted download** — Remove stale `item-*` work dirs on startup (D-014). |
+| #65 | NFR | P2 | infra | **Harden #41's native tests** — Give the timeout fixtures time to start (flaky on Windows CI), check the orphaned descendant actually exits, and run `test-linux.sh`'s remote guard instead of matching its text. #41 review and PR #64 CI. |
 
 ## M3 – Smart naming (rules)
 
