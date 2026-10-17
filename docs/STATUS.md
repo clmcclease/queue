@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #45 (D2 stale staging cleanup), uncommitted
+**Updated:** 2026-10-14 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #42 (D2 download failure-path tests), next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -61,7 +61,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
 
-## In progress: #45 (D2) clean up staging left by an interrupted download (uncommitted; D-014)
+## Done: #45 (D2) clean up staging left by an interrupted download (squash-merged from PR #63; D-014)
 - `download::stale_work_dirs(cache)` lists earlier runs' leftovers in the app cache: `downloads/item-*` work dirs (D-014) and `info/session-*` saved `-J` folders (D-017, never reused after a restart). Only real folders with those names are listed, never files or symlinks (`DirEntry::file_type` doesn't follow links).
 - In `lib.rs` setup, only when this copy holds the queue lock (so another copy's running download is never touched), the list is taken before this run creates its own folders and deleted on a background thread.
 - **Checks:** `cargo test` 268 (new test: matching folders, Unicode names, plain files, other folders, and a symlink whose target survives); clippy/fmt clean (macOS arm64). Live: after the dev app restarted with this code, `~/Library/Caches/dev.mcclease.queue/downloads` and `info` were empty, both modified at the restart. The earlier contents weren't captured.
@@ -370,9 +370,9 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #13 merge:** `cargo test` 267, `npm test` 174/174 (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
+- **macOS arm64 locally, at the #45 merge:** `cargo test` 277, `npm test` 174/174 (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
 - **Owner's Linux box (`scripts/test-linux.sh`):** all checks, including the loopback and ETXTBSY tests.
-- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #13 merge.
+- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #45 merge.
 - **Not verified natively:** UI behavior (folder picker, Open folder / Show in folder, webviews) on Windows and Linux; CI only runs the automated tests there.
 
 ## Open questions and problems
@@ -396,4 +396,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#45: committed for PR review (no `ci:bundle`). Remaining M2: #42 and the #41 follow-ups, then the M2 audit.
+#42 (D2, P2: download failure-path regression tests): read the issue. Then the #41 follow-ups:
+- the orphan-timeout test should assert the descendant exited;
+- `test-linux.test.mjs` should run the remote guard.
+Then the M2 `codex-qa audit` and close M2.
