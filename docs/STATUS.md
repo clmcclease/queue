@@ -440,4 +440,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-Commit #67 (owner approval), open its PR, and merge once CI is green on all three OSes. Then #68 (save-warning listener), #69, #70 and #72, each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Commit #67 (owner approval), open its PR, and merge once CI is green on all three OSes. Then #68 (save-warning listener), #69, #70, #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.

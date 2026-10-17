@@ -39,6 +39,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #69 | NFR | P2 | infra | **Fix the codex-qa watchdog and refresh stale docs** — The watchdog `sleep` can hold the caller's pipe for the whole timeout; README, STATUS, ARCHITECTURE and the PRD's format list are out of date. M2 audit. |
 | #70 | D2,D4 | P2 | download | **Exercise real video+audio merging in CI** — Local video and audio fixtures over loopback, so every OS runs a real ffmpeg merge, Processing events and the format notices. M2 audit. |
 | #72 | D2 | P2 | download | **Never leave a partial file under the final name** — Copy across volumes into a temporary name, then publish it without overwriting (per OS); startup removes Queue's leftover temp files. #67 review; accepted for #67 (D-014). |
+| #74 | Q6 | P1 | queue | **Cancel a download in progress** — A Cancel button on downloading/processing rows stops that download's whole tree (reusing #67) and removes its staging and partial files; the row goes back to Queued, marked Cancelled (owner's choice). Owner request; split from #22. |
 
 ## M3 – Smart naming (rules)
 
@@ -67,7 +68,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #19 | — | P1 | ui | **Keyboard shortcuts** — ⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item; focus starts in the URL bar. |
 | #20 | 6.5 | P1 | ui | **Completion notifications and history section** — OS notification on finish; Completed list with Show in folder (reuses #39), Copy URL, and Clear. |
 | #21 | — | P1 | infra | **yt-dlp auto-update (at most daily)** — Run yt-dlp -U at launch if the last check was over 24h ago; setting to disable. |
-| #22 | Q6 | P1 | queue | **Drag to reorder and cancel in-progress item** — Cancel kills the subprocess and cleans up partial files. |
+| #22 | Q6 | P1 | queue | **Drag to reorder the queue** — Drag rows to change the order Download all uses. Cancel was split out to #74. |
 | #23 | D3,D5 | P1 | download | **Per-item format override; embed thumbnail + metadata** — Per-row Default/Audio toggle; --embed-thumbnail --embed-metadata where supported. |
 | #24 | NFR | P1 | infra | **Signed installers for all platforms** — macOS notarized .dmg, Windows signed MSI/NSIS (certificate decision pending), Linux AppImage + .deb. |
 | #43 | NFR | P1 | infra | **Content Security Policy for the webview** — `app.security.csp` is null; set a strict CSP and verify it on all three webviews. |

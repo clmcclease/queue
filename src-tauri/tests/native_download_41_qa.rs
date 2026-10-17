@@ -159,7 +159,9 @@ fn native_403_reextracts_after_unicode_saved_info_and_reuses_staging() {
 }
 
 /// #67: a descendant that let go of the pipes, still running when its run ends, is stopped with
-/// its tree (Unix: the group is cleaned up on drop; Windows: the job closes).
+/// its tree (`Tree::finish`). Unix only: a Windows child inherits its parent's pipe handles even
+/// with null stdio, so it can't let go of them; there the job object stops leftovers.
+#[cfg(unix)]
 #[test]
 fn native_a_descendant_left_after_the_run_is_stopped_with_its_tree() {
     let f = Fake::new("detached", "unused");
