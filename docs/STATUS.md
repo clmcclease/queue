@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #41 follow-ups, then the M2 audit
+**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** the M2 `codex-qa audit`
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,14 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## Done: #65 (NFR) harden #41's native tests (squash-merged from PR #66)
+- **Windows flake:** the two metadata-timeout tests now allow 3 s (`START`) for a freshly copied fixture to start, instead of 300/500 ms, and require finishing within 10 s (`PROMPT`). The fixtures run 30 s, so that still proves the timeout stopped them.
+- **Orphan exit:** the held-pipe descendant writes a heartbeat every 50 ms, and the test checks it stops. Mutation check: with the Unix group kill disabled, the heartbeat check failed while the old time bound still passed.
+- **Remote guard:** `test-linux.test.mjs` runs the extracted `GUARD` heredoc against a scratch HOME. Mutation check: breaking its `case "$real"` line fails the test.
+- `codex-qa test "#65"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261017-120012-test-5fpu.md`). Codex's tests are added (D-021): slow-start scenarios with per-OS PID-exit checks (`kill(pid, 0)` plus Linux zombies; Windows `OpenProcess`/`GetExitCodeProcess`), and `qa/tests/test-linux-65-qa.test.mjs` (4 tests: the whole script with local `ssh`/`rsync` stubs, no host contacted).
+- `codex-qa review`: **PASS WITH NOTES** (`qa/reports/20261017-120543-review-W54q.md`). Its P3 (this handoff was stale) is fixed. Optional tests, not done: a descendant that keeps only stderr open, and a Unix descendant that ignores SIGTERM.
+- **Checks (macOS arm64):** fmt, clippy, `cargo test` 288 (14 ignored), `npm test` 185/185. **CI (run 39055679396):** green on Linux, Windows and macOS on the first run; on Windows both timeout tests and the PID-exit test passed.
 
 ## Done: #42 (D2) download failure-path regression tests (squash-merged from PR #64)
 - `download::place` and `copy_no_clobber` behave as before. Internally the hard link, copy and sync are separate steps (a private `Steps` struct of fn pointers, `STEPS` in production), so a test can fail any one of them.
@@ -379,9 +387,9 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - Owner test (2026-10-11): many links in the dev app; metadata and thumbnails load and the list scrolls. **Some downloads fail with "HTTP Error 403: Forbidden".** This is the download path (#4), not #6. The verbose log shows `PO Token Providers: none` and `Detected experiment to bind GVS PO Token to video ID for web client`, so YouTube's PO-token enforcement is the likely cause. Cause found (`visionos` link rejection; yt-dlp doesn't retry 4xx). Decided as D-017 and filed as **#48** (auto-retry + `--load-info-json`), next after #6.
 
 ## Checks (latest)
-- **macOS arm64 locally, at the #42 merge:** `cargo test` 287 (14 ignored), `npm test` 180/180, real-sidecar loopback tests pass (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
+- **macOS arm64 locally, at the #65 merge:** `cargo test` 288 (14 ignored), `npm test` 185/185, real-sidecar loopback tests pass (real-sidecar tests with network 14/14 at #11); clippy, fmt, actionlint and shellcheck clean.
 - **Owner's Linux box (`scripts/test-linux.sh`):** all checks, including the loopback and ETXTBSY tests.
-- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #42 merge.
+- **Hosted CI (public repo, free runners):** every PR runs the full checks natively on Linux, Windows and macOS arm64, plus the real-sidecar loopback tests. Bundles for all 4 targets run on `main` and `ci:bundle` PRs. All green at the #65 merge.
 - **Not verified natively:** UI behavior (folder picker, Open folder / Show in folder, webviews) on Windows and Linux; CI only runs the automated tests there.
 
 ## Open questions and problems
@@ -396,7 +404,8 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
    - **#44** yt-dlp GPG signature checks (M5).
 5. ~~Flaky Linux CI (`Text file busy`)~~ Fixed in #41: `spawn_tree` retries ETXTBSY.
 6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Not fixed yet.
-7. Flaky on Windows CI: `native_metadata_timeout_stops_a_running_executable_promptly` (#41's `native_download_41_qa.rs`) gives the fake yt-dlp 300 ms; on a slow runner it was killed before it wrote `started` (PR #64, run 39049278536, passed on re-run). Worth fixing with the #41 follow-ups: wait for `started` before the timeout counts, or allow a longer timeout.
+7. Flaky on Windows CI: `native_metadata_timeout_stops_a_running_executable_promptly` timed out (300 ms) before the fake yt-dlp started, on 2 of 3 PR #64 runs (passed on re-run). Fixed in #65 (3 s to start); passed on Windows CI on the first run.
+8. Dependabot alert 1 (moderate, GHSA-wrw7-89jp-8q8g): `glib` 0.18.5 `VariantStrIter` unsoundness, reached only through Tauri's Linux GTK stack (fixed in glib 0.20). Queue's code doesn't use glib, and no fix is possible until Tauri moves to gtk-rs ≥ 0.20. Proposed: dismiss as tolerable risk; waiting on the owner.
 
 ## Owner checks in the dev app (macOS)
 - 2026-10-13: live progress, "Processing…" and Retry worked on real downloads.
@@ -406,7 +415,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-The #41 follow-ups:
-- the orphan-timeout test should assert the descendant exited;
-- `test-linux.test.mjs` should run the remote guard.
-Then the M2 `codex-qa audit` and close M2.
+Run the M2 `codex-qa audit`. Fix or file what it finds, then close the M2 milestone (owner approval).
