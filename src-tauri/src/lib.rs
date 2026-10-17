@@ -31,6 +31,10 @@ fn fetch_worker(app: AppHandle, jobs: Receiver<(u64, String)>) {
         .ok()
         .map(|d| meta::session_dir(&d));
     for (id, url) in jobs {
+        // Counted until recorded, so quitting saves after it (#67); none start once quitting.
+        let Some(_running) = proc::job() else {
+            return;
+        };
         let state = app.state::<Mutex<Queue>>();
         let updated = run_fetch_job(&state, id, || {
             let (meta, raw) = sidecar::dir()
@@ -60,6 +64,11 @@ pub fn run_fetch_job(
 ) -> Option<Item> {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(fetch))
         .unwrap_or_else(|_| Err("Getting the video's info failed unexpectedly.".into()));
+    // A failure while quitting is the quit stopping it (#67): the row stays Fetching and
+    // fetches again after a restart. A finished fetch is still recorded.
+    if outcome.is_err() && proc::stopping() {
+        return None;
+    }
     let mut q = lock(queue).ok()?;
     let mut saved_path = None;
     let outcome = outcome.map(|(meta, saved)| {
@@ -324,6 +333,10 @@ const QUEUE_FILE: &str = "queue.json";
 /// How often the queue is saved if it changed.
 const SAVE_EVERY: Duration = Duration::from_millis(500);
 
+/// How long quitting waits for downloads and fetches to stop and record their results (#67): a
+/// tree gets up to 3 s after SIGTERM before SIGKILL, and 1 s to be gone (proc).
+const QUIT_WAIT: Duration = Duration::from_secs(5);
+
 /// Where the queue is saved, and the change count it was last saved at.
 struct QueueFile {
     path: Option<std::path::PathBuf>,
@@ -469,6 +482,11 @@ fn begin_download(
 /// Runs a started download to the end (blocking): 403 retries with a pause (D-017), then the
 /// outcome is recorded, the saved info deleted, and the row emitted.
 fn complete_download(app: &AppHandle, job: DownloadJob) {
+    // Counted until the result is recorded, so quitting saves after it (#67). Refused once
+    // quitting: the row stays as begun and comes back interrupted.
+    let Some(_running) = proc::job() else {
+        return;
+    };
     let state = app.state::<Mutex<Queue>>();
     let id = job.id;
     let emit = |updated: Option<Item>| {
@@ -484,7 +502,7 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
         &job.url,
         job.info.as_deref(),
         job.format,
-        std::thread::sleep,
+        proc::sleep_unless_quitting,
         |attempt| emit(lock(&state).ok().and_then(|mut q| q.retrying(id, attempt))),
         |event| match event {
             download::Event::Progress(p) => {
@@ -495,6 +513,12 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
             }
         },
     );
+    // A failure while quitting is the quit stopping it (#67): leave the row as it is, so the
+    // final save keeps it as an interrupted download rather than a failure. A finished
+    // download is still recorded.
+    if outcome.is_err() && proc::stopping() {
+        return;
+    }
     // A "most compatible" format the site didn't have gets an honest notice (D-015), decided
     // from the codecs yt-dlp chose.
     let notice = outcome.as_ref().ok().and_then(|saved| {
@@ -579,6 +603,9 @@ fn queue_run_all(app: AppHandle, runner: tauri::State<'_, Runner>) -> Result<boo
             queue::run_all(
                 &state,
                 |id| {
+                    if proc::stopping() {
+                        return false; // quitting (#67): start nothing more
+                    }
                     if lock(&state).map(|q| q.is_busy()).unwrap_or(true) {
                         return false; // a manual Download holds the slot: wait
                     }
@@ -726,8 +753,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // One last save on the way out, so nothing from the final half second is lost.
             if let tauri::RunEvent::Exit = event {
+                // Stop running downloads and fetches first, so none outlives Queue (#67), then
+                // one last save: rows cut off now come back as interrupted after a restart.
+                proc::shut_down();
+                proc::wait_idle(QUIT_WAIT);
                 save_queue(app);
             }
         });

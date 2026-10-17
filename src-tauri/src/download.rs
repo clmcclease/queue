@@ -664,7 +664,7 @@ struct Steps {
 
 const STEPS: Steps = Steps {
     link: |src, dest| fs::hard_link(src, dest),
-    copy: |from, to| io::copy(from, to),
+    copy: copy_unless_quitting,
     sync: fs::File::sync_all,
 };
 
@@ -673,6 +673,27 @@ fn place_via(src: &Path, dest: &Path, steps: &Steps) -> io::Result<()> {
         Ok(()) => fs::remove_file(src),
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(e),
         Err(_) => copy_via(src, dest, steps),
+    }
+}
+
+/// Copies in 1 MiB chunks, stopping if Queue starts quitting (#67): a quit mid-copy then
+/// removes the partial file, rather than leaving a cut-off file under the real name.
+fn copy_unless_quitting(from: &mut fs::File, to: &mut fs::File) -> io::Result<u64> {
+    use std::io::{Read, Write};
+    let mut buf = vec![0u8; 1 << 20];
+    let mut total = 0;
+    loop {
+        if proc::stopping() {
+            return Err(io::Error::other(QUITTING));
+        }
+        let n = match from.read(&mut buf) {
+            Ok(0) => return Ok(total),
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        to.write_all(&buf[..n])?;
+        total += n as u64;
     }
 }
 
@@ -691,6 +712,10 @@ fn copy_via(src: &Path, dest: &Path, steps: &Steps) -> io::Result<()> {
     }
     fs::remove_file(src)
 }
+
+/// Why a download or fetch stopped early: Queue is quitting (#67). The row isn't marked failed;
+/// it comes back after a restart like any other interrupted download.
+pub const QUITTING: &str = "Queue is quitting";
 
 /// Highest ` (n)` tried before giving up (N2).
 pub const MAX_COPIES: u32 = 999;
@@ -874,22 +899,39 @@ fn run_in(
             tree.terminate(); // a descendant still holds stdout open
             break;
         }
+        if proc::stopping() {
+            tree.terminate(); // Queue is quitting (#67)
+            return Err(QUITTING.to_string().into());
+        }
     }
+    // stdout closed, but yt-dlp may still be running: wait for it, unless Queue quits.
     let status = match status {
         Some(status) => status,
-        None => tree
-            .child
-            .wait()
-            .map_err(|e| format!("Couldn't wait for yt-dlp: {e}"))?,
+        None => match tree.wait_unless_quitting() {
+            Ok(Some(status)) => status,
+            Ok(None) => {
+                tree.terminate();
+                return Err(QUITTING.to_string().into());
+            }
+            Err(e) => {
+                tree.terminate();
+                return Err(format!("Couldn't wait for yt-dlp: {e}").into());
+            }
+        },
     };
     let drain_until = drain_until.unwrap_or_else(|| Instant::now() + DRAIN_GRACE);
-    let stderr = match err.recv_timeout(drain_until.saturating_duration_since(Instant::now())) {
-        Ok(stderr) => stderr,
-        Err(_) => {
+    let stderr = match proc::recv_until(&err, drain_until) {
+        proc::Waited::Got(stderr) => stderr,
+        proc::Waited::TimedOut => {
             tree.terminate(); // a descendant still holds stderr open
             err.recv_timeout(Duration::from_secs(1)).unwrap_or_default()
         }
+        proc::Waited::Quitting => {
+            tree.terminate();
+            return Err(QUITTING.to_string().into());
+        }
     };
+    tree.finish(); // yt-dlp is done: stop anything it left running
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr);
         let reason = failure_reason(&stderr, &status.to_string());

@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** the M2 `codex-qa audit`
+**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #67 (in review), then #68, #69, #70, #72
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -60,6 +60,31 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review` round 4: **FAIL** (one P2), then fixed (`qa/reports/20261011-093728-review-Y8qS.md`): `+` collided with `%2B` because `canonical()` decoded every escape. It now does plain RFC 3986 normalization, decoding only escapes of unreserved characters and upper-casing the rest, so `+`, `%2B` and `%20` stay distinct while `%2b` = `%2B`. Tests were added for values and names. All cargo tests pass; `npm test` 61/61; clippy clean.
 - **Review gate:** the owner accepted it after round 4's fix (2026-10-11) on the strength of the local checks; no fifth review was run.
 - This branch also records D-015 (MP4 preset) and D-016 (provisional model) plus the PRD, BACKLOG and STATUS updates, per the owner's 2026-10-11 decisions.
+
+## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
+- Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## In review: #67 (Q7, D2) stop downloads and metadata fetches when Queue quits (branch `queue/67-stop-on-quit`)
+- **The bug:** on exit Queue saved the queue but never stopped yt-dlp/ffmpeg. On macOS/Linux they run in their own process group, so a download kept running after Queue quit, and a relaunch's #45 cleanup deleted its staging folder. Windows' job object (`KILL_ON_JOB_CLOSE`) already killed them.
+- **`proc`:**
+  - A global shutdown state (`stopping`, live trees, running jobs) under one lock. `spawn_tree` refuses once stopping.
+  - `shut_down()`, `wait_for_trees`, `wait_idle`, and `job()` guards held by each download/fetch until its result is recorded.
+  - Quit-aware waits: `Tree::wait_unless_quitting`, `recv_until`, `sleep_unless_quitting` (the 403 retry pause).
+  - `Tree::terminate` waits up to 1 s until the tree is really gone (Unix: the group is empty; Windows: the job has no active processes).
+  - `Tree::finish` stops leftover descendants right after a run, while the group is certainly ours. Drop only stops an unfinished tree whose leader is unreaped, so a reused group ID is never signalled.
+- **Downloads/fetches:** their wait loops stop their own tree on quit. A failure during a quit is not recorded: the row stays Downloading/Fetching, so it comes back interrupted or re-fetches after a restart. A success is still recorded. The cross-volume copy stops between 1 MiB chunks and removes its partial file. The Download all runner starts nothing more.
+- **Exit:** `shut_down` → `wait_idle(5 s)` → final save.
+- **Tests:**
+  - `tests/quit_q7_67.rs`: a hanging download with a pipe-holding descendant plus a fetch, quit; everything exits within 5 s; new work refused; jobs hold up the save; the copy aborts; successes recorded.
+  - Codex's `tests/quit_q7_67_qa.rs` (6, each in its own process): closed stdout, orphans holding stdout or stderr, SIGTERM ignored → SIGKILL, restored rows, failed-spawn accounting.
+  - `native_a_descendant_left_after_the_run_is_stopped_with_its_tree`.
+  - `tests/support/native.rs` (the shared fixture builder and exit check; macOS/Linux zombies count as exited).
+- **Fault tests:** removing each stop check, the tree count, `finish()`, the drop cleanup or the copy's quit check fails its test.
+- `codex-qa test "#67"`: **FAIL**, then fixed (`qa/reports/20261017-142907-test-OxV3.md`). A download whose stdout closed, and metadata reader waits after the leader exited, ignored the quit; fixed with the quit-aware waits. Codex's tests are added. Its instant exit checks were relaxed to a bounded `exits_soon` (≤1 s), because a SIGKILLed process stays visible for milliseconds on macOS (1 in 4 runs; gone 200 ms later); 10/10 passes after.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261017-144350-review-bzNG.md`): descendants that let go of the pipes escaped (now `finish`/drop cleanup), and a success during a quit was discarded (now recorded; job guards; the copy aborts).
+- Round 2: **FAIL** (`qa/reports/20261017-145426-review-kbdi.md`). (1) A reused process-group ID could be signalled on drop: fixed (`finish` + the drop rule). (2) A write blocking past the quit wait, or a crash mid-copy, can leave a cut-off file under the final name. **Owner accepted it for #67** (D-014); it's **#72**, next in M2.
+- Round 3: **PASS WITH NOTES** (`qa/reports/20261017-154848-review-OzO5.md`). Only the accepted #72 limitation, plus this handoff (now updated). Suggested tests not added: a quit after a copy has written bytes, the exit handler with a delayed successful download, and a quit during a real 403 pause.
+- **Checks (macOS arm64):** fmt, clippy, `cargo test` 296 (14 ignored), real-sidecar loopback tests, `npm test` 185/185. Windows code is checked only by CI. **Owner in the dev app (macOS, 2026-10-17):** quit (⌘Q) in the middle of a real download. Afterwards I found no yt-dlp/ffmpeg process left, an empty `downloads` staging folder, and `queue.json` saved with that row still `downloading` (so it restores as interrupted) and the earlier finished row kept as done.
 
 ## Done: #65 (NFR) harden #41's native tests (squash-merged from PR #66)
 - **Windows flake:** the two metadata-timeout tests now allow 3 s (`START`) for a freshly copied fixture to start, instead of 300/500 ms, and require finishing within 10 s (`PROMPT`). The fixtures run 30 s, so that still proves the timeout stopped them.
@@ -403,7 +428,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
    - **#43** Content Security Policy (M5, P1);
    - **#44** yt-dlp GPG signature checks (M5).
 5. ~~Flaky Linux CI (`Text file busy`)~~ Fixed in #41: `spawn_tree` retries ETXTBSY.
-6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Not fixed yet.
+6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Being fixed in #69.
 7. Flaky on Windows CI: `native_metadata_timeout_stops_a_running_executable_promptly` timed out (300 ms) before the fake yt-dlp started, on 2 of 3 PR #64 runs (passed on re-run). Fixed in #65 (3 s to start); passed on Windows CI on the first run.
 8. Dependabot alert 1 (moderate, GHSA-wrw7-89jp-8q8g): `glib` 0.18.5 `VariantStrIter` unsoundness, reached only through Tauri's Linux GTK stack (fixed in glib 0.20). Queue's code doesn't use glib, and no fix is possible until Tauri moves to gtk-rs ≥ 0.20. Proposed: dismiss as tolerable risk; waiting on the owner.
 
@@ -415,4 +440,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-Run the M2 `codex-qa audit`. Fix or file what it finds, then close the M2 milestone (owner approval).
+Commit #67 (owner approval), open its PR, and merge once CI is green on all three OSes. Then #68 (save-warning listener), #69, #70 and #72, each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.

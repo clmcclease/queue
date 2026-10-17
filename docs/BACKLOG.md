@@ -34,6 +34,11 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #42 | D2 | P2 | download | **Download failure-path regression tests** — Forced cross-volume `place`, mid-copy and sync failures, and StrictMode listener cleanup. M1 audit. |
 | #45 | D2 | P2 | download | **Clean up staging folders left by an interrupted download** — Remove stale `item-*` work dirs on startup (D-014). |
 | #65 | NFR | P2 | infra | **Harden #41's native tests** — Give the timeout fixtures time to start (flaky on Windows CI), check the orphaned descendant actually exits, and run `test-linux.sh`'s remote guard instead of matching its text. #41 review and PR #64 CI. |
+| #67 | Q7,D2 | P1 | queue | **Stop downloads and metadata fetches when Queue quits** — On quit, refuse new yt-dlp runs, stop the running ones (whole trees) and wait up to 5 s, then save; rows cut off come back as interrupted. M2 audit. |
+| #68 | Q7 | P2 | ui | **Don't fail silently when the save-warning listener can't register** — Show the failure and/or poll the save status, so D-025's warning can't be lost. M2 audit. |
+| #69 | NFR | P2 | infra | **Fix the codex-qa watchdog and refresh stale docs** — The watchdog `sleep` can hold the caller's pipe for the whole timeout; README, STATUS, ARCHITECTURE and the PRD's format list are out of date. M2 audit. |
+| #70 | D2,D4 | P2 | download | **Exercise real video+audio merging in CI** — Local video and audio fixtures over loopback, so every OS runs a real ffmpeg merge, Processing events and the format notices. M2 audit. |
+| #72 | D2 | P2 | download | **Never leave a partial file under the final name** — Copy across volumes into a temporary name, then publish it without overwriting (per OS); startup removes Queue's leftover temp files. #67 review; accepted for #67 (D-014). |
 
 ## M3 – Smart naming (rules)
 
@@ -67,6 +72,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #24 | NFR | P1 | infra | **Signed installers for all platforms** — macOS notarized .dmg, Windows signed MSI/NSIS (certificate decision pending), Linux AppImage + .deb. |
 | #43 | NFR | P1 | infra | **Content Security Policy for the webview** — `app.security.csp` is null; set a strict CSP and verify it on all three webviews. |
 | #44 | NFR | P2 | infra | **Verify yt-dlp release GPG signatures** — Check `SHA2-256SUMS.sig` against upstream's key when pins change (and the ffmpeg `.asc`). |
+| #71 | NFR | P2 | ui | **Native UI smoke checks on Windows and Linux** — Folder picker (#10), Open folder / Show in folder (#39) and multi-line paste (#13), checked in the real app on each OS. M2 audit. |
 
 ## Later
 
