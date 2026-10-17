@@ -907,6 +907,56 @@ fn run_in(
     })
 }
 
+/// Leftovers in the app cache from earlier runs (#45): download work dirs (`downloads/item-*`,
+/// D-014) and saved `-J` sessions (`info/session-*`, D-017). A run removes its own when it ends,
+/// but a quit or crash mid-download leaves them, and a restored queue (#12) never reuses them.
+/// Only real folders with those names, inside real `downloads`/`info` folders, are listed:
+/// never files, and never symlinks at either level (they could point anywhere). Call it before this run creates any of its own.
+pub fn stale_work_dirs(cache_dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for (sub, prefix) in [("downloads", "item-"), ("info", "session-")] {
+        let container = cache_dir.join(sub);
+        // The container itself must be a real folder too: a `downloads` that's a symlink would
+        // lead the cleanup into someone else's folder.
+        if !fs::symlink_metadata(&container).is_ok_and(|m| m.file_type().is_dir()) {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&container) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            // `file_type` doesn't follow symlinks: a link to a folder isn't a folder here.
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            let named = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with(prefix));
+            if is_dir && named {
+                found.push(entry.path());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Deletes one folder found by [`stale_work_dirs`], after checking again, right before deleting,
+/// that it and its `downloads`/`info` parent are still real folders (not symlinks): something
+/// could have swapped them since they were listed. A process that can already write to the cache
+/// could still race the instant between this check and the delete; that sub-millisecond window
+/// is accepted (#45, D-014).
+pub fn remove_stale(dir: &Path) -> io::Result<()> {
+    let real_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_dir());
+    let parent = dir.parent().unwrap_or(dir);
+    if !real_dir(parent) || !real_dir(dir) {
+        return Err(io::Error::other(format!(
+            "{} isn't a real folder anymore; not deleting it",
+            dir.display()
+        )));
+    }
+    fs::remove_dir_all(dir)
+}
+
 /// Waits before retry 2 and retry 3 after a 403 (D-017).
 pub const RETRY_WAITS: [Duration; 2] = [Duration::from_secs(10), Duration::from_secs(30)];
 
@@ -1041,6 +1091,82 @@ pub fn run_with_retries_saved(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_earlier_runs_staging_and_info_folders_are_stale() {
+        let cache = std::env::temp_dir().join(format!("queue-45-stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache);
+        let downloads = cache.join("downloads");
+        let info = cache.join("info");
+        fs::create_dir_all(downloads.join("item-3-1760000000000000000").join("sub")).unwrap();
+        fs::write(
+            downloads.join("item-3-1760000000000000000/Video.f137.mp4.part"),
+            b"partial",
+        )
+        .unwrap();
+        fs::create_dir_all(downloads.join("item-日本語")).unwrap();
+        fs::write(downloads.join("item-file-not-dir"), b"x").unwrap();
+        fs::create_dir_all(downloads.join("keep-me")).unwrap();
+        fs::create_dir_all(info.join("session-123-456-0")).unwrap();
+        fs::write(info.join("session-123-456-0/item-1.json"), b"{}").unwrap();
+        fs::create_dir_all(info.join("other")).unwrap();
+        let outside = cache.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("precious.txt"), b"keep").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, downloads.join("item-link")).unwrap();
+
+        let stale = stale_work_dirs(&cache);
+        assert_eq!(
+            stale,
+            vec![
+                downloads.join("item-3-1760000000000000000"),
+                downloads.join("item-日本語"),
+                info.join("session-123-456-0"),
+            ]
+        );
+        for dir in stale {
+            fs::remove_dir_all(dir).unwrap();
+        }
+        assert!(downloads.join("item-file-not-dir").is_file());
+        assert!(downloads.join("keep-me").is_dir());
+        assert!(info.join("other").is_dir());
+        assert_eq!(
+            fs::read(outside.join("precious.txt")).unwrap(),
+            b"keep",
+            "a symlink is never followed"
+        );
+        assert!(stale_work_dirs(&cache.join("missing")).is_empty());
+        fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_container_swapped_for_a_symlink_after_listing_is_not_followed() {
+        let root = std::env::temp_dir().join(format!("queue-45-swap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let cache = root.join("cache");
+        fs::create_dir_all(cache.join("downloads/item-1")).unwrap();
+        let elsewhere = root.join("elsewhere");
+        fs::create_dir_all(elsewhere.join("item-1")).unwrap();
+        fs::write(elsewhere.join("item-1/precious.txt"), b"keep").unwrap();
+        let stale = stale_work_dirs(&cache);
+        assert_eq!(stale, vec![cache.join("downloads/item-1")]);
+        // Between listing and deleting, `downloads` is replaced by a link to another folder.
+        fs::rename(cache.join("downloads"), root.join("moved")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, cache.join("downloads")).unwrap();
+        assert!(remove_stale(&stale[0]).is_err(), "refused");
+        assert_eq!(
+            fs::read(elsewhere.join("item-1/precious.txt")).unwrap(),
+            b"keep"
+        );
+        // And a real one is still deleted.
+        fs::remove_file(cache.join("downloads")).unwrap();
+        fs::rename(root.join("moved"), cache.join("downloads")).unwrap();
+        remove_stale(&stale[0]).unwrap();
+        assert!(!stale[0].exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn formats_add_only_their_own_flags_and_never_remux_or_convert() {

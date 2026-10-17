@@ -654,6 +654,21 @@ pub fn run() {
             let lock = queue_file
                 .as_deref()
                 .and_then(|f| lock_queue_waiting(f, LOCK_WAIT));
+            // Staging and saved-info folders left by a quit or crash (#45). Only the copy that
+            // owns the queue cleans up, so another copy's running download is never touched;
+            // listed now, before this run makes its own, and deleted in the background.
+            if lock.is_some()
+                && let Ok(cache) = app.path().app_cache_dir()
+            {
+                let stale = download::stale_work_dirs(&cache);
+                if !stale.is_empty() {
+                    std::thread::spawn(move || {
+                        for dir in stale {
+                            let _ = download::remove_stale(&dir);
+                        }
+                    });
+                }
+            }
             let (queue, writable) = queue_file
                 .as_deref()
                 .map(Queue::load_checked)
