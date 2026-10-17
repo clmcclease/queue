@@ -646,23 +646,44 @@ pub fn finished_file(work_dir: &Path) -> Result<PathBuf, String> {
 /// A hard link is atomic and no-clobber; across volumes (or on FAT) it falls back to a copy into
 /// a file that must not exist yet. `fs::rename` isn't used: it replaces existing files.
 pub fn place(src: &Path, dest: &Path) -> io::Result<()> {
-    match fs::hard_link(src, dest) {
-        Ok(()) => fs::remove_file(src),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(e),
-        Err(_) => copy_no_clobber(src, dest),
-    }
+    place_via(src, dest, &STEPS)
 }
 
 /// `place`'s fallback: copy into `dest`, which must not exist yet, then remove `src`. A failed
 /// copy removes the partial `dest` and keeps `src`.
 pub fn copy_no_clobber(src: &Path, dest: &Path) -> io::Result<()> {
+    copy_via(src, dest, &STEPS)
+}
+
+/// The filesystem steps of [`place`], separate so tests can make any one of them fail (#42).
+struct Steps {
+    link: fn(&Path, &Path) -> io::Result<()>,
+    copy: fn(&mut fs::File, &mut fs::File) -> io::Result<u64>,
+    sync: fn(&fs::File) -> io::Result<()>,
+}
+
+const STEPS: Steps = Steps {
+    link: |src, dest| fs::hard_link(src, dest),
+    copy: |from, to| io::copy(from, to),
+    sync: fs::File::sync_all,
+};
+
+fn place_via(src: &Path, dest: &Path, steps: &Steps) -> io::Result<()> {
+    match (steps.link)(src, dest) {
+        Ok(()) => fs::remove_file(src),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(e),
+        Err(_) => copy_via(src, dest, steps),
+    }
+}
+
+fn copy_via(src: &Path, dest: &Path, steps: &Steps) -> io::Result<()> {
     let mut to = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(dest)?;
     let copied = fs::File::open(src)
-        .and_then(|mut from| io::copy(&mut from, &mut to))
-        .and_then(|_| to.sync_all());
+        .and_then(|mut from| (steps.copy)(&mut from, &mut to))
+        .and_then(|_| (steps.sync)(&to));
     if let Err(e) = copied {
         drop(to);
         let _ = fs::remove_file(dest);
@@ -1831,6 +1852,129 @@ mod tests {
             place_unique(&src, &out, OsStr::new("Free.webm")).unwrap(),
             out.join("Free.webm")
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The real steps, except a link that fails the way `hard_link` does across volumes
+    /// (EXDEV) or on FAT.
+    const CROSS_VOLUME: Steps = Steps {
+        link: |_, _| {
+            Err(io::Error::new(
+                io::ErrorKind::CrossesDevices,
+                "cross-device link",
+            ))
+        },
+        ..STEPS
+    };
+
+    #[test]
+    fn place_falls_back_to_a_copy_when_hard_links_are_unavailable() {
+        let dir = temp("cross");
+        let (src, dest) = (dir.join("src.webm"), dir.join("dest.webm"));
+        fs::write(&src, b"new").unwrap();
+        place_via(&src, &dest, &CROSS_VOLUME).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert!(!src.exists(), "the copy moves the file");
+        fs::write(&src, b"newer").unwrap();
+        let err = place_via(&src, &dest, &CROSS_VOLUME).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&dest).unwrap(), b"new", "existing file untouched");
+        assert!(src.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_link_that_finds_the_name_taken_never_falls_back_to_a_copy() {
+        let dir = temp("taken");
+        let (src, dest) = (dir.join("src.webm"), dir.join("dest.webm"));
+        fs::write(&src, b"new").unwrap();
+        let taken = Steps {
+            link: |_, _| Err(io::Error::from(io::ErrorKind::AlreadyExists)),
+            copy: |_, _| panic!("must not copy"),
+            ..STEPS
+        };
+        let err = place_via(&src, &dest, &taken).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert!(src.exists() && !dest.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_copy_failing_midway_or_at_sync_removes_the_partial_file_and_keeps_the_source() {
+        use std::io::{Read, Write};
+        let dir = temp("midcopy");
+        let src = dir.join("src.webm");
+        fs::write(&src, vec![7u8; 64 * 1024]).unwrap();
+        let mid_copy = Steps {
+            copy: |from, to| {
+                let mut half = vec![0u8; 32 * 1024];
+                from.read_exact(&mut half)?;
+                to.write_all(&half)?;
+                Err(io::Error::other("disk full"))
+            },
+            ..CROSS_VOLUME
+        };
+        // Only the sync fails: the real copy runs first, and its sync result must be checked.
+        let at_sync = Steps {
+            sync: |_| Err(io::Error::other("sync failed")),
+            ..CROSS_VOLUME
+        };
+        for (what, name, steps, reason) in [
+            ("mid-copy", "a.webm", &mid_copy, "disk full"),
+            ("sync", "b.webm", &at_sync, "sync failed"),
+        ] {
+            let err = place_via(&src, &dir.join(name), steps).unwrap_err();
+            assert_eq!(err.to_string(), reason, "{what}: the failure is reported");
+            assert!(
+                !dir.join(name).exists(),
+                "{what}: no partial destination left"
+            );
+            assert_eq!(
+                fs::read(&src).unwrap().len(),
+                64 * 1024,
+                "{what}: source kept"
+            );
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A real cross-volume move where the machine has one: `QUEUE_QA_OTHER_VOLUME` (a folder on
+    /// another drive, e.g. an exFAT USB drive, which also has no hard links), or else Linux's
+    /// /dev/shm, usually tmpfs apart from the temp folder. Elsewhere the injected tests above
+    /// cover the fallback.
+    #[cfg(unix)]
+    #[test]
+    fn place_moves_across_real_volumes_when_available() {
+        use std::os::unix::fs::MetadataExt;
+        let chosen = std::env::var_os("QUEUE_QA_OTHER_VOLUME").map(PathBuf::from);
+        let volume = chosen.clone().unwrap_or_else(|| PathBuf::from("/dev/shm"));
+        let dir = temp("realcross");
+        let dev = |p: &Path| fs::metadata(p).map(|m| m.dev());
+        if !volume.is_dir() || dev(&volume).ok() == dev(&dir).ok() {
+            assert!(
+                chosen.is_none(),
+                "QUEUE_QA_OTHER_VOLUME must be a folder on another drive"
+            );
+            eprintln!("no second volume here; skipped");
+            return fs::remove_dir_all(dir).unwrap();
+        }
+        // A folder of our own there; a read-only /dev/shm skips rather than fails.
+        let other = volume.join(format!("queue-place-{}", std::process::id()));
+        if let Err(e) = fs::create_dir(&other) {
+            assert!(
+                chosen.is_none(),
+                "can't write to QUEUE_QA_OTHER_VOLUME: {e}"
+            );
+            eprintln!("can't write to {}: {e}; skipped", volume.display());
+            return fs::remove_dir_all(dir).unwrap();
+        }
+        let src = dir.join("src.webm");
+        fs::write(&src, b"across").unwrap();
+        let dest = other.join("dest.webm");
+        place(&src, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"across");
+        assert!(!src.exists());
+        fs::remove_dir_all(other).unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 
