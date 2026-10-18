@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #69 (in progress), then #70, #72, #74
+**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #70 next, then #72, #74
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -70,13 +70,14 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
 
-## In progress: #69 (NFR) codex-qa watchdog and stale docs (branch `infra/69-codex-qa-watchdog`)
+## Done: #69 (NFR) codex-qa watchdog and stale docs (squash-merged from PR #76; Linux/macOS/Windows tests green)
 - **The bug:** `run_codex`'s watchdog subshell ran `sleep "$TIMEOUT"` with the caller's stdout/stderr. Killing the subshell left the `sleep` running, holding the pipe, so a caller reading to EOF waited for the full timeout (25 min by default).
 - **Fix:** the watchdog redirects its own stdio to `/dev/null`, runs the `sleep` in the background, and kills it from a `TERM` trap. A hung Codex is still killed (its whole process group) and the timeout is still logged.
 - **Test:** `qa/tests/codex-qa-watchdog-69.test.mjs` runs a copy of the script in a scratch repo with a fake `codex`: a finished run reaches EOF at once (about 0.2 s with a 20 s timeout), and a hung one is killed at a 1 s timeout, reported, and its pipes close. Against the old script the first test fails (EOF after 20 s).
 - `codex-qa test "#69"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261018-142525-test-kmJU.md`). Codex's `codex-qa-watchdog-69-qa.test.mjs` (4 tests) is added (D-021): the watchdog's `sleep` is gone after a success, an early Codex failure and a run with no report; a timeout logs once and kills the whole process group; paths with spaces and Unicode work. Removing the `sleep` cleanup fails 3 of them.
 - `codex-qa review` round 1: **PASS WITH NOTES**, no findings (`qa/reports/20261018-142914-review-XUHA.md`). Suggested test, not added: Codex exiting at once, before the watchdog's `sleep` has started. In that tiny window a `sleep` can outlive the run, but it's off the caller's pipes, so EOF isn't delayed; it just exits at the timeout.
-- **Checks (macOS arm64):** `bash -n scripts/codex-qa`; `npm test` 204/204. Codex also ran `cargo test` (296 passed), clippy and fmt in its worktree. Linux and Windows not run locally (CI will).
+- **Checks (macOS arm64):** `bash -n scripts/codex-qa`; `npm test` 204/204. Codex also ran `cargo test` (296 passed), clippy and fmt in its worktree. Linux and Windows not run locally.
+- **CI (PR #76, run 39159180307):** green on Linux, macOS and Windows. The watchdog tests ran on Linux and macOS and are skipped on Windows (a Unix bash script). No `ci:bundle` label, so bundles were skipped.
 - **Docs (audit P3):** README (smart naming marked M3/M4; M2 status; CI on all three OSes), STATUS "What works" and CI lines, ARCHITECTURE (built vs **Planned** sections, today's item states, a Persistence section per D-014/D-020/D-025, `yt-dlp -U` marked planned for #21), and the PRD's format list (all four presets) and persistence line.
 
 ## Done: #68 (Q7, D-025) the save warning can't be lost (squash-merged from PR #75; Linux/macOS/Windows tests green)
@@ -465,4 +466,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-Start #69 (codex-qa watchdog + stale docs). Then #70, #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Start #70 (real video+audio merging in CI). Then #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
