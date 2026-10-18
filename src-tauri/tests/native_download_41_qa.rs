@@ -1,47 +1,18 @@
 //! #41 / PRD §7 cross-platform NFR: real download/metadata subprocess paths on every OS.
 //! A tiny Rust executable replaces the Unix shell fixtures, including on Windows.
+#[path = "support/native.rs"]
+mod native;
+
+use native::{executable, process_has_exited};
 use queue_lib::{download, meta, sidecar::Sidecar};
 use std::{
     fs,
     path::PathBuf,
-    process::Command,
-    sync::{
-        OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
-static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
-
-fn executable() -> &'static PathBuf {
-    EXECUTABLE.get_or_init(|| {
-        let target = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/qa-native-41");
-        fs::create_dir_all(&target).unwrap();
-        let output = target.join(format!(
-            "fixture-{}{}",
-            std::process::id(),
-            std::env::consts::EXE_SUFFIX
-        ));
-        let result = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
-            .args(["--edition=2024", "--crate-name", "queue_native_fixture"])
-            .arg(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/support/native_sidecar_41.rs"),
-            )
-            .arg("-o")
-            .arg(&output)
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "fixture compilation: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        output
-    })
-}
 
 struct Fake(PathBuf);
 impl Fake {
@@ -187,6 +158,22 @@ fn native_403_reextracts_after_unicode_saved_info_and_reuses_staging() {
     assert!(!f.0.join("work").exists());
 }
 
+/// #67: a descendant that let go of the pipes, still running when its run ends, is stopped with
+/// its tree (`Tree::finish`). Unix only: a Windows child inherits its parent's pipe handles even
+/// with null stdio, so it can't let go of them; there the job object stops leftovers.
+#[cfg(unix)]
+#[test]
+fn native_a_descendant_left_after_the_run_is_stopped_with_its_tree() {
+    let f = Fake::new("detached", "unused");
+    let meta = meta::fetch(&f.0, "https://example.test/v", START).unwrap();
+    assert_eq!(meta.title.as_deref(), Some("日本語"));
+    let pid: u32 = fs::read_to_string(f.0.join("descendant.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(process_has_exited(pid), "the descendant outlived its run");
+}
+
 /// Long enough for a freshly copied fixture to start, even on a Windows runner that scans each
 /// new executable (#65: 300 ms timed out before it ran). Both fixtures run for 30 s, so finishing
 /// within `PROMPT` still proves the timeout stopped them.
@@ -228,51 +215,6 @@ fn native_metadata_timeout_covers_descendants_holding_the_output_pipe() {
 
 // #65 QA: check the process itself as well as the heartbeat. A stopped writer alone could
 // otherwise be mistaken for an exited descendant. These scenarios deliberately start slowly.
-fn process_has_exited(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        // SAFETY: signal 0 probes the recorded fixture PID without sending it a signal.
-        if unsafe { libc::kill(i32::try_from(pid).unwrap(), 0) } == -1 {
-            assert_eq!(
-                std::io::Error::last_os_error().raw_os_error(),
-                Some(libc::ESRCH)
-            );
-            return true;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            // An orphan can be a zombie until the runner's PID 1 reaps it; it has exited.
-            if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) {
-                return stat
-                    .rsplit_once(") ")
-                    .is_some_and(|(_, rest)| rest.starts_with('Z'));
-            }
-        }
-        false
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::{
-            Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError},
-            System::Threading::{
-                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
-        };
-        // SAFETY: query only; the owned handle is closed before returning.
-        unsafe {
-            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if process.is_null() {
-                assert_eq!(GetLastError(), ERROR_INVALID_PARAMETER);
-                return true;
-            }
-            let mut exit_code = 0;
-            let ok = GetExitCodeProcess(process, &mut exit_code);
-            CloseHandle(process);
-            assert_ne!(ok, 0, "couldn't query fixture PID {pid}");
-            exit_code != 259 // STILL_ACTIVE
-        }
-    }
-}
 
 #[test]
 fn native_slow_starting_timeout_fixtures_run_and_their_processes_exit() {
@@ -311,7 +253,7 @@ fn linux_transient_text_file_busy_is_retried_until_the_writer_closes() {
     let f = Fake::new("success", "日本語.webm");
     let binary = Sidecar::YtDlp.path_in(&f.0);
     let writer = fs::OpenOptions::new().write(true).open(&binary).unwrap();
-    let error = Command::new(&binary).spawn().unwrap_err();
+    let error = std::process::Command::new(&binary).spawn().unwrap_err();
     assert_eq!(error.raw_os_error(), Some(libc::ETXTBSY));
     let closing = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(80));

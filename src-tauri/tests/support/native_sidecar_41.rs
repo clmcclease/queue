@@ -39,6 +39,20 @@ fn main() {
         thread::sleep(Duration::from_secs(30));
         return;
     }
+    if scenario == "detached" {
+        // #67: a descendant that lets go of both pipes, so the run ends while it's alive.
+        let _child = Command::new(env::current_exe().unwrap())
+            .arg("--hold-pipe")
+            .stdout(process::Stdio::null())
+            .stderr(process::Stdio::null())
+            .spawn()
+            .unwrap();
+        while !root.join("descendant.pid").exists() {
+            thread::sleep(Duration::from_millis(10));
+        }
+        println!("{{\"title\":\"日本語\"}}");
+        return;
+    }
     if scenario == "orphan" || scenario == "slow-orphan" {
         // Inherit the parent's pipes, testing the same process group / Windows Job Object.
         let _child = Command::new(env::current_exe().unwrap())
@@ -53,6 +67,18 @@ fn main() {
         .position(|a| a == "-P")
         .expect("download must pass -P");
     let work = PathBuf::from(&args[p + 1]);
+    if scenario == "hang" {
+        // #67: a download that never finishes, with a descendant holding its pipes (like
+        // ffmpeg under yt-dlp), until Queue quits.
+        fs::write(work.join("Title.webm.part"), b"partial").unwrap();
+        fs::write(root.join("leader.pid"), process::id().to_string()).unwrap();
+        let _child = Command::new(env::current_exe().unwrap())
+            .arg("--hold-pipe")
+            .spawn()
+            .unwrap();
+        thread::sleep(Duration::from_secs(30));
+        return;
+    }
     if scenario == "retry" && attempt == 1 {
         fs::write(work.join("kept.part"), b"partial").unwrap();
         eprintln!("ERROR: HTTP Error 403: Forbidden");

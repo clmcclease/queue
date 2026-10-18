@@ -140,6 +140,10 @@ pub fn fetch_raw(
                 tree.terminate();
                 return Err(timed_out());
             }
+            Ok(None) if proc::stopping() => {
+                tree.terminate(); // Queue is quitting (#67)
+                return Err(crate::download::QUITTING.to_string());
+            }
             Ok(None) => {
                 // Stop early if stdout overflowed instead of waiting out the deadline.
                 if stdout_result.is_none()
@@ -159,24 +163,36 @@ pub fn fetch_raw(
             }
         }
     };
-    let remaining = || deadline.saturating_duration_since(Instant::now());
     // From here on, every early return stops the tree: the leader has exited, but a descendant
-    // may still hold the pipes (and keep the process group alive).
-    let stdout = match stdout_result.map_or_else(|| out.recv_timeout(remaining()), Ok) {
-        Ok(Ok(stdout)) => stdout,
-        Ok(Err(e)) => {
-            tree.terminate(); // overflow: don't wait on stderr first
-            return Err(format!("yt-dlp produced too much output ({e})"));
-        }
-        Err(_) => {
-            tree.terminate(); // a descendant still holds stdout open
+    // may still hold the pipes (and keep the process group alive). A quit cuts the wait short.
+    let stdout =
+        match stdout_result.map_or_else(|| proc::recv_until(&out, deadline), proc::Waited::Got) {
+            proc::Waited::Got(Ok(stdout)) => stdout,
+            proc::Waited::Got(Err(e)) => {
+                tree.terminate(); // overflow: don't wait on stderr first
+                return Err(format!("yt-dlp produced too much output ({e})"));
+            }
+            proc::Waited::TimedOut => {
+                tree.terminate(); // a descendant still holds stdout open
+                return Err(timed_out());
+            }
+            proc::Waited::Quitting => {
+                tree.terminate();
+                return Err(crate::download::QUITTING.to_string());
+            }
+        };
+    let stderr = match proc::recv_until(&err, deadline) {
+        proc::Waited::Got(stderr) => stderr,
+        proc::Waited::TimedOut => {
+            tree.terminate(); // a descendant still holds stderr open
             return Err(timed_out());
         }
+        proc::Waited::Quitting => {
+            tree.terminate();
+            return Err(crate::download::QUITTING.to_string());
+        }
     };
-    let Ok(stderr) = err.recv_timeout(remaining()) else {
-        tree.terminate(); // a descendant still holds stderr open
-        return Err(timed_out());
-    };
+    tree.finish(); // yt-dlp is done: stop anything it left running
     let stderr = stderr.unwrap_or_default();
     if !status.success() {
         return Err(failure_reason(
