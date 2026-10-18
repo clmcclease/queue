@@ -61,7 +61,7 @@ A single power user (the owner) on any desktop OS who downloads podcasts, music,
 | ID | Requirement | Priority |
 |---|---|---|
 | D1 | User-selectable output folder, remembered between sessions | P0 |
-| D2 | Format presets: **Default**, which lets yt-dlp choose the best format and container itself (no `-f` override, nothing forced to mp4), and **Audio only** (`-x`, keeping yt-dlp's best native audio format with no re-encode). Plus an optional **Most compatible (MP4)** that prefers H.264 + AAC so files play in QuickTime and on TVs, with no re-encode and an honest notice when a site has none (D-015). Default is **Default**. | P0 |
+| D2 | Format presets: **Default**, which lets yt-dlp choose the best format and container itself (no `-f` override, nothing forced to mp4), and **Audio only** (`-x`, keeping yt-dlp's best native audio format with no re-encode). Plus two optional compatibility presets with no re-encode (D-015): **Most compatible video (MP4)**, which prefers H.264 + AAC so files play in QuickTime and on TVs and shows an honest notice when a site has none, and **Most compatible audio (M4A)**, which prefers AAC. Default is **Default**. | P0 |
 | D3 | Per-item format override (e.g., this one audio-only) | P1 |
 | D4 | Live progress: %, speed, ETA (parsed from yt-dlp progress output) | P0 |
 | D5 | Embed thumbnail + metadata into file where supported | P1 |
@@ -106,7 +106,7 @@ The proposed name is computed as soon as metadata arrives, shown in the row, and
 *Implementation note:* the name is decided before the download starts and passed to yt-dlp's `-o` flag. yt-dlp writes it into a private work folder, and the app then moves the finished file into the download folder without ever overwriting an existing file (D-014). There's no rename after download. This matches "name it appropriately once complete" but avoids a window where a file sits under the wrong name.
 
 ### 6.4 Settings
-Download folder · format preset (Default / Audio only) · naming template · AI naming provider (Local / API / Off) + model manager + API key · concurrency · auto-start · auto-update yt-dlp (on by default) · notifications on completion.
+Download folder · format preset (Default / Most compatible video (MP4) / Audio only / Most compatible audio (M4A); D-015) · naming template · AI naming provider (Local / API / Off) + model manager + API key · concurrency · auto-start · auto-update yt-dlp (on by default) · notifications on completion.
 
 ### 6.5 History (P1)
 A "Completed" section listing finished items with Show in folder, Copy source URL, and Clear history.
@@ -130,7 +130,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
   - **Local** runs a bundled `llama-server` sidecar from llama.cpp's official per-platform builds on a localhost port, and talks to it through its OpenAI-compatible API. Because of that, the **Local** and **API** providers share one client.
   - Models live in the app-data directory.
   - API keys are stored with the `keyring` crate (macOS Keychain, Windows Credential Manager, Linux Secret Service).
-- **Persistence:** a JSON file or SQLite in the app-data directory for the queue, history, and settings.
+- **Persistence:** JSON files written atomically: `settings.json` in the app config directory (D-020) and `queue.json` in the app data directory (D-025).
 
 ## 9. Success metrics (personal-project scale)
 - No manual renames needed in a typical week.

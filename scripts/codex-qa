@@ -46,7 +46,16 @@ run_codex() {
   codex "$@" >"$log" 2>&1 &
   local pid=$! dog
   set +m
-  ( sleep "$TIMEOUT"; kill -TERM -- "-$pid" 2>/dev/null && echo "codex-qa: timed out after ${TIMEOUT}s" >>"$log" ) &
+  # The watchdog stays off the caller's pipes and kills its own sleep when stopped, so a finished
+  # run reaches EOF at once instead of after the full timeout (#69).
+  (
+    exec </dev/null >/dev/null 2>&1
+    nap=
+    trap '[[ -n $nap ]] && kill "$nap"; exit 0' TERM
+    sleep "$TIMEOUT" & nap=$!
+    wait "$nap"
+    kill -TERM -- "-$pid" && echo "codex-qa: timed out after ${TIMEOUT}s" >>"$log"
+  ) &
   dog=$!
   wait "$pid" || status=$?
   kill "$dog" 2>/dev/null || true; wait "$dog" 2>/dev/null || true
