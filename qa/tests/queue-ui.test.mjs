@@ -1446,6 +1446,45 @@ test("Q7: a save that starts failing shows the warning at once, and it clears wh
   assert.equal(container.querySelector('[data-role="unsaved"]'), null);
 });
 
+test("Q7 #68: if the save-warning listener can't register, the save status is still checked and shown", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let problem = null;
+  let id = 0;
+  let reads = 0;
+  mockIPC((command, args) => {
+    if (command === "plugin:event|listen") {
+      if (args.event === "queue://storage") throw "event system unavailable";
+      return ++id;
+    }
+    if (command === "plugin:event|unlisten") return null;
+    if (command === "queue_list") return [];
+    if (command === "queue_runner_state") return false;
+    if (command === "settings_download_folder") return DEFAULT_FOLDER;
+    if (command === "settings_format") return "default";
+    if (command === "queue_storage_problem") {
+      reads++;
+      return problem;
+    }
+    return null;
+  });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(React.createElement(App)));
+  assert.equal(container.querySelector('[data-role="unsaved"]'), null);
+  problem = "Queue couldn't save the list (No space left on device), so recent changes would be lost if it quit now. It keeps trying.";
+  await act(async () => t.mock.timers.tick(2000));
+  assert.equal(text('[data-role="unsaved"]'), problem, "a later save failure still shows");
+  problem = null;
+  await act(async () => t.mock.timers.tick(2000));
+  assert.equal(container.querySelector('[data-role="unsaved"]'), null, "and clears when saving works again");
+  await act(async () => root.unmount());
+  root = undefined;
+  const before = reads;
+  t.mock.timers.tick(10000);
+  assert.equal(reads, before, "the check stops with the app");
+});
+
 // #13 / Q8: paste several links at once, one per line.
 async function pasteText(text) {
   const event = new window.Event("paste", { bubbles: true, cancelable: true });

@@ -27,6 +27,9 @@ import { useDownloadFolder } from "./useDownloadFolder";
 
 import { FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
 
+// How often the save status is read when its event can't be listened to (#68).
+const STORAGE_POLL_MS = 2000;
+
 export default function App() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -77,25 +80,40 @@ export default function App() {
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   useEffect(() => {
-    // Listen first, then read the current state; an event is at least as new as the read.
+    // Listen first, then read the current state. A reply is used only if it's newer than the
+    // last one applied (an event counts as newer than every read started before it), so a
+    // late reply can't hide or bring back a warning, and slow replies still land (#68).
     let cancelled = false;
-    let eventSeen = false;
+    let started = 0;
+    let applied = 0;
     let stop: (() => void) | undefined;
+    let poll: ReturnType<typeof setInterval> | undefined;
+    const read = () => {
+      const mine = ++started;
+      storageProblem().then(
+        (problem) => {
+          if (cancelled || mine <= applied) return;
+          applied = mine;
+          setUnsaved(problem ?? null);
+        },
+        () => {},
+      );
+    };
     onStorageChanged((problem) => {
-      eventSeen = true;
+      applied = started;
       setUnsaved(problem);
     })
       .then((unlisten) => (cancelled ? unlisten() : (stop = unlisten)))
-      .catch(() => {})
-      .finally(() =>
-        storageProblem().then(
-          (problem) => !cancelled && !eventSeen && setUnsaved(problem ?? null),
-          () => {},
-        ),
-      );
+      .catch(() => {
+        // Without the event, read the save status every few seconds instead, so a save that
+        // starts failing later still shows the warning (D-025).
+        if (!cancelled) poll = setInterval(read, STORAGE_POLL_MS);
+      })
+      .finally(read);
     return () => {
       cancelled = true;
       stop?.();
+      clearInterval(poll);
     };
   }, []);
 

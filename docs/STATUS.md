@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #68, then #69, #70, #72, #74
+**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #68 (in review), then #69, #70, #72, #74
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -63,6 +63,15 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## In review: #68 (Q7, D-025) the save warning can't be lost (branch `ui/68-storage-listener`)
+- **The bug:** `App.tsx` swallowed a failed `queue://storage` registration, so a later save failure (a full disk, permissions) never showed D-025's warning.
+- **Fix:** when registration fails, the app reads `queue_storage_problem` every 2 s and sets or clears the warning; the timer stops on unmount. A reply is used only if it's newer than the last one applied, and an event counts as newer than every read started before it. So a late reply can't hide or bring back a warning, and replies slower than the interval still land.
+- **Tests:** a #68 test in `queue-ui.test.mjs`. Codex's `storage-listener-q7-68-qa.test.mjs` (10 tests): Unicode text, rejected reads, event precedence, StrictMode, cleanup, out-of-order replies. Plus 2 for review round 1's cases. Fault tests: removing the polling or the cleanup, or restoring either earlier ordering rule, fails them.
+- `codex-qa test "#68"`: **FAIL**, then fixed (`qa/reports/20261018-113843-test-Jq9b.md`): older replies overwrote newer ones. Codex's tests are added (D-021).
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261018-114333-review-ndOG.md`): the first ordering fix dropped every reply slower than the poll.
+- Round 2: **PASS WITH NOTES** (`qa/reports/20261018-114616-review-2Yej.md`). Its P3 (this handoff) is done. Suggested tests, not added: a registration that succeeds after unmount, and a recovery event while an older warning read is pending.
+- **Checks (macOS arm64):** `npm run build`, `npm test` 198/198. Frontend only; the Rust suites were not rerun.
 
 ## Done: #67 (Q7, D2) stop downloads and metadata fetches when Queue quits (squash-merged from PR #73; 4-OS bundles green)
 - **The bug:** on exit Queue saved the queue but never stopped yt-dlp/ffmpeg. On macOS/Linux they run in their own process group, so a download kept running after Queue quit, and a relaunch's #45 cleanup deleted its staging folder. Windows' job object (`KILL_ON_JOB_CLOSE`) already killed them.
@@ -440,4 +449,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#68 (save-warning listener), #69, #70, #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Commit #68 (owner approval), open its PR, and merge once CI is green. Then #69, #70, #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
