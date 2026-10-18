@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-17 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #68, then #69, #70, #72, #74
+**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #69 next, then #70, #72, #74
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -63,6 +63,16 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## Done: #68 (Q7, D-025) the save warning can't be lost (squash-merged from PR #75; Linux/macOS/Windows tests green)
+- **The bug:** `App.tsx` swallowed a failed `queue://storage` registration, so a later save failure (a full disk, permissions) never showed D-025's warning.
+- **Fix:** when registration fails, the app reads `queue_storage_problem` every 2 s and sets or clears the warning; the timer stops on unmount. A reply is used only if it's newer than the last one applied, and an event counts as newer than every read started before it. So a late reply can't hide or bring back a warning, and replies slower than the interval still land.
+- **Tests:** a #68 test in `queue-ui.test.mjs`. Codex's `storage-listener-q7-68-qa.test.mjs` (10 tests): Unicode text, rejected reads, event precedence, StrictMode, cleanup, out-of-order replies. Plus 2 for review round 1's cases. Fault tests: removing the polling or the cleanup, or restoring either earlier ordering rule, fails them.
+- `codex-qa test "#68"`: **FAIL**, then fixed (`qa/reports/20261018-113843-test-Jq9b.md`): older replies overwrote newer ones. Codex's tests are added (D-021).
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261018-114333-review-ndOG.md`): the first ordering fix dropped every reply slower than the poll.
+- Round 2: **PASS WITH NOTES** (`qa/reports/20261018-114616-review-2Yej.md`). Its P3 (this handoff) is done. Suggested tests, not added: a registration that succeeds after unmount, and a recovery event while an older warning read is pending.
+- **Checks (macOS arm64):** `npm run build`, `npm test` 198/198. Frontend only; the Rust suites were not rerun locally.
+- **CI (PR #75, run 39150714383):** tests green on Linux, macOS and Windows. No `ci:bundle` label (frontend only), so bundles were skipped.
 
 ## Done: #67 (Q7, D2) stop downloads and metadata fetches when Queue quits (squash-merged from PR #73; 4-OS bundles green)
 - **The bug:** on exit Queue saved the queue but never stopped yt-dlp/ffmpeg. On macOS/Linux they run in their own process group, so a download kept running after Queue quit, and a relaunch's #45 cleanup deleted its staging folder. Windows' job object (`KILL_ON_JOB_CLOSE`) already killed them.
@@ -430,7 +440,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 5. ~~Flaky Linux CI (`Text file busy`)~~ Fixed in #41: `spawn_tree` retries ETXTBSY.
 6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Being fixed in #69.
 7. Flaky on Windows CI: `native_metadata_timeout_stops_a_running_executable_promptly` timed out (300 ms) before the fake yt-dlp started, on 2 of 3 PR #64 runs (passed on re-run). Fixed in #65 (3 s to start); passed on Windows CI on the first run.
-8. Dependabot alert 1 (moderate, GHSA-wrw7-89jp-8q8g): `glib` 0.18.5 `VariantStrIter` unsoundness, reached only through Tauri's Linux GTK stack (fixed in glib 0.20). Queue's code doesn't use glib, and no fix is possible until Tauri moves to gtk-rs ≥ 0.20. Proposed: dismiss as tolerable risk; waiting on the owner.
+8. Dependabot alert 1 (moderate, GHSA-wrw7-89jp-8q8g): `glib` 0.18.5 `VariantStrIter` unsoundness, reached only through Tauri's Linux GTK stack (fixed in glib 0.20). Queue's code doesn't use glib, and no fix is possible until Tauri moves to gtk-rs ≥ 0.20. **Dismissed as tolerable risk at the owner's request (2026-10-18)**, with that reason recorded on the alert. Revisit when Tauri moves to gtk-rs ≥ 0.20.
 
 ## Owner checks in the dev app (macOS)
 - 2026-10-13: live progress, "Processing…" and Retry worked on real downloads.
@@ -440,4 +450,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-#68 (save-warning listener), #69, #70, #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Start #69 (codex-qa watchdog + stale docs). Then #70, #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
