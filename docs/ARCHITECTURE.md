@@ -1,46 +1,46 @@
 # Architecture
 
-> Stack confirmed (D-002, D-006); details provisional until M1 lands. Implements [PRD-001](prds/PRD-001-queue-v1.md).
+> Stack confirmed (D-002, D-006). Implements [PRD-001](prds/PRD-001-queue-v1.md). M1 and most of M2 are built (see [STATUS](STATUS.md)). Sections marked **Planned** describe later milestones and don't exist yet.
 
 ## Components
 
 ```
 ┌──────────────── Tauri window (React + TS + Tailwind) ────────────────┐
 │  UrlBar  →  QueueList (rows: thumb · title · proposed name · state)  │
-│  Settings · History                                                  │
+│  Settings · History (planned, M5)                                    │
 └───────────────▲──────────────────────────────┬───────────────────────┘
                 │ events (progress, state)     │ commands (add, start, remove…)
 ┌───────────────┴──────────────────────────────▼───────────────────────┐
 │ Rust core                                                            │
-│  queue::Runner     sequential worker, state machine per item         │
-│  ytdlp::Client     spawns sidecar; -J metadata; download + progress  │
-│  naming::Engine    pure fn: metadata + template → safe filename      │
-│  naming::Provider  Local (default) | Api | Rules; Tier-1 sanitized   │
-│  models::Manager   GGUF download/verify; llama-server lifecycle      │
-│  store             JSON/SQLite in app-data; API key in OS keyring    │
+│  queue             sequential runner, state machine per item         │
+│  meta · download   yt-dlp -J metadata; download + progress (proc)    │
+│  settings          settings.json (config dir), queue.json (data dir) │
+│  naming::Engine    pure fn: metadata + template → name   (M3)        │
+│  naming::Provider  Local (default) | Api | Rules         (M4)        │
+│  models::Manager   GGUF download/verify; llama-server    (M4)        │
 └───────────────┬──────────────────────────────────────────────────────┘
                 │ argv (no shell)
-        sidecars: yt-dlp, ffmpeg, llama-server (localhost, on demand)
+        sidecars: yt-dlp, ffmpeg/ffprobe, deno; llama-server (M4, localhost)
 ```
 
 ## Item lifecycle
 
-`Queued → FetchingInfo → Naming → Ready → Downloading → Processing → Done | Failed`
+Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. Failed rows can be retried, and a row interrupted by quitting comes back `Queued` (D-025). M3/M4 add a naming step between fetching and `Queued`.
 
-1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, store the metadata, then compute the proposed filename with the active naming provider. Tier 1 runs first, so a name is always available instantly.
-2. **Start:** the runner takes the next `Ready` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
+1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, and store the metadata. The name is the title for now; from M3 the active naming provider computes it here, with Tier 1 first so a name is always available instantly.
+2. **Start:** the runner takes the next `Queued` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
 3. **Progress:** parse each stdout line and emit `{id, percent, speed, eta}` to the UI.
 4. **Finish:** take the one finished file from the work dir and place it in the output folder with a no-clobber move (hard link, falling back to a `create_new` copy; never `rename`). The filesystem itself refuses an existing name. Record it in history and remove the work dir. If the item failed, keep stderr's last `ERROR:` line as the reason and move on.
 
-## Naming engine (Tier 1)
+## Naming engine (Tier 1) — Planned (M3)
 
 - Input: yt-dlp metadata (`title`, `channel`, `upload_date`, `artist`, `track`, `series`, `episode_number`, …) and a template string.
 - Steps: pick the structured fields if present → apply the template → strip noise patterns → strip emoji → replace characters that aren't allowed in filenames → collapse whitespace → cap the length.
 - Pure and deterministic (metadata + template → name, no filesystem access), covered by table-driven unit tests built from real titles.
-- Collisions (N2, #16) aren't part of the engine. The download layer picks a free ` (n)` variant and relies on the no-clobber placement (D-014), because only the filesystem knows which names exist (including case- and Unicode-equivalent ones).
+- Collisions (N2, #16, already built) aren't part of the engine. The download layer picks a free ` (n)` variant and relies on the no-clobber placement (D-014), because only the filesystem knows which names exist (including case- and Unicode-equivalent ones).
 - The filename rules are the strictest across OSes (Windows reserved names, trailing dots and spaces, `<>:"/\|?*`).
 
-## AI naming (Tier 2)
+## AI naming (Tier 2) — Planned (M4)
 
 - `trait NamingProvider { async fn name(&self, meta: &Meta) -> Result<String> }` with three implementations: `Local`, `Api`, and `Rules`.
 - `Local`: `models::Manager` makes sure the GGUF model exists and starts `llama-server -m <model> --port <free>` when first needed. It stops the server after ~2 min idle.
@@ -53,7 +53,13 @@
 - Sidecars are pinned in `scripts/sidecars.json` for each target triple (aarch64/x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu) and land in `src-tauri/binaries/` (git-ignored) as `queue-<name>-<triple>[.exe]` (D-012):
   - `scripts/fetch-sidecars.mjs` downloads and checksum-verifies the official `yt-dlp` onefile build and `deno` (yt-dlp's JS runtime for YouTube). `--check` confirms yt-dlp sees all its tools.
   - `scripts/build-ffmpeg.sh` builds a minimal LGPL `ffmpeg` + `ffprobe` from the signed upstream tarball, with no network protocols.
-  - `llama-server` (llama.cpp release) is added in #30.
+  - `llama-server` (llama.cpp release) is planned for #30 (M4).
 - Tauri copies them next to the app binary and strips the triple. `src-tauri/src/sidecar.rs` resolves them there and builds the base yt-dlp argv (`--ignore-config --no-update --ffmpeg-location … --js-runtimes deno:…`).
 - Models are never bundled. They're downloaded at runtime into the app-data directory.
-- At runtime, `yt-dlp -U` runs at most once a day (configurable).
+- **Planned (#21, M5):** run `yt-dlp -U` at most once a day (configurable). Today the base argv passes `--no-update`, so yt-dlp only changes when the pinned version does.
+
+## Persistence
+
+- `settings.json` in the app config folder (D-020) and `queue.json` in the app data folder (D-025), both written atomically (a temp file, then a rename). A damaged `queue.json` is moved aside, and a save failure shows a warning in the window.
+- Download staging folders live in the app cache folder and are removed after each download, or at the next launch if Queue was interrupted (D-014, #45).
+- API keys (M4) go in the OS credential store via the `keyring` crate, never in these files. History (P1) is planned for M5.

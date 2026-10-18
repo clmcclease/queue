@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #69 next, then #70, #72, #74
+**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #69 (in progress), then #70, #72, #74
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -15,7 +15,13 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   | #3 | URL bar and list | `6d81623` |
   | #4 | Download one item | `87b0d2d` |
 
-- **What works:** paste a link → a row appears → Download → yt-dlp downloads it into the OS Downloads folder under its title. One download runs at a time. Failures show yt-dlp's reason, and an existing file is never overwritten ("Not saved: … already exists").
+- **What works (M2 so far):**
+  - paste one or more links (#13); each is validated and de-duplicated (#5), and its title, channel, duration and thumbnail are fetched (#6);
+  - Download or Download all runs one download at a time, with live progress and Processing (#7, #8);
+  - files go to the chosen folder (OS Downloads by default; #10), named after the title, with four format presets (#11, D-015);
+  - a taken name becomes `Title (2).ext`, and an existing file is never overwritten (#16, D-018);
+  - failures show yt-dlp's reason, with Remove and Retry (#9); Open folder and Show in folder (#39);
+  - the queue and settings survive restarts (#12, D-020, D-025), and quitting stops running downloads (#67).
 - **Toolchain (D-010):** Node 24.21.0 (mise) and Rust 1.99.0 (rust-toolchain.toml); exact npm/crate pins with lockfiles. jsdom 30.1.2 is a test-only devDependency.
 - **Sidecars (D-012):**
   - yt-dlp 2026.08.19 (onefile) and deno v2.9.7, fetched and checksum-verified by `scripts/fetch-sidecars.mjs`;
@@ -24,7 +30,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Installer budget (D-013):** under 256 MB. Measured: dmg 77–81 MB, NSIS 49 MB, deb 84 MB, AppImage 155 MB.
 - **Downloads are staged (D-014):** yt-dlp runs in a fresh app-cache folder, and the finished file is moved into place with a no-clobber hard link or copy.
 - **CI (D-011):**
-  - Linux checks on every PR and every push to `main`;
+  - checks on Linux, Windows and macOS for every PR and every push to `main` (D-023);
   - 4-OS bundles plus a per-OS sidecar `--check` on `main` and on PRs labelled `ci:bundle`;
   - a cached ffmpeg build job.
 - **QA:**
@@ -63,6 +69,15 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## In progress: #69 (NFR) codex-qa watchdog and stale docs (branch `infra/69-codex-qa-watchdog`)
+- **The bug:** `run_codex`'s watchdog subshell ran `sleep "$TIMEOUT"` with the caller's stdout/stderr. Killing the subshell left the `sleep` running, holding the pipe, so a caller reading to EOF waited for the full timeout (25 min by default).
+- **Fix:** the watchdog redirects its own stdio to `/dev/null`, runs the `sleep` in the background, and kills it from a `TERM` trap. A hung Codex is still killed (its whole process group) and the timeout is still logged.
+- **Test:** `qa/tests/codex-qa-watchdog-69.test.mjs` runs a copy of the script in a scratch repo with a fake `codex`: a finished run reaches EOF at once (about 0.2 s with a 20 s timeout), and a hung one is killed at a 1 s timeout, reported, and its pipes close. Against the old script the first test fails (EOF after 20 s).
+- `codex-qa test "#69"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261018-142525-test-kmJU.md`). Codex's `codex-qa-watchdog-69-qa.test.mjs` (4 tests) is added (D-021): the watchdog's `sleep` is gone after a success, an early Codex failure and a run with no report; a timeout logs once and kills the whole process group; paths with spaces and Unicode work. Removing the `sleep` cleanup fails 3 of them.
+- `codex-qa review` round 1: **PASS WITH NOTES**, no findings (`qa/reports/20261018-142914-review-XUHA.md`). Suggested test, not added: Codex exiting at once, before the watchdog's `sleep` has started. In that tiny window a `sleep` can outlive the run, but it's off the caller's pipes, so EOF isn't delayed; it just exits at the timeout.
+- **Checks (macOS arm64):** `bash -n scripts/codex-qa`; `npm test` 204/204. Codex also ran `cargo test` (296 passed), clippy and fmt in its worktree. Linux and Windows not run locally (CI will).
+- **Docs (audit P3):** README (smart naming marked M3/M4; M2 status; CI on all three OSes), STATUS "What works" and CI lines, ARCHITECTURE (built vs **Planned** sections, today's item states, a Persistence section per D-014/D-020/D-025, `yt-dlp -U` marked planned for #21), and the PRD's format list (all four presets) and persistence line.
 
 ## Done: #68 (Q7, D-025) the save warning can't be lost (squash-merged from PR #75; Linux/macOS/Windows tests green)
 - **The bug:** `App.tsx` swallowed a failed `queue://storage` registration, so a later save failure (a full disk, permissions) never showed D-025's warning.
@@ -438,7 +453,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
    - **#43** Content Security Policy (M5, P1);
    - **#44** yt-dlp GPG signature checks (M5).
 5. ~~Flaky Linux CI (`Text file busy`)~~ Fixed in #41: `spawn_tree` retries ETXTBSY.
-6. `scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open, so callers waiting for EOF hang (seen in the #10 review). Being fixed in #69.
+6. ~~`scripts/codex-qa` can leave its watchdog `sleep` running after Codex exits, holding the output pipe open~~ Fixed in #69: the watchdog stays off the caller's pipes and kills its own `sleep`.
 7. Flaky on Windows CI: `native_metadata_timeout_stops_a_running_executable_promptly` timed out (300 ms) before the fake yt-dlp started, on 2 of 3 PR #64 runs (passed on re-run). Fixed in #65 (3 s to start); passed on Windows CI on the first run.
 8. Dependabot alert 1 (moderate, GHSA-wrw7-89jp-8q8g): `glib` 0.18.5 `VariantStrIter` unsoundness, reached only through Tauri's Linux GTK stack (fixed in glib 0.20). Queue's code doesn't use glib, and no fix is possible until Tauri moves to gtk-rs ≥ 0.20. **Dismissed as tolerable risk at the owner's request (2026-10-18)**, with that reason recorded on the alert. Revisit when Tauri moves to gtk-rs ≥ 0.20.
 

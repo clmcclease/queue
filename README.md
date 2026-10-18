@@ -1,8 +1,8 @@
 # Queue
 
-A lightweight desktop app for queuing video and audio downloads. Paste links, press **+**, then hit **Download all**. Queue runs [yt-dlp](https://github.com/yt-dlp/yt-dlp) for each link, and every file gets a clean, human-readable name built from the page's metadata and tidied up by an on-device AI model, so there's nothing to rename by hand.
+A lightweight desktop app for queuing video and audio downloads. Paste links, press **+**, then hit **Download all**. Queue runs [yt-dlp](https://github.com/yt-dlp/yt-dlp) for each link. The goal is that every file gets a clean, human-readable name built from the page's metadata and tidied up by an on-device AI model, so there's nothing to rename by hand. Smart naming isn't built yet: rule-based names are M3 and AI naming is M4. Today files are named after the page's title.
 
-> **Status:** M1 (walking skeleton) done. Paste a link, click Download, and yt-dlp saves it to your Downloads folder under its title. M2 (real queue) is next. See [docs/STATUS.md](docs/STATUS.md).
+> **Status:** M1 (walking skeleton) done; M2 (real queue) is finishing its audit follow-ups. Paste one or more links, check each row's title, channel and duration, then Download or Download all. Items download one at a time with live progress into the folder you pick (your Downloads folder by default), with a choice of four format presets. A name that's taken gets a ` (2)` suffix, so nothing is overwritten. Failed rows show yt-dlp's reason and can be retried, and the queue is restored when Queue restarts. See [docs/STATUS.md](docs/STATUS.md).
 
 ## Docs
 
@@ -35,7 +35,7 @@ npm run tauri dev                  # opens the app window
 npm run build && npm test          # frontend build + scaffold tests
 ```
 
-CI (`.github/workflows/build.yml`) runs the checks on every PR and every push to `main`, and builds unsigned bundles for all four targets on every push to `main` (D-011).
+CI (`.github/workflows/build.yml`) runs the checks on Linux, Windows and macOS for every PR and every push to `main` (D-023). It builds unsigned bundles for all four targets on every push to `main` and on PRs labelled `ci:bundle` (D-011).
 
 Linux also needs the [Tauri system dependencies](https://tauri.app/start/prerequisites/) (WebKitGTK and friends). Windows needs WebView2 and the MSVC build tools. `build-ffmpeg.sh` runs on macOS and Linux only; it cross-compiles the Windows build with mingw-w64. On Windows, copy the `ffmpeg-*` artifact from a CI run into `src-tauri/binaries/` instead.
 
