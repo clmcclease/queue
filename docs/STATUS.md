@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-19 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #72 next, then #74, #77
+**Updated:** 2026-10-19 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #74 next, then #77
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -69,6 +69,53 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## Done: #72 (D2, D-014) never leave a partial file under the final name; the macOS test flake (squash-merged from PR #79; 4-OS bundles green)
+- **The bug:** across volumes, `download::place` copied straight into the final filename, so a crash, or a quit whose write blocked past the 5 s wait, could leave a cut-off file under the real name.
+- **Fix (`download.rs`, D-014):**
+  - The copy goes to `.queue-partial-<id>` next to the final name, is synced, then published with a no-replace rename: `renamex_np(RENAME_EXCL)` on macOS, the `renameat2(RENAME_NOREPLACE)` system call on Linux, and `MoveFileExW` without replace (with `\\?\` paths for long names) on Windows.
+  - Where that rename isn't supported, an empty `create_new` claim is renamed over. Measured: macOS returns ENOTSUP on exFAT, so exFAT drives use the claim.
+  - ` (n)` numbering copies once, then publishes under the first free name.
+  - A note in the work folder records the temporary file, and the claim once Queue has made it, as hex of each path's bytes. At launch, the #45 cleanup removes only what those notes name: a `.queue-partial-` file, or a claim that's still empty and in the same folder.
+  - `windows-sys` gains the `Win32_Storage_FileSystem` feature (no new crate; `Cargo.lock` is unchanged).
+- **Tests (6 new in `download.rs`):**
+  - during a copy, only the temporary name exists in the download folder;
+  - a failed copy leaves nothing in either folder;
+  - numbered names across volumes copy only once;
+  - the claim fallback, including losing a race without replacing anything;
+  - the real no-replace rename refuses files, folders and dangling symlinks, and handles a 250-character name;
+  - launch cleanup removes only what the notes name.
+
+  The real-volume test now also checks that nothing is left on the other volume; it passed on a temporary exFAT disk image, going through the claim. Fault tests: copying under the final name fails 6 tests, and dropping the claim fails the race test.
+- **The macOS flake (`native_a_descendant_left_after_the_run_is_stopped_with_its_tree`):** reproduced locally under full CPU load, 2 in 150 and 2 in 300 runs.
+  - Diagnostics showed the descendant wasn't alive: it had been SIGKILLed and was mid-teardown. `kill(pid, 0)` still succeeded, but `proc_pidinfo` couldn't read it, and it was gone about 1.3 ms later. It had already left its process group, so `Tree::terminate` was right.
+  - The test now checks that the descendant writes no heartbeat after the run returns, and that it's gone within 2 s: 0 failures in 300 loaded runs. With `Tree::finish` not killing, it still fails.
+- **CI (PR #79):**
+  - The first run (39357638819) failed on Windows clippy: an unused `mut` in a test whose push is Unix-only, so no Windows test ran. Fixed in `1cc97c2`.
+  - Run 39359860815 is green on Linux, macOS and Windows, plus all four bundles (`ci:bundle`). The real no-replace rename test passed on all three, including a path over 260 UTF-16 units through `MoveFileExW` on Windows. On Linux, the real cross-volume test also ran across `/dev/shm` through `renameat2`.
+- `codex-qa test "#72"`: **FAIL**, then fixed (`qa/reports/20261019-200752-test-6Cf1.md`). Two launch-cleanup bugs, both confirmed by Codex's tests:
+  1. The note recorded a claim before `create_new`, so after losing a race to another writer's empty file and then crashing, a launch would delete that file. Claims are now recorded only once made. The new unit test `a_lost_claim_is_never_recorded_so_a_launch_keeps_the_winners_empty_file` drives the real code; moving the note write back in front of `create_new` fails it.
+  2. Notes stored paths one per line, so an output folder with a newline in its name lost its temporary copy. Notes now store hex of each path's bytes (`download::partial_note`), and a new unit test covers newlines and malformed lines.
+
+  Codex's `tests/partial_d2_72_qa.rs` is added (D-021), adapted to the new note format:
+  - removing recorded leftovers but keeping finished and unrecorded files;
+  - not following symlinked notes or leaves;
+  - a copy killed mid-way (a FIFO source in a child process) never exposes the final name, and the launch removes its partial;
+  - a quit mid-copy;
+  - a killed copy in a folder with a newline, and (Linux only) a non-UTF-8 folder.
+
+  Its hand-made lost-race test is replaced by the production-driven unit test above, because production no longer writes that note.
+- `codex-qa review` round 1: **FAIL**, then fixed (`qa/reports/20261019-202027-review-1HvS.md`). Both findings were from source inspection:
+  - **P2:** a note update truncated the note before rewriting it, so a crash there would orphan the temporary copy. Updates now use `settings::write_atomic`.
+  - **P1:** if another program replaced the fallback's empty claim before the rename, Queue overwrote their file. The owner chose to narrow it and accept the rest (D-014): right before the rename, the claim must still be Queue's own empty file (same device and inode; emptiness only on Windows), otherwise it's left alone and the next name is tried.
+
+  New test `a_claim_replaced_before_the_rename_is_left_alone_and_the_next_name_is_used` replaces the claim through a new `Steps::claimed` hook, with a non-empty file and (Unix) an empty one. Disabling the check fails it. Remaining accepted risk: a replacement in the microseconds between the check and the rename.
+- `codex-qa review` round 2: **FAIL**, then fixed (`qa/reports/20261019-210232-review-9sUM.md`). **P2:** if Queue crashed after recording its claim and another program then replaced the claim with its own empty file, the next launch deleted it. The claim's file ID wasn't saved for recovery. Notes now record it, and the cleanup removes a claim only if it's the same empty file. On Windows, which has no file IDs, a claim isn't recorded. `a_launch_removes_only_what_an_interrupted_copy_recorded` now includes a replaced claim; dropping the ID check fails it. Codex's suggested "a failed publish, then the next item completes" test was not added.
+- `codex-qa review` round 3: **PASS WITH NOTES** (`qa/reports/20261019-210713-review-BITP.md`). It didn't raise the accepted race again. Its P3 is fixed (test only): the long-path test now asserts that its path is over 260 UTF-16 units, using a 200-character folder. Suggested tests, not added:
+  - a publish failure for one item, then the next queued item completes;
+  - a fallback rename failing after the claim is recorded;
+  - a native Windows long-path publish (CI's Windows job runs the long-path test).
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test` 311 passed, the real-sidecar suite 13/13 (rerun after the review fixes), `npm test` 204/204, the exFAT real-volume test. The rename and note code was compiled and clippy-checked for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` in a scratch crate; it hasn't run on Linux or Windows locally (CI will).
 
 ## Done: #70 (D2, D4, D-026) real video+audio merging in CI (squash-merged from PR #78; Linux/macOS/Windows tests green)
 - **The gap:** the loopback tests served one WAV, so a real ffmpeg merge, Processing and the format notices were only tested against YouTube, behind the network opt-in that CI doesn't use.
@@ -495,4 +542,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-Start #72 (never leave a partial file under the final name, plus the #67 macOS test flake). Then #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled) and #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Start #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled). Then #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.

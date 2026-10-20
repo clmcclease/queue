@@ -30,7 +30,7 @@ Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. F
 1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, and store the metadata. The name is the title for now; from M3 the active naming provider computes it here, with Tier 1 first so a name is always available instantly.
 2. **Start:** the runner takes the next `Queued` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
 3. **Progress:** parse each stdout line and emit `{id, percent, speed, eta}` to the UI.
-4. **Finish:** take the one finished file from the work dir and place it in the output folder with a no-clobber move (hard link, falling back to a `create_new` copy; never `rename`). The filesystem itself refuses an existing name. Record it in history and remove the work dir. If the item failed, keep stderr's last `ERROR:` line as the reason and move on.
+4. **Finish:** take the one finished file from the work dir and place it in the output folder with a no-clobber move: a hard link, or across volumes a copy under a temporary name that's then renamed into place without replacing anything (D-014, #72). Plain `rename` is never used, because it replaces files. The filesystem itself refuses an existing name, and a crash mid-copy never leaves a cut-off file under the real name. Record it in history and remove the work dir. If the item failed, keep stderr's last `ERROR:` line as the reason and move on.
 
 ## Naming engine (Tier 1) — Planned (M3)
 

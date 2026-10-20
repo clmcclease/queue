@@ -161,6 +161,12 @@ fn native_403_reextracts_after_unicode_saved_info_and_reuses_staging() {
 /// #67: a descendant that let go of the pipes, still running when its run ends, is stopped with
 /// its tree (`Tree::finish`). Unix only: a Windows child inherits its parent's pipe handles even
 /// with null stdio, so it can't let go of them; there the job object stops leftovers.
+///
+/// #72: it's killed, so it never writes another heartbeat, and it's gone moments later. On macOS
+/// a killed process can still answer `kill(pid, 0)` while the kernel tears it down: it has left
+/// its process group (so `Tree::terminate` rightly sees the group empty) and `proc_pidinfo` can
+/// no longer read it, but it's gone about 1 ms later. Checking that one instant failed about 1
+/// run in 75 under load, on CI and locally.
 #[cfg(unix)]
 #[test]
 fn native_a_descendant_left_after_the_run_is_stopped_with_its_tree() {
@@ -171,7 +177,19 @@ fn native_a_descendant_left_after_the_run_is_stopped_with_its_tree() {
         .unwrap()
         .parse()
         .unwrap();
-    assert!(process_has_exited(pid), "the descendant outlived its run");
+    let beat = || fs::read_to_string(f.0.join("heartbeat")).unwrap_or_default();
+    let last = beat();
+    let gone_by = std::time::Instant::now() + Duration::from_secs(2);
+    while !process_has_exited(pid) {
+        assert!(
+            std::time::Instant::now() < gone_by,
+            "the descendant outlived its run"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Four heartbeats' time: a descendant still running would have written one.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(beat(), last, "the descendant kept running after its run");
 }
 
 /// Long enough for a freshly copied fixture to start, even on a Windows runner that scans each
