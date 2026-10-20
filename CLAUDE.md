@@ -6,6 +6,7 @@
   - `codex-qa`: independent QA by Codex (GPT-6.1-Sol, high effort). See [docs/QA.md](docs/QA.md).
   - `reviewer`: Claude's own read-only review of a stable diff.
   - `ytdlp-expert`: yt-dlp flags, format selection, output templates.
+  - `architect`: Fable 5.1, read-only. While D-028 is active, it gives the approvals AGENTS.md reserves for the owner (within D-028's limits); ask it instead of the owner and record each ruling in STATUS.
 - **QA gates (required):**
   1. After implementing a backlog item, run `codex-qa` in `test "#<issue>"` mode. Report its verdict, then bring in any tests it wrote: apply its tests patch without its `docs/STATUS.md` edit, once the tests pass against any fixes. The owner approved this standing practice on 2026-10-13. Say in the report and in STATUS which tests were added.
   2. Before asking for commit approval, run `codex-qa` in `review` mode. A FAIL blocks the request until it's fixed or the owner accepts it.
