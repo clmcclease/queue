@@ -89,6 +89,10 @@ pub struct Queue {
     items: Vec<Item>,
     /// Bumped by every change worth saving (#12); live progress doesn't count.
     changes: u64,
+    /// Bumped by every cancel (#74), and each row's latest value, so "Download all" can tell a
+    /// cancel during its run from an earlier one. Not saved.
+    cancels: u64,
+    cancelled_at: std::collections::HashMap<u64, u64>,
 }
 
 impl Queue {
@@ -274,6 +278,7 @@ impl Queue {
             return Err("A download in progress can't be removed yet.".into());
         }
         self.changes += 1;
+        self.cancelled_at.remove(&id);
         Ok(self.items.remove(index))
     }
 
@@ -362,6 +367,8 @@ impl Queue {
         item.notice = Some(CANCELLED.to_string());
         item.rev += 1;
         self.changes += 1;
+        self.cancels += 1;
+        self.cancelled_at.insert(id, self.cancels);
         Some(item.clone())
     }
 
@@ -524,21 +531,27 @@ fn set_aside(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
 /// "Download all" (Q4): downloads the next Queued row (lowest id first) until none are left.
 /// Rows still fetching their info are waited for, but don't hold up rows that are ready. A
 /// failed item doesn't stop the run (Q6), and a row cancelled during the run (#74) is skipped
-/// for the rest of it, so the run moves on instead of starting it again. `download(id)` returns
-/// false if it couldn't start (e.g. a manual download holds the one slot); the loop then `wait`s
-/// and tries again.
+/// for the rest of it, so the run moves on instead of starting it again. That includes a manual
+/// download the run was waiting for; a row cancelled before the run is downloaded again.
+/// `download(id)` returns false if it couldn't start (e.g. a manual download holds the one
+/// slot); the loop then `wait`s and tries again.
 pub fn run_all(
     queue: &std::sync::Mutex<Queue>,
     mut download: impl FnMut(u64) -> bool,
     mut wait: impl FnMut(),
 ) {
-    let mut cancelled = std::collections::HashSet::new();
+    let Ok(began) = queue.lock().map(|q| q.cancels) else {
+        return;
+    };
     loop {
         let (next, pending) = match queue.lock() {
             Ok(q) => (
                 q.items
                     .iter()
-                    .find(|i| i.status == Status::Queued && !cancelled.contains(&i.id))
+                    .find(|i| {
+                        i.status == Status::Queued
+                            && q.cancelled_at.get(&i.id).is_none_or(|&at| at <= began)
+                    })
                     .map(|i| i.id),
                 q.items.iter().any(|i| {
                     matches!(
@@ -550,18 +563,7 @@ pub fn run_all(
             Err(_) => return,
         };
         match next {
-            Some(id) if download(id) => {
-                let was_cancelled = queue.lock().is_ok_and(|q| {
-                    q.items.iter().any(|i| {
-                        i.id == id
-                            && i.status == Status::Queued
-                            && i.notice.as_deref() == Some(CANCELLED)
-                    })
-                });
-                if was_cancelled {
-                    cancelled.insert(id);
-                }
-            }
+            Some(id) if download(id) => {}
             Some(_) => wait(),
             None if pending => wait(),
             None => return,
@@ -601,6 +603,20 @@ mod tests {
         q.finish(id, Ok("/d/a.webm".into())).unwrap();
         assert_eq!(q.cancelled(id), None, "a finished download stays Done");
         assert!(matches!(q.items()[0].status, Status::Done { .. }));
+    }
+
+    /// #74 review: removing a cancelled row also forgets when it was cancelled.
+    #[test]
+    fn removing_cancelled_rows_releases_their_cancel_history() {
+        let mut q = Queue::default();
+        for url in ["https://e.test/a", "https://e.test/b"] {
+            let id = ready(&mut q, url);
+            q.start(id).unwrap();
+            q.cancelled(id).unwrap();
+            q.remove(id).unwrap();
+        }
+        assert!(q.items().is_empty());
+        assert!(q.cancelled_at.is_empty(), "{:?}", q.cancelled_at);
     }
 
     #[test]
@@ -1217,6 +1233,24 @@ mod tests {
             assert_eq!(first.status, Status::Queued);
             assert_eq!(first.notice.as_deref(), Some(CANCELLED));
             assert!(matches!(q.items()[2].status, Status::Done { .. }));
+        }
+
+        /// #74 review: cancelling a manual download the run is waiting for doesn't restart it;
+        /// the run moves on to the next row.
+        #[test]
+        fn a_manual_download_cancelled_while_the_run_waits_is_skipped() {
+            let q = queued(&["https://e.test/1", "https://e.test/2"]);
+            q.lock().unwrap().start(1).unwrap(); // manual Download in progress
+            let mut order = Vec::new();
+            let mut waits = 0;
+            run_all(&q, fake_download(&q, &mut order), || {
+                waits += 1;
+                q.lock().unwrap().cancelled(1).unwrap(); // the user pressed Cancel
+            });
+            assert_eq!((order, waits), (vec![2], 1));
+            let q = q.lock().unwrap();
+            assert_eq!(q.items()[0].status, Status::Queued);
+            assert_eq!(q.items()[0].notice.as_deref(), Some(CANCELLED));
         }
 
         #[test]

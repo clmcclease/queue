@@ -543,33 +543,51 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
             .notice_for(std::path::Path::new(&saved.path), &saved.codecs)
     });
     let outcome = outcome.map(|saved| saved.path);
-    // A cancel that lost the race to the finished file leaves the row Done; otherwise the row
-    // goes back to Queued, marked Cancelled (owner's choice), never Failed.
-    let cancelled = outcome.is_err() && job.cancel.load(Ordering::SeqCst);
-    let (updated, info) = match lock(&state) {
-        Ok(mut q) => {
-            if let Ok(mut cancels) = app.state::<Cancels>().0.lock() {
-                cancels.remove(&id);
-            }
-            let finished = if cancelled {
-                q.cancelled(id)
-            } else {
-                q.finish(id, outcome)
-            };
-            let updated = match notice {
-                Some(notice) => q.noticed(id, notice).or(finished),
-                None => finished,
-            };
-            (updated, q.take_info(id))
-        }
-        Err(_) => (None, None),
-    };
+    let (updated, info) = record_download(
+        &state,
+        &app.state::<Cancels>(),
+        id,
+        &job.cancel,
+        outcome,
+        notice,
+    );
     if let Some(path) = info {
         let _ = std::fs::remove_file(path);
     }
     if let Some(item) = updated {
         let _ = app.emit(ITEM_EVENT, item);
     }
+}
+
+/// Records a download's outcome and drops its cancel flag; returns the updated row and the
+/// saved info file to delete. A cancel that lost the race to the finished file leaves the row
+/// Done; otherwise the row goes back to Queued, marked Cancelled (owner's choice), never Failed.
+/// The flag is read under the queue lock, which `queue_cancel` holds while setting it, so a
+/// cancel it accepted is never recorded as a failure (#74).
+fn record_download(
+    queue: &Mutex<Queue>,
+    cancels: &Cancels,
+    id: u64,
+    cancel: &AtomicBool,
+    outcome: Result<String, String>,
+    notice: Option<String>,
+) -> (Option<Item>, Option<std::path::PathBuf>) {
+    let Ok(mut q) = lock(queue) else {
+        return (None, None);
+    };
+    if let Ok(mut cancels) = cancels.0.lock() {
+        cancels.remove(&id);
+    }
+    let finished = if outcome.is_err() && cancel.load(Ordering::SeqCst) {
+        q.cancelled(id)
+    } else {
+        q.finish(id, outcome)
+    };
+    let updated = match notice {
+        Some(notice) => q.noticed(id, notice).or(finished),
+        None => finished,
+    };
+    (updated, q.take_info(id))
 }
 
 /// Starts downloading one queued item on a background thread. Returns the item as
@@ -833,6 +851,43 @@ mod tests {
         assert_eq!(updated, None);
         assert!(!saved.exists(), "no orphaned info file");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #74 review: a cancel accepted while a failed download waits to record its outcome makes
+    /// the row Cancelled, not Failed; a finished file still wins over a late cancel.
+    #[test]
+    fn a_cancel_accepted_before_the_outcome_is_recorded_is_never_a_failure() {
+        let queue = Mutex::new(Queue::default());
+        let cancels = Cancels::default();
+        let started = |url: &str| {
+            let mut q = queue.lock().unwrap();
+            let id = q.add(url).unwrap().id;
+            q.fetched(id, Ok(Meta::default())).unwrap();
+            q.start(id).unwrap();
+            let flag = Arc::new(AtomicBool::new(false));
+            cancels.0.lock().unwrap().insert(id, flag.clone());
+            (id, flag)
+        };
+        let (id, flag) = started("https://e.test/a");
+        let held = queue.lock().unwrap(); // queue_cancel holds the lock
+        let updated = std::thread::scope(|s| {
+            let recording =
+                s.spawn(|| record_download(&queue, &cancels, id, &flag, Err("x".into()), None));
+            std::thread::sleep(Duration::from_millis(100)); // let it reach the lock
+            flag.store(true, Ordering::SeqCst); // queue_cancel accepts
+            drop(held);
+            recording.join().unwrap().0
+        })
+        .unwrap();
+        assert_eq!(updated.status, Status::Queued);
+        assert_eq!(updated.notice.as_deref(), Some(queue::CANCELLED));
+        assert!(cancels.0.lock().unwrap().is_empty(), "flag dropped");
+
+        queue.lock().unwrap().remove(id).unwrap();
+        let (id, flag) = started("https://e.test/b");
+        flag.store(true, Ordering::SeqCst);
+        let (done, _) = record_download(&queue, &cancels, id, &flag, Ok("/d/b".into()), None);
+        assert!(matches!(done.unwrap().status, Status::Done { .. }));
     }
 
     #[test]
