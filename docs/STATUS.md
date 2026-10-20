@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #70 next, then #72, #74
+**Updated:** 2026-10-18 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #70 (in progress), then #72, #74, #77
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -69,6 +69,34 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## In progress: #70 (D2, D4, D-026) real video+audio merging in CI (branch `ci/70-real-merge`)
+- **The gap:** the loopback tests served one WAV, so a real ffmpeg merge, Processing and the format notices were only tested against YouTube, behind the network opt-in that CI doesn't use.
+- **Design (ytdlp-expert, verified with the pinned yt-dlp 2026.08.19):**
+  - The loopback page has a `<video>` whose source is a DASH `.mpd`. Each Representation is one whole file, and its `codecs` attribute is what yt-dlp reports, since it doesn't probe.
+  - Our ffmpeg can't encode H.264 or AAC, so the owner chose tiny committed fixtures (D-026).
+- **Test:** `d70_real_merge_picks_each_formats_streams_and_reports_processing` in `download_real_d2.rs`, which CI's real-sidecar step already runs on all three OSes. It covers two pages × four formats:
+
+  | Page | Format | Saved as | Streams (ffprobe) | Notice |
+  |---|---|---|---|---|
+  | full | Default | .mp4 | mjpeg + flac | — |
+  | full | Most compatible video | .mp4 | h264 + aac | — |
+  | full | Audio only | .m4a | flac | — |
+  | full | Most compatible audio | .m4a | aac | — |
+  | noh264 | Default | .mp4 | mjpeg + flac | — |
+  | noh264 | Most compatible video | .mkv | mjpeg + flac | No H.264 |
+  | noh264 | Audio only | .m4a | flac | — |
+  | noh264 | Most compatible audio | .m4a | flac | No AAC (only the codec shows it) |
+
+  It also checks the codecs yt-dlp reports, `Merger` or `ExtractAudio` Processing events, part 2 progress on merges, the title-based name, and that only the finished file is left. Dropping Most compatible audio's `-S` fails it ("flac", expected "aac").
+- **Server:** the loopback server now serves a list of files, and the tests copy `queue-ffprobe` next to ffmpeg, as the app has it.
+- `codex-qa test "#70"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261018-175313-test-vLEx.md`). Codex's sandbox can't run the onefile yt-dlp (`semctl`), so it ran the loopback suite with the official same-version Python zipapp (checksum-verified); the pinned run below is the real one. Codex's `tests/support/merge_70_qa.rs` (3 tests) is added (D-021), registered in `download_real_d2.rs` so CI runs it:
+  - a malformed progress transcript doesn't advance parts or hide Processing (a unit test, so it runs in plain `cargo test`);
+  - saved-info (`--load-info-json`) merges keep each stream's packets byte for byte and take ` (2)` names for reserved and Unicode titles;
+  - H.264 without AAC still merges, with the audio fallback notice.
+- `codex-qa review` round 1: **PASS WITH NOTES**, no findings (`qa/reports/20261018-180248-review-7iUo.md`). Suggested tests, not added: VP9 + Opus `.webm` (the gap D-026 records), and a real ffmpeg merge failure followed by another queued download.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test` 297 passed, the real-sidecar suite with the pinned sidecars 13/13 (about 155 s), `npm test` 204/204.
+- **Filed:** #77, which ytdlp-expert found: `--trim-filenames` counts characters, so long CJK titles probably break Linux's 255-byte limit.
 
 ## Done: #69 (NFR) codex-qa watchdog and stale docs (squash-merged from PR #76; Linux/macOS/Windows tests green)
 - **The bug:** `run_codex`'s watchdog subshell ran `sleep "$TIMEOUT"` with the caller's stdout/stderr. Killing the subshell left the `sleep` running, holding the pipe, so a caller reading to EOF waited for the full timeout (25 min by default).
@@ -466,4 +494,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-Start #70 (real video+audio merging in CI). Then #72 and #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Finish #70 through the QA gates. Then #72 (now with the macOS flake), #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled) and #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
