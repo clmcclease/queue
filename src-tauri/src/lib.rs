@@ -7,8 +7,10 @@ pub mod reveal;
 pub mod settings;
 pub mod sidecar;
 
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use queue::{AddError, Item, Queue};
@@ -433,9 +435,16 @@ fn persist(
     Some(now)
 }
 
+/// The cancel flag of each running download (#74), by row id. Changed only while the queue is
+/// locked, so a row is active exactly while its flag is here.
+#[derive(Default)]
+struct Cancels(Mutex<HashMap<u64, Arc<AtomicBool>>>);
+
 /// Everything a started download needs, captured while the queue was locked.
 struct DownloadJob {
     id: u64,
+    /// Set by `queue_cancel` (#74); the run's wait loops check it.
+    cancel: Arc<AtomicBool>,
     url: String,
     info: Option<std::path::PathBuf>,
     sidecar_dir: std::path::PathBuf,
@@ -467,8 +476,13 @@ fn begin_download(
     let mut q = lock(queue)?;
     let item = q.start(id)?;
     let info = q.fresh_info(id, std::time::SystemTime::now());
+    let cancel = Arc::new(AtomicBool::new(false));
+    if let Ok(mut cancels) = app.state::<Cancels>().0.lock() {
+        cancels.insert(id, cancel.clone());
+    }
     let job = DownloadJob {
         id,
+        cancel,
         url: item.url.clone(),
         info,
         sidecar_dir,
@@ -495,24 +509,27 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
         }
     };
     // Progress arrives already throttled (download::PROGRESS_EVERY); state changes always do.
-    let outcome = download::run_with_retries_saved(
-        &job.sidecar_dir,
-        &job.work_dir,
-        &job.out_dir,
-        &job.url,
-        job.info.as_deref(),
-        job.format,
-        proc::sleep_unless_quitting,
-        |attempt| emit(lock(&state).ok().and_then(|mut q| q.retrying(id, attempt))),
-        |event| match event {
-            download::Event::Progress(p) => {
-                emit(lock(&state).ok().and_then(|mut q| q.progressed(id, p)));
-            }
-            download::Event::Processing(_) => {
-                emit(lock(&state).ok().and_then(|mut q| q.processing(id)));
-            }
-        },
-    );
+    // A cancel (#74) stops it like a quit, but only this download.
+    let outcome = proc::with_cancel(job.cancel.clone(), || {
+        download::run_with_retries_saved(
+            &job.sidecar_dir,
+            &job.work_dir,
+            &job.out_dir,
+            &job.url,
+            job.info.as_deref(),
+            job.format,
+            proc::sleep_unless_quitting,
+            |attempt| emit(lock(&state).ok().and_then(|mut q| q.retrying(id, attempt))),
+            |event| match event {
+                download::Event::Progress(p) => {
+                    emit(lock(&state).ok().and_then(|mut q| q.progressed(id, p)));
+                }
+                download::Event::Processing(_) => {
+                    emit(lock(&state).ok().and_then(|mut q| q.processing(id)));
+                }
+            },
+        )
+    });
     // A failure while quitting is the quit stopping it (#67): leave the row as it is, so the
     // final save keeps it as an interrupted download rather than a failure. A finished
     // download is still recorded.
@@ -526,9 +543,19 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
             .notice_for(std::path::Path::new(&saved.path), &saved.codecs)
     });
     let outcome = outcome.map(|saved| saved.path);
+    // A cancel that lost the race to the finished file leaves the row Done; otherwise the row
+    // goes back to Queued, marked Cancelled (owner's choice), never Failed.
+    let cancelled = outcome.is_err() && job.cancel.load(Ordering::SeqCst);
     let (updated, info) = match lock(&state) {
         Ok(mut q) => {
-            let finished = q.finish(id, outcome);
+            if let Ok(mut cancels) = app.state::<Cancels>().0.lock() {
+                cancels.remove(&id);
+            }
+            let finished = if cancelled {
+                q.cancelled(id)
+            } else {
+                q.finish(id, outcome)
+            };
             let updated = match notice {
                 Some(notice) => q.noticed(id, notice).or(finished),
                 None => finished,
@@ -556,6 +583,28 @@ fn queue_download(
     let (item, job) = begin_download(&app, &queue, id)?;
     std::thread::spawn(move || complete_download(&app, job));
     Ok(item)
+}
+
+/// Cancels a download in progress (#74): its whole yt-dlp/ffmpeg tree is stopped and its
+/// staging and partial files removed, then the row goes back to Queued, marked Cancelled. The
+/// updated row arrives as [`ITEM_EVENT`] once the download has stopped; a download that finishes
+/// first stays Done.
+#[tauri::command]
+fn queue_cancel(
+    queue: tauri::State<'_, Mutex<Queue>>,
+    cancels: tauri::State<'_, Cancels>,
+    id: u64,
+) -> Result<(), String> {
+    let q = lock(&queue)?;
+    let active = q.items().iter().any(|i| i.id == id && i.is_downloading());
+    let flag = cancels.0.lock().ok().and_then(|c| c.get(&id).cloned());
+    match flag {
+        Some(flag) if active => {
+            flag.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+        _ => Err("Only a download in progress can be cancelled.".into()),
+    }
 }
 
 /// Emitted with `{ running }` when "Download all" starts or finishes.
@@ -657,6 +706,7 @@ pub fn run() {
             }
         }))
         .manage(Runner(Mutex::new(false)))
+        .manage(Cancels::default())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let file = app
@@ -738,6 +788,7 @@ pub fn run() {
             queue_add,
             queue_list,
             queue_download,
+            queue_cancel,
             queue_remove,
             queue_retry,
             queue_run_all,

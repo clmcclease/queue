@@ -144,3 +144,10 @@ For #70, the owner chose to commit three tiny media files (about 9 KB in all) un
 - **Why committed:** our ffmpeg can't encode H.264 or AAC (D-012), so they were made once on macOS with `avconvert` and `afconvert` (`make-fixtures.sh`, with the recipe and sha256 in the folder's README). The FLAC stream is made at test time by the bundled ffmpeg.
 - **Not covered:** VP9 + Opus `.webm`. That needs a full ffmpeg once; the no-H.264 fallback is covered by MJPEG + FLAC instead, which yt-dlp saves as `.mkv`.
 - `.gitattributes` marks `*.mp4` and `*.m4a` binary, and the test checks each fixture's size.
+
+## D-027 Cancelling a download returns the row to Queued — Confirmed (2026-10-17, built 2026-10-20)
+For #74 (Q6), the owner chose this behaviour when splitting cancel from #22:
+- **What Cancel does:** it stops that download's whole yt-dlp/ffmpeg tree and removes its staging folder and any partial or temporary file (D-014). The row goes back to **Queued** with the note "Cancelled. Download it again when you're ready.", and ✕ still removes it. A cancel is never a failure.
+- **Mechanism:** each download runs on its own thread with a cancel flag (`proc::with_cancel`). Every wait the download already stops at when Queue quits (#67) checks `proc::should_stop()`: the progress loop, waiting for yt-dlp, draining its output, the 403 retry pause (D-017) and the chunked cross-volume copy. A cancel stops exactly like a quit, but only for that download. A quit wins if both happen, so the row comes back as interrupted.
+- **Download all** skips rows cancelled during its run and moves on. A later Download all includes them again.
+- **A cancel that loses the race** to the finished file leaves the row Done. Once placement has finished, the download can't be undone.

@@ -118,22 +118,39 @@ fn d72_blocked_copy_child() {
     let src = std::env::var_os("QUEUE_QA72_FIFO_SRC").expect("child source");
     let dest = std::env::var_os("QUEUE_QA72_COPY_DEST").expect("child destination");
     let quitting = std::env::var("QUEUE_QA72_QUIT").as_deref() == Ok("true");
-    let watcher = quitting.then(|| {
+    let cancelling = std::env::var("QUEUE_QA74_CANCEL").as_deref() == Ok("true");
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watcher = (quitting || cancelling).then(|| {
         let work = Path::new(&src).parent().unwrap().to_path_buf();
+        let flag = cancel.clone();
         std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while !work.join("quit-request").exists() {
                 assert!(std::time::Instant::now() < deadline, "no quit request");
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            queue_lib::proc::shut_down();
+            if cancelling {
+                flag.store(true, Ordering::SeqCst);
+            } else {
+                queue_lib::proc::shut_down();
+            }
             fs::write(work.join("quit-started"), b"").unwrap();
         })
     });
-    let result = download::copy_no_clobber(Path::new(&src), Path::new(&dest));
+    let result = queue_lib::proc::with_cancel(cancel, || {
+        download::copy_no_clobber(Path::new(&src), Path::new(&dest))
+    });
     if let Some(watcher) = watcher {
         watcher.join().unwrap();
-        assert_eq!(result.unwrap_err().to_string(), download::QUITTING);
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            if cancelling {
+                download::CANCELLED
+            } else {
+                download::QUITTING
+            }
+        );
+        assert_eq!(queue_lib::proc::stopping(), quitting);
     } else {
         panic!("the parent must kill this blocked copy: {result:?}");
     }
@@ -141,6 +158,11 @@ fn d72_blocked_copy_child() {
 
 #[cfg(unix)]
 fn interrupt_copy_then_recover(folder: &std::ffi::OsStr, quitting: bool) {
+    interrupt_copy_with_stop(folder, if quitting { "quit" } else { "kill" });
+}
+
+#[cfg(unix)]
+fn interrupt_copy_with_stop(folder: &std::ffi::OsStr, stop: &str) {
     use std::{
         ffi::CString,
         io::Write,
@@ -157,6 +179,7 @@ fn interrupt_copy_then_recover(folder: &std::ffi::OsStr, quitting: bool) {
         }
     }
     let f = Fixture::new();
+    let quitting = stop != "kill";
     let out = f.0.join(folder);
     fs::create_dir(&out).unwrap();
     let src = f.work().join("source.fifo");
@@ -169,7 +192,8 @@ fn interrupt_copy_then_recover(folder: &std::ffi::OsStr, quitting: bool) {
             .args(["--ignored", "--exact", "d72_blocked_copy_child"])
             .env("QUEUE_QA72_FIFO_SRC", &src)
             .env("QUEUE_QA72_COPY_DEST", &dest)
-            .env("QUEUE_QA72_QUIT", quitting.to_string())
+            .env("QUEUE_QA72_QUIT", (stop == "quit").to_string())
+            .env("QUEUE_QA74_CANCEL", (stop == "cancel").to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -286,6 +310,12 @@ fn d72_killed_copy_never_exposes_final_name_and_launch_removes_its_real_partial(
 #[test]
 fn d72_quitting_mid_copy_removes_partial_and_note_without_exposing_a_final_name() {
     interrupt_copy_then_recover(std::ffi::OsStr::new("out 日本語 e\u{301}"), true);
+}
+
+#[cfg(unix)]
+#[test]
+fn q6_74_cancelling_after_bytes_were_copied_removes_partial_and_note_without_quitting() {
+    interrupt_copy_with_stop(std::ffi::OsStr::new("out\n日本語"), "cancel");
 }
 
 #[cfg(unix)]

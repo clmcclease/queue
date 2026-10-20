@@ -7,6 +7,7 @@ import {
   addItem,
   addManySummary,
   type AddManyResult,
+  cancelItem,
   downloadItem,
   isAddError,
   listItems,
@@ -233,6 +234,33 @@ export default function App() {
     }
   }
 
+  // Rows whose Cancel was pressed: the button waits until the row stops (#74), which can take
+  // a few seconds while yt-dlp and ffmpeg are stopped.
+  const [cancelling, setCancelling] = useState<ReadonlySet<number>>(new Set());
+  useEffect(() => {
+    setCancelling((prev) => {
+      const still = [...prev].filter((id) =>
+        items.some((item) => item.id === id && (item.status.state === "downloading" || item.status.state === "processing")),
+      );
+      return still.length === prev.size ? prev : new Set(still);
+    });
+  }, [items]);
+
+  async function cancel(id: number) {
+    setCancelling((prev) => new Set(prev).add(id));
+    try {
+      await cancelItem(id);
+      setError(null);
+    } catch (e) {
+      setCancelling((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setError(String(e));
+    }
+  }
+
   async function retry(id: number) {
     try {
       const item = await retryItem(id);
@@ -333,6 +361,8 @@ export default function App() {
             onDownload={download}
             onRetry={retry}
             onRemove={remove}
+            onCancel={cancel}
+            cancelling={cancelling}
             onReveal={reveal}
             connected={listening}
             busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
