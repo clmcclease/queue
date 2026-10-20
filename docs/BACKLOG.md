@@ -38,7 +38,8 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #68 | Q7 | P2 | ui | **Don't fail silently when the save-warning listener can't register** — Show the failure and/or poll the save status, so D-025's warning can't be lost. M2 audit. |
 | #69 | NFR | P2 | infra | **Fix the codex-qa watchdog and refresh stale docs** — The watchdog `sleep` can hold the caller's pipe for the whole timeout; README, STATUS, ARCHITECTURE and the PRD's format list are out of date. M2 audit. |
 | #70 | D2,D4 | P2 | download | **Exercise real video+audio merging in CI** — Local video and audio fixtures over loopback, so every OS runs a real ffmpeg merge, Processing events and the format notices. M2 audit. |
-| #72 | D2 | P2 | download | **Never leave a partial file under the final name** — Copy across volumes into a temporary name, then publish it without overwriting (per OS); startup removes Queue's leftover temp files. #67 review; accepted for #67 (D-014). |
+| #72 | D2 | P2 | download | **Never leave a partial file under the final name** — Copy across volumes into a temporary name, then publish it without overwriting (per OS); startup removes Queue's leftover temp files. #67 review; accepted for #67 (D-014). Also fix the flaky #67 macOS test `native_a_descendant_left_after_the_run_is_stopped_with_its_tree` (owner, 2026-10-18). |
+| #77 | D2 | P2 | download | **Long non-ASCII titles exceed Linux's 255-byte filename limit** — `--trim-filenames 200` counts characters, so a long CJK title gives a ~600-byte name; make names fit 255 bytes on every OS, leaving room for yt-dlp's temp suffixes. Found while researching #70. |
 | #74 | Q6 | P1 | queue | **Cancel a download in progress** — A Cancel button on downloading/processing rows stops that download's whole tree (reusing #67) and removes its staging and partial files; the row goes back to Queued, marked Cancelled (owner's choice). Owner request; split from #22. |
 
 ## M3 – Smart naming (rules)

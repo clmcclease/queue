@@ -1,2 +1,5 @@
 # LF everywhere so lockfiles, configs, and the config tests match on Windows checkouts too.
 * text=auto eol=lf
+# Test media fixtures (#70) are binary: never touch their bytes.
+*.mp4 binary
+*.m4a binary

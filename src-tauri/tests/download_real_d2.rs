@@ -1,4 +1,5 @@
-//! #4 / D2: opt-in tests using the unmodified bundled yt-dlp, with loopback-only WAV fixtures.
+//! #4 / D2: opt-in tests using the unmodified bundled yt-dlp, with loopback-only fixtures: a
+//! WAV page, and separate video and audio streams for real merges (#70, tests/fixtures/merge).
 //! Set QUEUE_QA_REAL_SIDECARS to src-tauri/binaries, then run:
 //! cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
 //! These tests do not contact external sites or write into the user's Downloads folder.
@@ -6,7 +7,7 @@ use queue_lib::{download, sidecar::Sidecar};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -15,6 +16,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+#[path = "support/merge_70_qa.rs"]
+mod merge_70_qa;
 
 struct LocalDownload {
     root: PathBuf,
@@ -117,8 +121,252 @@ fn d11_real_formats_download_without_reencoding_and_flag_honest_fallbacks() {
     }
 }
 
+/// A file the loopback server serves: its path, MIME type and bytes. Media is paced.
+type Route = (&'static str, &'static str, Vec<u8>);
+
+/// #70: a real video+audio merge with the bundled ffmpeg, over loopback, for every format. The
+/// page is a DASH manifest of separate streams (fixtures/merge/README.md), and yt-dlp takes their
+/// codecs from it. "full" offers a larger MJPEG video and FLAC audio alongside a small H.264 and
+/// AAC; "noh264" has only MJPEG and FLAC, so the compatible formats must fall back honestly.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn d70_real_merge_picks_each_formats_streams_and_reports_processing() {
+    use download::Format::*;
+    // (page, format, saved extension, streams ffprobe finds, codecs yt-dlp reports, notice)
+    let cases = [
+        ("full", Default, "mp4", "mjpeg,flac", "mp4v.6C|flac", None),
+        (
+            "full",
+            CompatibleVideo,
+            "mp4",
+            "h264,aac",
+            "avc1.42c00a|mp4a.40.2",
+            None,
+        ),
+        ("full", Audio, "m4a", "flac", "none|flac", None),
+        (
+            "full",
+            CompatibleAudio,
+            "m4a",
+            "aac",
+            "none|mp4a.40.2",
+            None,
+        ),
+        ("noh264", Default, "mp4", "mjpeg,flac", "mp4v.6C|flac", None),
+        // `--merge-output-format mp4/webm/mkv` checks codecs too: FLAC goes to .mkv.
+        (
+            "noh264",
+            CompatibleVideo,
+            "mkv",
+            "mjpeg,flac",
+            "mp4v.6C|flac",
+            Some("No H.264 version was available"),
+        ),
+        ("noh264", Audio, "m4a", "flac", "none|flac", None),
+        // Saved as .m4a, so only the reported codec shows it isn't AAC.
+        (
+            "noh264",
+            CompatibleAudio,
+            "m4a",
+            "flac",
+            "none|flac",
+            Some("No AAC version was available, so it's FLAC audio"),
+        ),
+    ];
+    for page in ["full", "noh264"] {
+        let f = LocalDownload::serve(
+            "Merge 日本語",
+            r#"<video controls><source src="/media.mpd" type="application/dash+xml"></video>"#,
+            |bin| merge_routes(bin, page == "full"),
+        );
+        for (_, format, ext, streams, codecs, notice) in cases.iter().filter(|c| c.0 == page) {
+            let case = format!("{page} {format:?}");
+            let work = f.root.join(format!("work-{page}-{format:?}"));
+            let mut events = Vec::new();
+            let saved = download::run_with_retries_saved(
+                &f.bin,
+                &work,
+                &f.out,
+                &f.url,
+                None,
+                *format,
+                |_| panic!("loopback fixture must not retry"),
+                |_| panic!("loopback fixture must not retry"),
+                |event| events.push(event),
+            )
+            .unwrap_or_else(|e| panic!("{case}: {e}"));
+            let path = PathBuf::from(&saved.path);
+            assert_eq!(path.parent(), Some(f.out.as_path()), "{case}");
+            assert!(
+                path.file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("Merge 日本語"),
+                "{case}: {saved:?}"
+            );
+            assert_eq!(path.extension().unwrap(), *ext, "{case}: {saved:?}");
+            assert_eq!(
+                probe_streams(&f.bin, &path),
+                *streams,
+                "{case}: the streams chosen, copied without re-encoding"
+            );
+            assert_eq!(saved.codecs, download::Codecs::parse(codecs), "{case}");
+            let shown = format.notice_for(&path, &saved.codecs);
+            match notice {
+                None => assert_eq!(shown, None, "{case}"),
+                Some(start) => assert!(
+                    shown.as_deref().is_some_and(|n| n.starts_with(start)),
+                    "{case}: {shown:?}"
+                ),
+            }
+            let processing: Vec<_> = events
+                .iter()
+                .filter_map(|e| match e {
+                    download::Event::Processing(name) => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let parts = events
+                .iter()
+                .filter_map(|e| match e {
+                    download::Event::Progress(p) => Some(p.part),
+                    _ => None,
+                })
+                .max();
+            if streams.contains(',') {
+                assert!(processing.contains(&"Merger"), "{case}: {processing:?}");
+                assert_eq!(parts, Some(2), "{case}: video, then audio");
+            } else {
+                assert!(
+                    processing.contains(&"ExtractAudio"),
+                    "{case}: {processing:?}"
+                );
+                assert_eq!(parts, Some(1), "{case}");
+            }
+            assert!(!work.exists(), "{case}");
+            assert_eq!(
+                fs::read_dir(&f.out).unwrap().count(),
+                1,
+                "{case}: only the finished file"
+            );
+            fs::remove_file(&path).unwrap();
+        }
+    }
+}
+
+/// The DASH manifest and streams for [`d70_real_merge_picks_each_formats_streams_and_reports_processing`].
+/// The FLAC stream is made here from [`silence_wav`] by the bundled ffmpeg.
+fn merge_routes(bin: &Path, full: bool) -> Vec<Route> {
+    let fixture = |name: &str, size: u64| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/merge")
+            .join(name);
+        let bytes = fs::read(&path).unwrap();
+        // A changed size means a damaged checkout or a rebuilt fixture (see its README).
+        assert_eq!(bytes.len() as u64, size, "{name}");
+        bytes
+    };
+    let wav = bin.join("silence.wav");
+    let flac = bin.join("flac.mp4");
+    fs::write(&wav, silence_wav()).unwrap();
+    let made = std::process::Command::new(bin.join(Sidecar::Ffmpeg.file_name()))
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(&wav)
+        .args(["-c:a", "flac", "-f", "mp4"])
+        .arg(&flac)
+        .output()
+        .unwrap();
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let representation = |id: &str, mime: &str, codecs: &str, extra: &str| {
+        format!(
+            r#"<Representation id="{id}" mimeType="{mime}" codecs="{codecs}" {extra}><BaseURL>/{id}</BaseURL></Representation>"#
+        )
+    };
+    let mut video = representation(
+        "v_mjpeg.mp4",
+        "video/mp4",
+        "mp4v.6C",
+        r#"bandwidth="40000" width="128" height="96" frameRate="10""#,
+    );
+    let mut audio = representation(
+        "a_flac.mp4",
+        "audio/mp4",
+        "flac",
+        r#"bandwidth="64000" audioSamplingRate="8000""#,
+    );
+    let mut routes = vec![
+        ("/v_mjpeg.mp4", "video/mp4", fixture("v_mjpeg.mp4", 3578)),
+        ("/a_flac.mp4", "audio/mp4", fs::read(&flac).unwrap()),
+    ];
+    if full {
+        video += &representation(
+            "v_h264.mp4",
+            "video/mp4",
+            "avc1.42c00a",
+            r#"bandwidth="20000" width="64" height="48" frameRate="10""#,
+        );
+        audio += &representation(
+            "a_aac.m4a",
+            "audio/mp4",
+            "mp4a.40.2",
+            r#"bandwidth="32000" audioSamplingRate="8000""#,
+        );
+        routes.push(("/v_h264.mp4", "video/mp4", fixture("v_h264.mp4", 1630)));
+        routes.push(("/a_aac.m4a", "audio/mp4", fixture("a_aac.m4a", 4136)));
+    }
+    let mpd = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT1S" minBufferTime="PT1S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"><Period><AdaptationSet contentType="video">{video}</AdaptationSet><AdaptationSet contentType="audio" lang="en">{audio}</AdaptationSet></Period></MPD>"#
+    );
+    routes.push(("/media.mpd", "application/dash+xml", mpd.into_bytes()));
+    routes
+}
+
+/// The codec of each stream in `file`, as the bundled ffprobe sees it: "h264,aac".
+fn probe_streams(bin: &Path, file: &Path) -> String {
+    let out = std::process::Command::new(
+        bin.join(format!("queue-ffprobe{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .args([
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_name",
+        "-of",
+        "csv=p=0",
+    ])
+    .arg(file)
+    .output()
+    .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 impl LocalDownload {
+    /// A page titled `title` with one WAV `<audio>`.
     fn new(title: &str) -> Self {
+        Self::serve(
+            title,
+            r#"<audio controls src="/media.wav"></audio>"#,
+            |_| vec![("/media.wav", "audio/wav", silence_wav())],
+        )
+    }
+
+    /// A page titled `title` whose body is `media`, serving the files `routes` makes; it gets
+    /// the tools folder, so it can make fixtures with the bundled ffmpeg. Any other path is the page.
+    fn serve(title: &str, media: &str, routes: impl FnOnce(&Path) -> Vec<Route>) -> Self {
         let root = std::env::temp_dir().join(format!(
             "queue-real-d2-{}-{}",
             std::process::id(),
@@ -150,17 +398,30 @@ impl LocalDownload {
             )
             .unwrap();
         }
+        // yt-dlp finds ffprobe next to ffmpeg, as in the app (sidecar.rs).
+        let ffprobe = format!("queue-ffprobe{}", std::env::consts::EXE_SUFFIX);
+        fs::copy(
+            source.join(format!(
+                "queue-ffprobe-{triple}{}",
+                std::env::consts::EXE_SUFFIX
+            )),
+            bin.join(ffprobe),
+        )
+        .unwrap();
+        let routes = routes(&bin);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
-        let html = format!("<!doctype html><html><head><title>{title}</title></head><body><audio controls src=\"/media.wav\"></audio></body></html>").into_bytes();
-        let wav = silence_wav();
+        let html = format!(
+            "<!doctype html><html><head><title>{title}</title></head><body>{media}</body></html>"
+        )
+        .into_bytes();
         let server = thread::spawn(move || {
             while !stopping.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((stream, _)) => respond(stream, &html, &wav),
+                    Ok((stream, _)) => respond(stream, &html, &routes),
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(5))
                     }
@@ -215,7 +476,7 @@ fn silence_wav() -> Vec<u8> {
     data
 }
 
-fn respond(mut stream: TcpStream, html: &[u8], wav: &[u8]) {
+fn respond(mut stream: TcpStream, html: &[u8], routes: &[Route]) {
     // On Windows a socket accepted from a non-blocking listener is non-blocking too (Linux and
     // macOS hand back a blocking one), so the first read would fail with WouldBlock and drop the
     // connection: yt-dlp then saw WSAECONNABORTED (10053).
@@ -236,19 +497,18 @@ fn respond(mut stream: TcpStream, html: &[u8], wav: &[u8]) {
     }
     let text = String::from_utf8_lossy(&request);
     let first = text.lines().next().unwrap_or("");
-    let media = first.contains(" /media.wav ");
-    let body = if media { wav } else { html };
-    let mime = if media {
-        "audio/wav"
-    } else {
-        "text/html; charset=utf-8"
-    };
+    let path = first.split(' ').nth(1).unwrap_or("");
+    let route = routes.iter().find(|(p, _, _)| *p == path);
+    let media = route.is_some();
+    let (mime, body) = route.map_or(("text/html; charset=utf-8", html), |(_, mime, body)| {
+        (*mime, body.as_slice())
+    });
     let headers = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     if stream.write_all(headers.as_bytes()).is_ok() && !first.starts_with("HEAD ") {
-        // Media is paced (about 0.3 s total) so yt-dlp has elapsed time to report speed and ETA;
+        // Media is paced (the WAV takes about 0.3 s) so yt-dlp has elapsed time to report speed and ETA;
         // an instant loopback transfer leaves both null.
         let chunk = if media { 1024 } else { body.len().max(1) };
         for part in body.chunks(chunk) {
