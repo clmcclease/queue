@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-19 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #72 (in progress), then #74, #77
+**Updated:** 2026-10-19 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #74 next, then #77
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -70,7 +70,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
 
-## In progress: #72 (D2, D-014) never leave a partial file under the final name; the macOS test flake (branch `download/72-no-partial-file`)
+## Done: #72 (D2, D-014) never leave a partial file under the final name; the macOS test flake (squash-merged from PR #79; 4-OS bundles green)
 - **The bug:** across volumes, `download::place` copied straight into the final filename, so a crash, or a quit whose write blocked past the 5 s wait, could leave a cut-off file under the real name.
 - **Fix (`download.rs`, D-014):**
   - The copy goes to `.queue-partial-<id>` next to the final name, is synced, then published with a no-replace rename: `renamex_np(RENAME_EXCL)` on macOS, the `renameat2(RENAME_NOREPLACE)` system call on Linux, and `MoveFileExW` without replace (with `\\?\` paths for long names) on Windows.
@@ -90,6 +90,9 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **The macOS flake (`native_a_descendant_left_after_the_run_is_stopped_with_its_tree`):** reproduced locally under full CPU load, 2 in 150 and 2 in 300 runs.
   - Diagnostics showed the descendant wasn't alive: it had been SIGKILLed and was mid-teardown. `kill(pid, 0)` still succeeded, but `proc_pidinfo` couldn't read it, and it was gone about 1.3 ms later. It had already left its process group, so `Tree::terminate` was right.
   - The test now checks that the descendant writes no heartbeat after the run returns, and that it's gone within 2 s: 0 failures in 300 loaded runs. With `Tree::finish` not killing, it still fails.
+- **CI (PR #79):**
+  - The first run (39357638819) failed on Windows clippy: an unused `mut` in a test whose push is Unix-only, so no Windows test ran. Fixed in `1cc97c2`.
+  - Run 39359860815 is green on Linux, macOS and Windows, plus all four bundles (`ci:bundle`). The real no-replace rename test passed on all three, including a path over 260 UTF-16 units through `MoveFileExW` on Windows. On Linux, the real cross-volume test also ran across `/dev/shm` through `renameat2`.
 - `codex-qa test "#72"`: **FAIL**, then fixed (`qa/reports/20261019-200752-test-6Cf1.md`). Two launch-cleanup bugs, both confirmed by Codex's tests:
   1. The note recorded a claim before `create_new`, so after losing a race to another writer's empty file and then crashing, a launch would delete that file. Claims are now recorded only once made. The new unit test `a_lost_claim_is_never_recorded_so_a_launch_keeps_the_winners_empty_file` drives the real code; moving the note write back in front of `create_new` fails it.
   2. Notes stored paths one per line, so an output folder with a newline in its name lost its temporary copy. Notes now store hex of each path's bytes (`download::partial_note`), and a new unit test covers newlines and malformed lines.
@@ -539,4 +542,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 
 ## Next bounded action
-Finish #72 through the QA gates. Then #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled) and #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+Start #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled). Then #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
