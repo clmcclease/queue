@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #74 (review gate passed; review fixes uncommitted on its branch), then #77
+**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #74 (PR #80 green, awaiting squash), then #77
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -134,7 +134,8 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
 - **Checks after the review fixes (macOS arm64, new Mac):** fmt, clippy `-D warnings`, `cargo test` 333 passed, the real-sidecar suite 13/13, `npm run build`, `npm test` 210/210.
 - **Owner's dev-app check (2026-10-20):** all three cancel checks passed (see "Owner checks").
 - **Accepted by the architect (D-028):** `Queue::start` doesn't clear `cancelled_at`, so a row cancelled during a run, restarted by hand, failed and retried stays skipped until the next Download all. That's "the run moves on" (D-027).
-- **Architect rulings (D-028, 2026-10-20 ~18:15):** commit the review fixes, then D-028's docs as a second commit on this branch, push, and open the draft PR with `ci:bundle`. Both approved.
+- **Architect rulings (D-028, 2026-10-20 ~18:15):** commit the review fixes, then D-028's docs as a second commit on this branch, push, and open the draft PR with `ci:bundle`. Both approved, and done: 8fdea44 (fixes) and ffe5d17 (D-028/D-029 docs).
+- **PR #80 (draft, `ci:bundle`):** CI run 39514852741 passed: tests on Linux, Windows and macOS, and bundles for macOS arm64/x64, Windows x64 and Linux x64.
 
 ## Done: #72 (D2, D-014) never leave a partial file under the final name; the macOS test flake (squash-merged from PR #79; 4-OS bundles green)
 - **The bug:** across volumes, `download::place` copied straight into the final filename, so a crash, or a quit whose write blocked past the 5 s wait, could leave a cut-off file under the real name.
@@ -610,7 +611,4 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 
 ## Next bounded action
 On branch `queue/74-cancel-download` (#74 is committed as WIP and pushed; the review gate has passed, and the review fixes plus this STATUS update are uncommitted in `queue.rs`, `lib.rs` and `docs/STATUS.md`):
-1. The owner's dev-app check passed (2026-10-20). Ask for approval to commit the review fixes, then to open the draft PR.
-2. Then the usual flow: CI, the STATUS handoff commit, squash approval.
-
-Then #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+#74 is ready to squash-merge (PR #80; CI run 39514852741 green on all 3 OSes and 4 bundles). After the merge, continue the overnight order (see "Overnight run"): #77 (branch `download/77-long-names`, in QA), then the M2 audit, then M3.
