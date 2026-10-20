@@ -2579,6 +2579,7 @@ mod tests {
         fs::write(&file, b"keep").unwrap();
         let folder = dir.join("folder");
         fs::create_dir(&folder).unwrap();
+        #[cfg_attr(not(unix), allow(unused_mut))] // only Unix adds a dangling symlink
         let mut taken = vec![file.clone(), folder.clone()];
         #[cfg(unix)]
         {
