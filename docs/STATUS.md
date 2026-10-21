@@ -116,7 +116,8 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #33(a) (N9) AI naming prompt, schema, validation, eval set and runner (branch `naming/33-ai-prompt-eval`)
+## In progress: #33(a) (N9) AI naming prompt, schema, validation, eval set and runner (PR #88, branch `naming/33-ai-prompt-eval`)
+- **PR #88 (draft, no label):** f874061; CI run 39531584183 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
 - **Dependency (D-029):** `ureq =3.4.2`, `default-features = false`, `rustls` + `json`. It's blocking, with no OpenSSL. New lock entries are only ureq's own stack (rustls, ring, webpki-roots and friends); no native-tls, tokio or hyper (the latter two were already there via Tauri).
 - **`src-tauri/src/ai.rs`:**
   - `prompt`: style rules in the system message; the metadata in the user message as one JSON object, labelled as data, never instructions.
@@ -733,6 +734,6 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#33(a)** (worktree branch `naming/33-ai-prompt-eval`, uncommitted, on cd81134): review passed. Next: the commit request to the architect, the draft PR, CI, handoff and squash.
+1. **#33(a):** PR #88 is green; squash-merge it (pre-approved), then sync `main`. #33 stays open for (b).
 2. **#17** (worktree branch `naming/17-template-picker`, on #15's commit): `codex-qa test "#17"` is running. Bring `main` in after #15's merge, then review.
 3. Then the M3 audit (after #17), then #25.
