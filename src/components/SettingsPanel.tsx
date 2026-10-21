@@ -9,6 +9,8 @@ import type { NamingStatus } from "../settings";
 
 interface Props {
   folder: DownloadFolderState;
+  /** A download is running; it finishes in the folder it started with (D-030). */
+  downloading?: boolean;
   onClose: () => void;
   /** The AI naming provider changed (#25). */
   namingStatus?: NamingStatus | null;
@@ -23,7 +25,7 @@ interface Props {
  * closes it. Later items add their sections here (AI #25/#31/#32,
  * yt-dlp updates #21, notifications #20). Every change is saved by the backend as it's made.
  */
-export default function SettingsPanel({ folder, onClose, namingStatus, onNamingStatus, models, onModels }: Props) {
+export default function SettingsPanel({ folder, downloading, onClose, namingStatus, onNamingStatus, models, onModels }: Props) {
   const close = useRef<HTMLButtonElement>(null);
 
   // Focus moves into the panel; App puts it back on the opener once the queue isn't inert.
@@ -50,7 +52,7 @@ export default function SettingsPanel({ folder, onClose, namingStatus, onNamingS
       aria-modal="true"
       aria-labelledby="settings-title"
       data-role="settings"
-      className="absolute inset-0 z-10 flex flex-col bg-white p-4 dark:bg-neutral-900"
+      className="absolute inset-0 z-10 flex flex-col overflow-y-auto bg-white p-4 dark:bg-neutral-900"
     >
       <div className="flex items-center justify-between">
         <h2 id="settings-title" className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
@@ -73,6 +75,11 @@ export default function SettingsPanel({ folder, onClose, namingStatus, onNamingS
         <div className="mt-2 flex">
           <FolderPicker state={folder} label="Download folder" />
         </div>
+        {downloading && (
+          <p data-role="folder-note" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            Downloads in progress keep the folder they started in.
+          </p>
+        )}
       </section>
       <section aria-labelledby="settings-format" className="mt-6">
         <h3 id="settings-format" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
