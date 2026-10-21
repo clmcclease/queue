@@ -49,6 +49,9 @@ fn every_template_round_trips_without_changing_other_settings() {
             format: Format::CompatibleAudio,
             naming_template: template,
             naming_provider: queue_lib::ai::Provider::Off, // #25
+            api_base_url: "https://api.example.test/v1".into(), // #32
+            api_model: "m".into(),
+            ..Default::default()
         };
         settings.save(&file).unwrap();
         assert_eq!(Settings::load(&file), settings);

@@ -192,7 +192,11 @@ fn n4_the_real_ask_path_names_the_row() {
         (Some("Clean Name"), Some(NameSource::Ai))
     );
     assert!(
-        ai::endpoint(ai::Provider::Local).is_err(),
-        "and no real provider is set up yet"
+        ai::endpoint(
+            &queue_lib::settings::Settings::default(),
+            &queue_lib::secrets::Memory::default()
+        )
+        .is_err(),
+        "and the local model isn't set up yet"
     );
 }

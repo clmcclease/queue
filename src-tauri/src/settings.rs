@@ -25,6 +25,15 @@ pub struct Settings {
     /// Who suggests names (N4, #25): the local model by default.
     #[serde(deserialize_with = "or_default")]
     pub naming_provider: crate::ai::Provider,
+    /// The API service's wire format (N8, #32); only OpenAI-compatible today.
+    #[serde(deserialize_with = "or_default")]
+    pub api_kind: crate::ai::ApiKind,
+    /// Its base URL, e.g. `https://api.openai.com/v1`; empty until set up. The key is in the OS
+    /// credential store (`secrets.rs`), never in this file.
+    #[serde(deserialize_with = "or_default")]
+    pub api_base_url: String,
+    #[serde(deserialize_with = "or_default")]
+    pub api_model: String,
 }
 
 /// Reads one setting, or its default if it can't be understood (e.g. a format from a newer
@@ -208,6 +217,48 @@ mod tests {
             (loaded.naming_provider, loaded.format),
             (Provider::Local, crate::download::Format::Audio)
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// N8 (#32): the API service's address and model are remembered, each falls back alone, and
+    /// the file has no key field at all.
+    #[test]
+    fn the_api_settings_are_remembered_and_each_falls_back_alone() {
+        use crate::ai::ApiKind;
+        let dir = temp("api");
+        let path = dir.join(FILE);
+        let api = Settings {
+            api_base_url: "https://api.example.test/v1".into(),
+            api_model: "small-model".into(),
+            ..Default::default()
+        };
+        api.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), api);
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.contains(r#""apiKind": "openai_compatible""#),
+            "{saved}"
+        );
+        assert!(saved.contains(r#""apiBaseUrl": "https://api.example.test/v1""#));
+        assert!(
+            !saved.to_lowercase().contains("key"),
+            "no key field: {saved}"
+        );
+        fs::write(
+            &path,
+            br#"{"apiKind": "carrier_pigeon", "apiBaseUrl": 7, "apiModel": "m", "format": "audio"}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(
+            (
+                loaded.api_kind,
+                loaded.api_base_url.as_str(),
+                loaded.api_model.as_str()
+            ),
+            (ApiKind::OpenaiCompatible, "", "m")
+        );
+        assert_eq!(loaded.format, crate::download::Format::Audio);
         fs::remove_dir_all(dir).unwrap();
     }
 

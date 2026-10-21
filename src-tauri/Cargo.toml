@@ -30,6 +30,9 @@ tauri-plugin-single-instance = "=2.5.1"
 # One blocking HTTP client for naming providers, the local model server and the model download
 # (D-029); rustls, so there's no OpenSSL on Linux.
 ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "json"] }
+# API keys (#32, D-029): macOS Keychain, Windows Credential Manager, and on Linux the Secret
+# Service over zbus (pure Rust, no libdbus). Only through `secrets.rs`; tests never touch it.
+keyring = { version = "=4.2.0", default-features = false, features = ["v1"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"

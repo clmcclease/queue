@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #25 (PR #90), then #32
+**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #32(a) (PR #92), then #31
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -110,6 +110,67 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
+## In progress: #32(a) (N8) OpenAI-compatible API provider (PR #92, branch `naming/32-api-provider`)
+- **Design ruled by the architect under D-028** (D-029's #32 bullets): OpenAI-compatible only; the native Anthropic API is #32(b), filed as **#91** (P1, gates M4). The PR gets the `ci:bundle` label.
+- **Keys (`secrets.rs`):**
+  - the `Secrets` trait: `Keyring` (the real store, `keyring =4.2.0` with only `v1`: Keychain, Credential Manager, and Secret Service over zbus, pure Rust with no libdbus or OpenSSL in the lock) and `Memory` (tests);
+  - service `dev.mcclease.queue`, account `api-key`, one slot, cached after the first read;
+  - a missing key is `None`, removing one isn't an error, and a store failure becomes "Couldn't reach your system's credential store." (`Unavailable::StoreUnreachable`), never a panic.
+- **Settings:** `apiKind` (`openai_compatible`), `apiBaseUrl`, `apiModel`, flat, each with `or_default`. No key field.
+- **`ai.rs`:**
+  - `endpoint(settings, secrets)`: `Local` never reads the API fields or the key;
+  - `api_endpoint`, used by Test connection whatever the provider;
+  - `askable` (no key read), the cheap check before queueing a row;
+  - `base_url` (the request rule, and strips a pasted `/chat/completions`);
+  - `SENT` (the nine prompt fields, tested against `prompt`);
+  - `Resolving` (the endpoint resolved inside the job);
+  - `test_connection` (the preview sample through `ask`, reporting only the parsed name or `ask`'s redacted error, plus a 401/403 or 404 hint).
+- **Race fix (#25's review):** `naming_worker` resolves the endpoint inside the job, after `naming_job` takes the generation, so a provider changed meanwhile is never sent to.
+- **Commands:** `settings_api` (the setup, with `keySet` only, never the key), `settings_set_api`, `api_key_set`, `api_key_remove`, `api_test_connection` (async, on a blocking thread). Changing the service or the key while API is chosen re-asks Queued rows not edited by hand, as a provider change does.
+- **UI (`ApiSetup.tsx`, under the API radio):**
+  - Base URL and Model with Save;
+  - a password field with Save key and Remove key, and "Key saved", "No key" or the store error; the field is cleared after saving;
+  - Test connection, disabled until saved and while running;
+  - "What is sent for each item", listing the nine fields;
+  - the API radio's note now covers all of them, and there's a store-unreachable note.
+- **Tests:**
+  - unit tests: providers resolve only when set up, `base_url`, `SENT` against the prompt, the hints, the settings fallback (and no key in the file), and the in-memory store;
+  - `tests/api_n8_32.rs` (6): Test connection's success (the stored key in `Authorization`, the sample, the model), a 401 with no key or URL in the message, 404, unreachable, not set up and a broken store, the Local cross-wiring check (a recorder sees no connection), the provider-change race, and no key in `settings.json`;
+  - `qa/tests/api-n8-32.test.mjs` (7 UI tests); #25's API test mock now answers `settings_api`.
+- **Real store, by hand on macOS (2026-10-20, 23:3x):** `QUEUE_QA_REAL_KEYRING=1 cargo test --lib real_keyring -- --ignored` gave `secrets::tests::real_keyring_round_trip ... ok`. Afterwards, `security find-generic-password -s dev.mcclease.queue -a api-key-test` found nothing. The Windows and Linux real stores weren't exercised by hand.
+- **Checks (macOS arm64, before QA):** fmt, clippy `-D warnings`, `cargo test` 437 passed, `tsc`, `npm test` 249/249, `git diff --check`. The real-sidecar suite wasn't run: #32 doesn't touch downloading.
+- `codex-qa test "#32"`: **FAIL**, 3 bugs, all fixed (`qa/reports/20261020-232044-test-vgJm.md`, in the #32 worktree):
+  - **P1:** a switch to Off that finished while the key was being read (resolving can wait on the credential store) still let the request go to the old API; only its answer was dropped. Now `Namer::name_if` takes a `current()` check: `Resolving` resolves, then sends only if the job is still current (Queued, not edited, same generation). `run_naming_job` passes that check.
+  - **P2:** a job whose provider couldn't be asked (Off, or not set up, by the time it ran) got the Fallback tag although no ask ran (D-029). Now `name_if` returns `None` and the row keeps its plain rules name. My cross-wiring test now expects that too.
+  - **P2:** after saving a URL the backend normalised (a pasted `/chat/completions`), the field kept the typed text, so Save stayed on and Test stayed off. Now the fields show what was saved.
+
+  Its tests are added (D-021): `tests/api_n8_32_qa.rs` (6: optional key, key change, sanitizing, redaction, timeout, both switch regressions) and `qa/tests/api-n8-32-qa.test.mjs` (5 UI tests). Codex's sandbox couldn't use the shared `node_modules` symlink, so it installed dependencies in a temporary folder; the symlink is unchanged.
+- **Checks (macOS arm64, after the fixes):** fmt, clippy `-D warnings`, `cargo test` 443 passed, `tsc`, `npm test` 254/254, `git diff --check`.
+- `codex-qa review`, round 1: **FAIL**, 2 P2s, both fixed (`qa/reports/20261020-233152-review-6zVs.md`, in the #32 worktree):
+  - Credential calls ran on the main thread, so an unlock prompt or a stalled Secret Service could freeze the window. Now `naming_status`, `settings_set_naming_provider`, `settings_api`, `settings_set_api`, `api_key_set` and `api_key_remove` are async and run their work through `off_main` (`spawn_blocking`), like Test connection.
+  - An API change while rows waited queued them again on top of their old jobs, so each was asked twice: double the cost, and a failing second ask could replace a good name. Now each job carries the generation it was queued under (`Naming` sends `(id, generation)`), and `run_naming_job_at` drops a job whose generation has moved on. Test: `n8_a_job_queued_before_an_api_change_is_dropped_not_asked_twice`.
+  - Its other suggested tests (a blocked store keeping queue commands responsive, and a failure then a success through the real worker loop) need the running app. They're on #84 (Tauri glue).
+- **Checks (macOS arm64, after the review fixes):** fmt, clippy `-D warnings`, `cargo test` 444 passed, `tsc`, `npm test` 254/254, `git diff --check`.
+- `codex-qa review`, round 2: **FAIL**, 2 P2s, both fixed (`qa/reports/20261020-233724-review-G30l.md`):
+  - A row could still be queued twice for **one** generation: a fetch finishing just as the API setup changed. Now the naming worker claims each row once per generation (`NamingClaims`), and later copies are skipped. Test: `n8_a_row_is_asked_once_per_generation_even_if_queued_twice`.
+  - A base URL with a user name, password, query or fragment (a key pasted into the URL) would be saved in `settings.json` in plain text. Now `ai::base_url` refuses it and points to the key field, without echoing it, and such a URL already in the file is never used (`askable` and `api_set_up` use the same check). Tested in `a_base_url_is_checked_and_saved_without_the_chat_path`.
+- **Checks (macOS arm64, after round 2's fixes):** fmt, clippy `-D warnings`, `cargo test` 445 passed, `npm test` 254/254, `git diff --check`.
+- `codex-qa review`, round 3: **FAIL**, 1 P2, fixed (`qa/reports/20261020-234128-review-1Vlk.md`): the API setup's status refresh after a key or service change could land after a switch to Local, once the setup was gone, and hide Local's model-missing banner. Now a refresh's reply is used only while the setup is still shown and no newer refresh has started. Test: "a late status reply from the API setup can't undo a switch to Local" (it fails without the fix). Closing Settings mid-operation is covered by the same guard.
+- **Checks (macOS arm64, after round 3's fix, UI only):** `tsc`, `npm test` 255/255, `git diff --check`. Rust is unchanged since `cargo test` passed 445.
+- `codex-qa review`, round 4: **PASS WITH NOTES**, no findings (`qa/reports/20261020-234544-review-pqSV.md`). Its four suggested tests are all command-level (the real worker loop, a blocked credential read during Download/Cancel/Off, a failed `settings_set_api` save, and duplicate dispatch through the channel). They're on #84.
+- **Commit, `ci:bundle` draft PR #92 and squash approved by the architect under D-028.**
+  - The squash is pre-approved on green `test` (3 OSes) and green `bundle` (4 targets), for both the code commit and this handoff. This is the first CI build of the per-OS credential stores; a code change after review round 4 goes back to the architect.
+  - Design changes (a) `name_if`, (b) `off_main`, and (c) the base-URL refusal (Azure `?api-version=` is out of scope) are confirmed and recorded in D-029.
+  - `Closes #32`; (b) is #91. A follow-up, #93 (keyless API on Linux without a Secret Service), is filed in M5.
+- **PR #92:** 7ef2910; CI run 39546563808 passed `test` on Linux, Windows and macOS and `bundle` on all 4 targets (windows-x64, macos-arm64, macos-x64, linux-x64).
+- **Owner checks (dev app, macOS):**
+  - Settings → API: save a base URL and model, then Save key (an unsigned dev build may show a Keychain prompt once);
+  - Test connection against a real service (Ollama locally, or OpenAI);
+  - add a link: the row gets the "AI" tag;
+  - switch to Off during an ask: no Fallback tag appears;
+  - Remove key, then check Keychain Access: only `dev.mcclease.queue` / `api-key` existed, and it's gone after Remove.
+  - The Windows and Linux real stores belong with #71's native checks.
+
 ## M3 audit (end of milestone): YELLOW (`qa/reports/20261020-221105-audit-DqXf.md`, on 9e29480)
 - 0 P1, 4 P2, 4 P3. Under D-029 nothing needed fixing tonight. The architect's disposition (D-028):
   - **Already filed:** #83 (P2, queue.json version), #84 (P2, command-level tests; #17's and #25's settings commands added as a comment), #71 (P2, native Windows/Linux UI checks), #86 (P3, reproducible ffmpeg), #85 (P3, ids beyond 2^53).
@@ -118,7 +179,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **The M3 milestone is closed** on GitHub.
 - If #25 hasn't merged by 05:30, these doc fixes go in a docs-only PR instead (the architect's condition).
 
-## In progress: #25 (N4) AI naming provider: Local (default) / API / Off (PR #90, branch `naming/25-provider-toggle`)
+## Done: #25 (N4) AI naming provider: Local (default) / API / Off (squash-merged from PR #90 as 1d88303; Linux/macOS/Windows tests green)
 - **PR #90 (draft, no label):** 0a554c3; CI run 39539558222 passed `test` on Linux, Windows and macOS.
 - **Setting:** `namingProvider` (`local` | `api` | `off`, default `local`, `or_default`).
 - **`ai::endpoint(provider)`** returns where to ask, or why nowhere: `Off`, `ModelMissing` (until #30/#31), `NotSetUp` (until #32). Nothing is sent for an unavailable provider, and `Local` only ever means this computer. `ai::Namer` is a trait (`Endpoint` asks with `ai::ask`; tests use fakes).
@@ -798,5 +859,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#25:** PR #90 is green; squash-merge it (pre-approved by the architect, on green `test` on all three OSes), then sync `main`.
-2. Then **#32** (API setup and keys), then #31, #30 and the M4 audit (D-029 order).
+1. **#32(a):** PR #92 (`ci:bundle`); when `test` (3 OSes) and `bundle` (4 targets) are green on this handoff, squash-merge it (pre-approved), post "(a) shipped in PR #92; (b) is #91" on #32, then sync `main`.
+2. Then **#31** (model manager: first-run model download), then #30, #91 and the M4 audit (D-029 order).

@@ -58,7 +58,8 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #25 | N4 | P0 | naming | **AI naming provider toggle: Local (default) / API / Off** — NamingProvider trait with Local, Api, and Rules implementations, plus the settings UI. Any error, timeout (~10s), or invalid output falls back to Tier 1, and the row is marked "rules". |
 | #30 | N6 | P0 | naming | **Local model runtime: bundled llama.cpp (llama-server) sidecar** — Official per-platform builds (Metal / CUDA or Vulkan / CPU fallback). Started on demand on a localhost port, unloaded after ~2 min idle. |
 | #31 | N7 | P0 | naming | **Model manager: first-run model download** — Consented, resumable, checksum-verified GGUF download into app-data, with progress. Shows size and location; delete or switch model. Tier 1 is used until the model is ready. |
-| #32 | N8 | P1 | naming | **API providers: Anthropic + OpenAI-compatible** — Base URL, model, and key (stored via the keyring crate in the OS credential store), plus a Test connection button. Covers OpenAI, OpenRouter, Ollama, and LM Studio. |
+| #32 | N8 | P1 | naming | **API providers: Anthropic + OpenAI-compatible** — Base URL, model, and key (stored via the keyring crate in the OS credential store), plus a Test connection button. Covers OpenAI, OpenRouter, Ollama, and LM Studio. Split (D-029): **(a)**, #32: the OpenAI-compatible provider, with the key optional and kept in the OS credential store under service `dev.mcclease.queue`, account `api-key`. **(b)**, #91: the native Anthropic Messages API, which gates M4 completion. |
+| #91 | N8 | P1 | naming | **Anthropic Messages API provider** (#32(b)) — `apiKind: anthropic`, `/v1/messages` with a forced `filename` tool, through the same request rules as `ai::ask`. Gates M4 completion. |
 | #33 | N9 | P0 | naming | **Naming prompt, structured output, and eval set** — JSON-schema output, validation, and Tier 1 sanitizing. Eval set of ~50 real titles (podcasts, music, misc) to pick the default local model; target ≥90% accepted unedited and <3s per item. Split (D-029): **(a)**, done in PR #88: prompt, schema, validation, a 54-case author-written seed set and the eval runner. **(b)**, the owner's: 200–300 real, owner-labelled items and the real model runs on the pinned files. (b) gates M4 completion. |
 
 ## M5 – Polish & release
@@ -79,6 +80,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #84 | Q6,Q7 | P2 | queue | **Command-level tests for cancel and quit** — Drive `queue_cancel`, `complete_download` and quit through the commands, especially a finish racing a cancel. M2 audit. |
 | #85 | Q7 | P2 | queue | **Keep row ids within JavaScript's safe integer range** — Cap restored and allocated ids at 2^53 − 1 (or send them as strings). M2 audit (P3). |
 | #86 | NFR | P2 | infra | **Make ffmpeg rebuilds reproducible** — Record the build environment, include it in the CI cache key, and pin it if needed. M2 audit (P3). |
+| #93 | N8 | P2 | naming | **Keyless API on Linux without a Secret Service** — Treat an unreadable credential store as "no key" for a keyless service (Ollama, LM Studio), keeping the status note. #32 follow-up (P3). |
 
 ## Later
 
