@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #25 (in QA)
+**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #25 (PR #90), then #32
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -118,7 +118,8 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **The M3 milestone is closed** on GitHub.
 - If #25 hasn't merged by 05:30, these doc fixes go in a docs-only PR instead (the architect's condition).
 
-## In progress: #25 (N4) AI naming provider: Local (default) / API / Off (branch `naming/25-provider-toggle`, on `main` at 9e29480, uncommitted)
+## In progress: #25 (N4) AI naming provider: Local (default) / API / Off (PR #90, branch `naming/25-provider-toggle`)
+- **PR #90 (draft, no label):** 0a554c3; CI run 39539558222 passed `test` on Linux, Windows and macOS.
 - **Setting:** `namingProvider` (`local` | `api` | `off`, default `local`, `or_default`).
 - **`ai::endpoint(provider)`** returns where to ask, or why nowhere: `Off`, `ModelMissing` (until #30/#31), `NotSetUp` (until #32). Nothing is sent for an unavailable provider, and `Local` only ever means this computer. `ai::Namer` is a trait (`Endpoint` asks with `ai::ask`; tests use fakes).
 - **Queue:**
@@ -797,5 +798,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#25** (worktree branch `naming/25-provider-toggle`, on 9e29480, uncommitted): committed and in a draft PR; on green CI, the squash (pre-approved), then sync `main`.
+1. **#25:** PR #90 is green; squash-merge it (pre-approved by the architect, on green `test` on all three OSes), then sync `main`.
 2. Then **#32** (API setup and keys), then #31, #30 and the M4 audit (D-029 order).
