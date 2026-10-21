@@ -116,7 +116,8 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #15 (N1) proposed file name in each row, edited inline (branch `naming/15-name-in-row`)
+## In progress: #15 (N1) proposed file name in each row, edited inline (PR #87, branch `naming/15-name-in-row`)
+- **PR #87 (draft, no label):** fdcbe1a; CI run 39529223379 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
 - **Backend (`queue.rs`):**
   - `Item.name` and `Item.name_source` (`rules` | `ai` | `edited`), additive in `queue.json` and skipped when None;
   - `Queue::fetched` sets the Tier-1 name under the same lock that makes the row Queued (D-029), using `Queue.template` (private, `{title}` until #17);
@@ -714,6 +715,6 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#15:** the draft PR is open. CI, then the handoff, then the squash (pre-approved).
+1. **#15:** PR #87 is green; squash-merge it (pre-approved), then sync `main`.
 1. **#33(a)** (worktree branch `naming/33-ai-prompt-eval`, uncommitted, on 646552e): built, and its QA gates are next (the architect: don't wait for #17).
 2. Then **#17** (template picker, live preview; recompute Queued names that aren't `edited`), then the M3 audit, then #33(a) (design approved; see D-029).
