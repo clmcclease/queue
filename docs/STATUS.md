@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #31 (PR #94), then #30
+**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #30(a) (built, QA next); #30(b) is the morning's
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -110,7 +110,44 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #31 (N7) local model manager: first-run download (PR #94, branch `naming/31-model-manager`)
+## In progress: #30(a) (N6) bundled llama-server (branch `naming/30-llama-runtime`, on c66c6c0, uncommitted)
+- **Design ruled by the architect under D-028** (D-029's #30 bullets). Full #30 tonight was refused, so it's split:
+  - **(a), tonight:** fetch, verify and bundle the server. Nothing runs it yet: `endpoint(Local)` still gives `RuntimeMissing`.
+  - **(b), the morning:** the lifecycle, to the spec in D-029.
+  - #91 isn't started tonight. The PR gets `ci:bundle`, and it doesn't close #30.
+- **Pins (`scripts/sidecars.json` `llama`):**
+  - official llama.cpp **b11669**: macOS arm64 (Metal), macOS x64, Windows x64 CPU and Ubuntu x64 CPU;
+  - each archive's sha256 is as measured (upstream publishes none), and tonight's fetch reproduced the architect's values for both macOS archives;
+  - `files` maps each name the loader asks for to its archive entry, so only those are installed: 12 files on macOS arm64, 11 on x64, 22 on Linux, 23 on Windows, licenses included.
+- **`scripts/fetch-sidecars.mjs`:**
+  - a minimal tar.gz reader (ustar, symlinks skipped) beside the zip reader;
+  - `installLlama` builds `binaries/llama.part/`, writes `target.txt`, and swaps the folder in whole;
+  - `--check` also runs `llama-server --version` (it must say 11669) and `--list-devices` from that folder, and on Windows and Linux requires ggml's "loaded CPU backend";
+  - `--check-llama <dir>` checks an existing folder.
+- **Bundle (`tauri.conf.json`):**
+  - `bundle.resources` maps `binaries/llama/` → `llama/` (`Contents/Resources/llama/`, `<install>\llama\`, `/usr/lib/queue/llama/`; tauri-build copies it to `target/<profile>/llama/` in dev);
+  - the `.deb` depends on `libssl3`, `libgomp1` and `libstdc++6`.
+- **Rust:** `local::server_in(resources)` with a unit test; `models::GPU`'s doc says it follows the pinned builds.
+- **CI:** the `test` job runs `--check-llama` on `src-tauri/target/debug/llama` on all three OSes; the bundle jobs check through `--check` (macOS x64 under Rosetta).
+- **Tests:**
+  - `sidecar-behavior.test.mjs`'s fixture gains a llama component (a one-entry zip), and its fake `spawnSync` answers llama's checks; the request counts go from 2 to 3;
+  - a new tar.gz test: only the listed files, real files under their loader names, `target.txt`, the exec bit, and a missing entry failing without touching the folder.
+- **Checked by hand on macOS:** `node scripts/fetch-sidecars.mjs --check` (arm64): the sha256 matched, then `check ok: llama-server 11669`. x64 under Rosetta: `--check-llama` ok, and `otool -L` lists exactly the 9 `@rpath` libraries installed, with no Metal. The copy in `target/debug/llama` passes too.
+- **Docs:** THIRD_PARTY_NOTICES gains llama.cpp (MIT) and the LLVM OpenMP runtime (Windows; Apache-2.0 WITH LLVM-exception); README's fetch line; ARCHITECTURE's sidecar section.
+- `actionlint` isn't installed on this Mac, so the workflow edit is checked only by CI.
+- **Checks (macOS arm64, on c66c6c0):** fmt, clippy `-D warnings`, `cargo test` 474 passed, `npm test` 271/271, `git diff --check`.
+- `codex-qa test "#30"` (scoped to (a)): **PASS WITH NOTES**, no bugs (`qa/reports/20261021-023605-test-pyTq.md`, in the #30 worktree). Its tests are added (D-021):
+  - 21 more cases in `sidecar-behavior.test.mjs` (extraction, recovery, timeouts, subprocess failures);
+  - `qa/tests/llama-bundle-30-qa.test.mjs` (2: the release pins and the bundle contract);
+  - `tests/local_n6_30_qa.rs` (2: Unicode and non-UTF-8 resource paths);
+  - `qa/tests/llama_native_30_qa.py`: an opt-in, offline manual check on macOS arm64, standard library only. It re-hashes both cached macOS archives, compares every bundled arm64 file, and loads both architectures from a Unicode, spaced path. Not run by `npm test` or CI.
+- **Checks (macOS arm64, with Codex's tests):** fmt, clippy `-D warnings`, `cargo test` 476 passed, `npm test` 294/294, `python3 -I qa/tests/llama_native_30_qa.py` (arm64 native and x64 under Rosetta: PASS), `git diff --check`.
+- `codex-qa review`, round 1: **PASS WITH NOTES** (`qa/reports/20261021-024527-review-9y02.md`). Both P3s are fixed:
+  - The Windows archive has no llama.cpp `LICENSE`, only LLVM's. A copy is now in the repo (`scripts/licenses/llama.cpp-b11669-LICENSE`, byte-identical to the macOS and Linux archives' copy) and installed on Windows through the manifest's `repoFiles`. Codex's bundle test now requires `LICENSE` on every target and checks its MIT text. Fetching the real Windows archive matched its pin (a third independent download) and gave `LICENSE` plus `LICENSE-LLVM-OpenMP`.
+  - BACKLOG's #30 row now records the (a)/(b) split and the Vulkan follow-up.
+  - Its suggested tests: installer sizes are measured from this PR's `ci:bundle` run and recorded in the handoff. Running the server from inside each final installer is #71's class (native checks per OS).
+
+## Done: #31 (N7) local model manager: first-run download (squash-merged from PR #94 as c66c6c0; 3-OS tests and 4-target bundles green)
 - **Design ruled by the architect under D-028** (D-029's #31 bullets). `Local` stays unavailable until #30: `ModelMissing` without the file, `RuntimeMissing` with it. The PR gets `ci:bundle` (per-OS memory detection).
 - **`models.rs`:**
   - **Pins:** both from bartowski, verified. Qwen3 4B Instruct 2507 Q4_K_M is 2,497,280,736 bytes (the default). Qwen3.5 2B Q4_K_M is 1,396,198,496 bytes: **1.4 GB, not D-016's 1.28 GB** (that was unsloth's file).
@@ -922,5 +959,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#31:** PR #94 (`ci:bundle`); when `test` (3 OSes) and `bundle` (4 targets) are green on this handoff, squash-merge it (pre-approved), then sync `main`.
-2. Then **#30** (llama-server runtime: bundled llama.cpp, start on demand, stop when idle), then #91 and the M4 audit (D-029 order). #30 starts with a design ruling from the architect.
+1. **#30(a)** (worktree branch `naming/30-llama-runtime`, on c66c6c0, uncommitted): `codex-qa test` and `review` PASS WITH NOTES (review P3s fixed). Next: the commit request to the architect; a `ci:bundle` draft PR. If the gates aren't done by about 05:30, push it as a draft and hand off.
+2. **Morning (owner):** #30(b), the llama-server lifecycle (spec in D-029), then the real-model hand tests; then #91 and the M4 audit.

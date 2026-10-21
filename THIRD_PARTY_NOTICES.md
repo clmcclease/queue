@@ -10,6 +10,8 @@ also ship these separate programs, unmodified, as Tauri sidecars that Queue runs
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 2026.08.19 | Source: [Unlicense](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE) (public domain). The official PyInstaller builds we ship include GPLv3+ components, so **the binary as distributed is GPLv3+** | Official release binaries, SHA-256 checked; source: <https://github.com/yt-dlp/yt-dlp/tree/2026.08.19> |
 | [deno](https://github.com/denoland/deno) | v2.9.7 | [MIT](https://github.com/denoland/deno/blob/main/LICENSE.md) | Official release binaries, SHA-256 checked; source: <https://github.com/denoland/deno/tree/v2.9.7> |
 | [FFmpeg](https://ffmpeg.org) (`ffmpeg`, `ffprobe`) | 9.0.2 | [LGPL-2.1-or-later](https://ffmpeg.org/legal.html) | Built by Queue from the official source |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server` and its ggml libraries) | b11669 | [MIT](https://github.com/ggml-org/llama.cpp/blob/b11669/LICENSE), shipped as `llama/LICENSE` | Official release binaries, SHA-256 checked (upstream publishes no checksums; pinned as measured); source: <https://github.com/ggml-org/llama.cpp/tree/b11669> |
+| [LLVM OpenMP runtime](https://openmp.llvm.org) (`libomp.dll`, Windows only, inside llama.cpp's Windows build) | as shipped in llama.cpp b11669 | Apache-2.0 WITH LLVM-exception, shipped as `llama/LICENSE-LLVM-OpenMP` | Part of llama.cpp's official Windows release archive |
 
 ## FFmpeg
 

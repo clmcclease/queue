@@ -99,7 +99,7 @@ jobs:
           pattern: ffmpeg-*
           merge-multiple: true
           path: ffmpeg-out
-      - name: Install sidecars and check yt-dlp sees them
+      - name: Install sidecars, check yt-dlp sees them and llama-server loads
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
@@ -121,6 +121,11 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
+      # llama-server and its libraries as tauri-build copied them beside the dev executable
+      # (#30): they load, and keep their exec bit, on each OS.
+      - name: Check the bundled llama-server copy
+        shell: bash
+        run: node scripts/fetch-sidecars.mjs --target ${{ matrix.target }} --check-llama src-tauri/target/debug/llama
       # The real pinned yt-dlp and ffmpeg against a loopback HTTP server (no external network;
       # the one YouTube test skips itself without QUEUE_QA_NETWORK).
       - name: Real-sidecar loopback tests
@@ -176,7 +181,7 @@ jobs:
           merge-multiple: true
           path: ffmpeg-out
       # Runs each sidecar on its own OS (macOS x64 via Rosetta) to prove yt-dlp finds them.
-      - name: Install sidecars and check yt-dlp sees them
+      - name: Install sidecars, check yt-dlp sees them and llama-server loads
         shell: bash
         run: |
           mkdir -p src-tauri/binaries

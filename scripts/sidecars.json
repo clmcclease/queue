@@ -20,6 +20,112 @@
       "x86_64-unknown-linux-gnu": { "asset": "deno-x86_64-unknown-linux-gnu.zip", "sha256": "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490" }
     }
   },
+  "llama": {
+    "$comment": "llama.cpp's llama-server (#30, D-029): the build v0.7.0 names. Upstream publishes no checksums, so each sha256 is as measured by two independent downloads. `files` maps the name the loader asks for to the archive entry under `prefix`; nothing else is installed. `repoFiles` adds files kept in this repo: the Windows archive has no llama.cpp LICENSE, so ours (byte-identical to the macOS and Linux archives' copy) is installed.",
+    "version": "b11669",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/{version}/{asset}",
+    "assets": {
+      "aarch64-apple-darwin": {
+        "asset": "llama-b11669-bin-macos-arm64.tar.gz",
+        "sha256": "dbed55493d72bc1ba2babc8770d669c2289b5bc4ee9fb2a4dfc158d45b7d13fd",
+        "prefix": "llama-b11669/",
+        "files": {
+          "llama-server": "llama-server",
+          "libllama-server-impl.dylib": "libllama-server-impl.dylib",
+          "libllama-common.0.dylib": "libllama-common.0.7.0.dylib",
+          "libmtmd.0.dylib": "libmtmd.0.7.0.dylib",
+          "libllama.0.dylib": "libllama.0.7.0.dylib",
+          "libggml.0.dylib": "libggml.0.27.0.dylib",
+          "libggml-base.0.dylib": "libggml-base.0.27.0.dylib",
+          "libggml-cpu.0.dylib": "libggml-cpu.0.27.0.dylib",
+          "libggml-blas.0.dylib": "libggml-blas.0.27.0.dylib",
+          "libggml-rpc.0.dylib": "libggml-rpc.0.27.0.dylib",
+          "LICENSE": "LICENSE",
+          "libggml-metal.0.dylib": "libggml-metal.0.27.0.dylib"
+        }
+      },
+      "x86_64-apple-darwin": {
+        "asset": "llama-b11669-bin-macos-x64.tar.gz",
+        "sha256": "cab28238d78158109b48deb27b05d50e0dcef56275d2e76da9ca8281526c7532",
+        "prefix": "llama-b11669/",
+        "files": {
+          "llama-server": "llama-server",
+          "libllama-server-impl.dylib": "libllama-server-impl.dylib",
+          "libllama-common.0.dylib": "libllama-common.0.7.0.dylib",
+          "libmtmd.0.dylib": "libmtmd.0.7.0.dylib",
+          "libllama.0.dylib": "libllama.0.7.0.dylib",
+          "libggml.0.dylib": "libggml.0.27.0.dylib",
+          "libggml-base.0.dylib": "libggml-base.0.27.0.dylib",
+          "libggml-cpu.0.dylib": "libggml-cpu.0.27.0.dylib",
+          "libggml-blas.0.dylib": "libggml-blas.0.27.0.dylib",
+          "libggml-rpc.0.dylib": "libggml-rpc.0.27.0.dylib",
+          "LICENSE": "LICENSE"
+        }
+      },
+      "x86_64-pc-windows-msvc": {
+        "asset": "llama-b11669-bin-win-cpu-x64.zip",
+        "sha256": "37b3efcf962847ca869745fd4ccf7f5e7e8dacfeff9fa3523b4ca8cdc66d632b",
+        "prefix": "",
+        "repoFiles": {
+          "LICENSE": "scripts/licenses/llama.cpp-b11669-LICENSE"
+        },
+        "files": {
+          "llama-server.exe": "llama-server.exe",
+          "llama-server-impl.dll": "llama-server-impl.dll",
+          "llama-common.dll": "llama-common.dll",
+          "llama.dll": "llama.dll",
+          "mtmd.dll": "mtmd.dll",
+          "ggml.dll": "ggml.dll",
+          "ggml-base.dll": "ggml-base.dll",
+          "libomp.dll": "libomp.dll",
+          "ggml-cpu-alderlake.dll": "ggml-cpu-alderlake.dll",
+          "ggml-cpu-cannonlake.dll": "ggml-cpu-cannonlake.dll",
+          "ggml-cpu-cascadelake.dll": "ggml-cpu-cascadelake.dll",
+          "ggml-cpu-cooperlake.dll": "ggml-cpu-cooperlake.dll",
+          "ggml-cpu-haswell.dll": "ggml-cpu-haswell.dll",
+          "ggml-cpu-icelake.dll": "ggml-cpu-icelake.dll",
+          "ggml-cpu-ivybridge.dll": "ggml-cpu-ivybridge.dll",
+          "ggml-cpu-piledriver.dll": "ggml-cpu-piledriver.dll",
+          "ggml-cpu-sandybridge.dll": "ggml-cpu-sandybridge.dll",
+          "ggml-cpu-sapphirerapids.dll": "ggml-cpu-sapphirerapids.dll",
+          "ggml-cpu-skylakex.dll": "ggml-cpu-skylakex.dll",
+          "ggml-cpu-sse42.dll": "ggml-cpu-sse42.dll",
+          "ggml-cpu-x64.dll": "ggml-cpu-x64.dll",
+          "ggml-cpu-zen4.dll": "ggml-cpu-zen4.dll",
+          "LICENSE-LLVM-OpenMP": "LICENSE-LLVM-OpenMP"
+        }
+      },
+      "x86_64-unknown-linux-gnu": {
+        "asset": "llama-b11669-bin-ubuntu-x64.tar.gz",
+        "sha256": "cf07c1c112d709bd67e522017471de57ed0ec8bea031d732c5422351c07f65ac",
+        "prefix": "llama-b11669/",
+        "files": {
+          "llama-server": "llama-server",
+          "libllama-server-impl.so": "libllama-server-impl.so",
+          "libllama-common.so.0": "libllama-common.so.0.7.0",
+          "libmtmd.so.0": "libmtmd.so.0.7.0",
+          "libllama.so.0": "libllama.so.0.7.0",
+          "libggml.so.0": "libggml.so.0.27.0",
+          "libggml-base.so.0": "libggml-base.so.0.27.0",
+          "libggml-cpu-alderlake.so": "libggml-cpu-alderlake.so",
+          "libggml-cpu-cannonlake.so": "libggml-cpu-cannonlake.so",
+          "libggml-cpu-cascadelake.so": "libggml-cpu-cascadelake.so",
+          "libggml-cpu-cooperlake.so": "libggml-cpu-cooperlake.so",
+          "libggml-cpu-haswell.so": "libggml-cpu-haswell.so",
+          "libggml-cpu-icelake.so": "libggml-cpu-icelake.so",
+          "libggml-cpu-ivybridge.so": "libggml-cpu-ivybridge.so",
+          "libggml-cpu-piledriver.so": "libggml-cpu-piledriver.so",
+          "libggml-cpu-sandybridge.so": "libggml-cpu-sandybridge.so",
+          "libggml-cpu-sapphirerapids.so": "libggml-cpu-sapphirerapids.so",
+          "libggml-cpu-skylakex.so": "libggml-cpu-skylakex.so",
+          "libggml-cpu-sse42.so": "libggml-cpu-sse42.so",
+          "libggml-cpu-x64.so": "libggml-cpu-x64.so",
+          "libggml-cpu-zen4.so": "libggml-cpu-zen4.so",
+          "LICENSE": "LICENSE"
+        }
+      }
+    }
+  },
   "ffmpeg": {
     "version": "9.0.2",
     "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",

@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod download;
 pub mod link;
+pub mod local;
 pub mod meta;
 pub mod models;
 pub mod naming;

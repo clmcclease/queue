@@ -598,8 +598,9 @@ pub fn suggested(memory: Option<u64>, gpu: bool) -> Option<ModelId> {
     }
 }
 
-/// Whether llama.cpp gets a GPU backend here: Metal on Apple silicon (D-029 ships CPU/Metal
-/// builds; #30 revisits).
+/// Whether llama.cpp gets a GPU backend here. It follows the pinned builds (#30(a), D-029):
+/// Metal on macOS arm64, CPU on macOS x64, Windows and Linux. So no runtime probe is needed
+/// until a Vulkan build ships (an M5 follow-up).
 pub const GPU: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 /// This computer's total physical memory, if it can be read.
