@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod download;
 pub mod link;
 pub mod meta;

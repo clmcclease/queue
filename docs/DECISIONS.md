@@ -168,4 +168,7 @@ The owner asked for a software architect agent on Fable 5.1 (`.claude/agents/arc
 - #33 is split: prompt, schema, validation and the eval set + runner first; the real model runs on the pinned files remain the owner's and gate M4 completion.
 - llama-server ships CPU/Metal builds (Vulkan only within D-013); no CUDA. Shared libs go in `bundle.resources`.
 - M2/M3 audits: fix RED/P1 tonight; file the rest.
+- HTTP client: `ureq =3.4.2`, `default-features = false`, `rustls` + `json`, blocking on worker threads; one client for naming providers, the local server and the model download.
+- AI names replace `{title}` in the active template; the engine applies the template for every provider. AI output is sanitized, a trailing media extension is stripped, and an answer that drops the title's non-Latin script is rejected.
+- The naming eval set ships as a 54-case author-written seed with a shape test; the 200–300 real, owner-labelled items the #33 note asks for are #33(b)'s deliverable and gate M4 completion. Decided by the architect under D-028.
 - A Codex usage-limit error with a stated reset time is a pause, not a failure: the gate re-runs unchanged after the reset; work continues on branches meanwhile; limit errors don't count toward the two-failure rule. A limit with no reset time, or one more than about 3 h away, is the owner's case for that gate. Decided by the architect under D-028, 2026-10-20.

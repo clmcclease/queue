@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #15 (PR), #33(a) (in QA), then #17
+**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #33(a) (review passed, commit request), #17 (in QA), then the M3 audit
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -116,7 +116,26 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #15 (N1) proposed file name in each row, edited inline (PR #87, branch `naming/15-name-in-row`)
+## In progress: #33(a) (N9) AI naming prompt, schema, validation, eval set and runner (PR #88, branch `naming/33-ai-prompt-eval`)
+- **PR #88 (draft, no label):** f874061; CI run 39531584183 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
+- **Dependency (D-029):** `ureq =3.4.2`, `default-features = false`, `rustls` + `json`. It's blocking, with no OpenSSL. New lock entries are only ureq's own stack (rustls, ring, webpki-roots and friends); no native-tls, tokio or hyper (the latter two were already there via Tauri).
+- **`src-tauri/src/ai.rs`:**
+  - `prompt`: style rules in the system message; the metadata in the user message as one JSON object, labelled as data, never instructions.
+  - `response_format`: a JSON schema for `{filename}`.
+  - `parse`: sanitizes before it rejects. It tolerates fences, strips a media extension (again after sanitizing, in case a removed character hid it), and rejects only NotJson, Empty, TooLong (over 150), Fallback (`Untitled`, any case) and LostScript. LostScript means every script group in the title must keep at least one letter in the answer; Han and kana count as one; other scripts are grouped by Unicode block; Latin, including modifier letters, doesn't count.
+  - `ask` / `ask_within` / `ask_content`: one chokepoint. Only `https://`, or `http://` to this computer; no redirects; **no environment proxy for local endpoints**; a 10 s total budget; a 64 KB cap; `max_tokens` 128; a truncated (`length`) reply is unusable. Error text never contains the key, the URL or the metadata, and error bodies are never read.
+- **Eval:**
+  - `naming-eval/titles.json`: 54 author-written seed cases, Meta-shaped, 37% non-English, with `lang`, `expected` and `accept`, plus a README;
+  - `tests/naming_eval_33.rs`: a shape test, and an ignored runner (`QUEUE_EVAL_ENDPOINT`, `_MODEL`, `_KEY`) that asserts ≥90% accepted and prints D-016's measures: JSON validity, fallback rate, warm p50/p95 and cold latency, and counters for romanized, added extension, dropped episode or feat., prompt injection and style drift. Made-up details are listed for manual review.
+- **#33(b), the owner's:** the 200–300 real, owner-labelled items, and the real model runs on the pinned files (D-016, D-029). A collector that turns a URL list into unlabelled entries is listed for (b), not built.
+- **Tests:** 7 unit tests; `tests/ai_n9_33.rs` (8: a fake loopback server, leak checks, the raw path's rules, and a child-process proxy test that fails without the fix); Codex's `ai_n9_33_qa.rs` (12) and `naming_eval_33_qa.rs` (runner tests; its ≥200 size test was dropped by the architect's ruling).
+- **QA:**
+  - `codex-qa test`: FAIL (`wt33 qa/reports/20261020-204646-test-973R`): fallback case, per-script check, missing scripts, the reporting. All fixed; the corpus-size finding was ruled as (b).
+  - review round 1: FAIL (`…205810-review-JiTF`): P1, the local request went through the environment proxy; P2, scripts outside the table. Both fixed.
+  - review round 2: **PASS WITH NOTES** (`…210240-review-qnCu`). Its P3s (`OʼConnor`, an extension hidden behind a bidi control) and its missing test (a truncated reply) are fixed **after the review**, each with a test (`modifier_letters_are_latin_and_hidden_extensions_are_stripped` and the `finish_reason` case in `n9_bad_answers_are_errors_never_names`). The architect accepted them without another round (D-028).
+- **Checks (macOS arm64, on cd81134):** fmt, clippy `-D warnings`, `cargo test` 398 passed.
+
+## Done: #15 (N1) proposed file name in each row, edited inline (squash-merged from PR #87 as cd81134; Linux/macOS/Windows tests green)
 - **PR #87 (draft, no label):** fdcbe1a; CI run 39529223379 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
 - **Backend (`queue.rs`):**
   - `Item.name` and `Item.name_source` (`rules` | `ai` | `edited`), additive in `queue.json` and skipped when None;
@@ -715,6 +734,6 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#15:** PR #87 is green; squash-merge it (pre-approved), then sync `main`.
-1. **#33(a)** (worktree branch `naming/33-ai-prompt-eval`, uncommitted, on 646552e): built, and its QA gates are next (the architect: don't wait for #17).
-2. Then **#17** (template picker, live preview; recompute Queued names that aren't `edited`), then the M3 audit, then #33(a) (design approved; see D-029).
+1. **#33(a):** PR #88 is green; squash-merge it (pre-approved), then sync `main`. #33 stays open for (b).
+2. **#17** (worktree branch `naming/17-template-picker`, on #15's commit): `codex-qa test "#17"` is running. Bring `main` in after #15's merge, then review.
+3. Then the M3 audit (after #17), then #25.
