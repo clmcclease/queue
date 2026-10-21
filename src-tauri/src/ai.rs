@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::meta::Meta;
 use crate::naming;
+use crate::secrets::Secrets;
+use crate::settings::Settings;
 
 /// The whole budget for one answer: connecting, sending and reading (PRD §6.3).
 pub const TIMEOUT: Duration = Duration::from_secs(10);
@@ -39,6 +41,19 @@ pub struct Message {
     pub role: &'static str,
     pub content: String,
 }
+
+/// Every field [`prompt`] sends, in order. The API setup screen lists them (#32).
+pub const SENT: [&str; 9] = [
+    "title",
+    "channel",
+    "upload_date",
+    "artist",
+    "track",
+    "series",
+    "season_number",
+    "episode_number",
+    "description",
+];
 
 /// The messages for `meta`: the style rules, then the metadata as one JSON object.
 pub fn prompt(meta: &Meta) -> Vec<Message> {
@@ -247,6 +262,15 @@ pub enum Provider {
     Off,
 }
 
+/// The API service's wire format (N8, #32). The native Anthropic Messages API is #32(b).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKind {
+    /// `<base>/chat/completions`: OpenAI, OpenRouter, Ollama, LM Studio.
+    #[default]
+    OpenaiCompatible,
+}
+
 /// Why no AI name is asked for. The row keeps its Tier-1 name with no "rules" tag; for
 /// `ModelMissing` the UI shows a banner (PRD §6.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -255,25 +279,146 @@ pub enum Unavailable {
     Off,
     /// The local model isn't downloaded or running yet (#30, #31).
     ModelMissing,
-    /// No API service is set up yet (#32).
+    /// No API service is set up: no valid base URL or no model (#32). A missing key is fine.
     NotSetUp,
+    /// The OS credential store couldn't be read (#32). It never stops the app.
+    StoreUnreachable,
 }
 
-/// Where `provider` names things, or why nowhere yet. Nothing is sent for an unavailable one;
-/// `Local` never resolves to anything but this computer.
-pub fn endpoint(provider: Provider) -> Result<Endpoint, Unavailable> {
-    match provider {
+/// Where the chosen provider names things, or why nowhere. Nothing is sent for an unavailable
+/// one. `Local` never reads the API settings or the key: it only ever means this computer.
+pub fn endpoint(settings: &Settings, secrets: &dyn Secrets) -> Result<Endpoint, Unavailable> {
+    match settings.naming_provider {
         Provider::Off => Err(Unavailable::Off),
         // #30/#31 return the running local server here (http://127.0.0.1:<port>/v1).
         Provider::Local => Err(Unavailable::ModelMissing),
-        // #32 returns the user's service here, with its key from the OS credential store.
-        Provider::Api => Err(Unavailable::NotSetUp),
+        Provider::Api => api_endpoint(settings, secrets),
+    }
+}
+
+/// The user's API service (#32), whichever provider is chosen (Test connection uses it): its
+/// base URL and model from the settings, and its key, if any, from the credential store.
+pub fn api_endpoint(settings: &Settings, secrets: &dyn Secrets) -> Result<Endpoint, Unavailable> {
+    if !api_set_up(settings) {
+        return Err(Unavailable::NotSetUp);
+    }
+    let key = secrets.get().map_err(|_| Unavailable::StoreUnreachable)?;
+    Ok(Endpoint {
+        base_url: settings.api_base_url.clone(),
+        model: settings.api_model.clone(),
+        key,
+    })
+}
+
+/// Whether the chosen provider could be asked, without reading the key: the cheap check before
+/// a row is queued for naming. [`endpoint`] decides for real, inside the job.
+pub fn askable(settings: &Settings) -> bool {
+    match settings.naming_provider {
+        Provider::Off | Provider::Local => false,
+        Provider::Api => api_set_up(settings),
+    }
+}
+
+fn api_set_up(settings: &Settings) -> bool {
+    base_url(&settings.api_base_url).is_ok() && !settings.api_model.trim().is_empty()
+}
+
+/// A base URL as the user typed it, checked by the same rule as every request (https://, or
+/// http:// to this computer) and saved without a pasted `/chat/completions` or trailing `/`.
+/// A user name, password, query or fragment is refused: a key pasted into the URL would be
+/// saved in settings.json in plain text (#32 review), so it belongs in the key field.
+pub fn base_url(input: &str) -> Result<String, String> {
+    let trimmed = input.trim().trim_end_matches('/');
+    let trimmed = trimmed
+        .strip_suffix("/chat/completions")
+        .unwrap_or(trimmed)
+        .trim_end_matches('/');
+    let url = chat_url(trimmed)?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(
+            "The base URL can't contain a user name, password or ?query. \
+            Put the key in the API key field."
+                .to_owned(),
+        );
+    }
+    Ok(trimmed.to_owned())
+}
+
+/// A [`Namer`] that finds its endpoint only when asked, inside the naming job and after the
+/// row's generation was taken (#32). Resolving can take a while (the credential store), so the
+/// job is checked again just before sending: a provider changed before or during it is never
+/// sent to. A provider that can't be asked means nothing was asked, not a failed ask.
+pub struct Resolving<F>(pub F);
+
+impl<F: Fn() -> Result<Endpoint, Unavailable>> Namer for Resolving<F> {
+    fn name(&self, meta: &Meta) -> Result<String, String> {
+        self.name_if(meta, &|| true)
+            .unwrap_or_else(|| Err("The naming provider can't be asked now.".to_owned()))
+    }
+
+    fn name_if(&self, meta: &Meta, current: &dyn Fn() -> bool) -> Option<Result<String, String>> {
+        let endpoint = (self.0)().ok()?;
+        current().then(|| ask(&endpoint, meta))
+    }
+}
+
+/// What Test connection reports (#32): whether it worked, and a message with no key, URL or
+/// response body in it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Tested {
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Test connection (#32): asks the saved API service to name the preview sample, through the
+/// same [`ask`] as every row, within [`TIMEOUT`].
+pub fn test_connection(settings: &Settings, secrets: &dyn Secrets) -> Tested {
+    let failed = |message: String| Tested { ok: false, message };
+    let endpoint = match api_endpoint(settings, secrets) {
+        Ok(endpoint) => endpoint,
+        Err(Unavailable::StoreUnreachable) => {
+            return failed(crate::secrets::UNREACHABLE.to_owned());
+        }
+        Err(_) => return failed("Save a base URL and a model first.".to_owned()),
+    };
+    match ask(&endpoint, &naming::sample()) {
+        Ok(name) => Tested {
+            ok: true,
+            message: format!("Connected. It would name the sample \u{201c}{name}\u{201d}."),
+        },
+        Err(error) => failed(match hint(&error) {
+            Some(hint) => format!("{error} {hint}"),
+            None => error,
+        }),
+    }
+}
+
+/// A hint for a Test connection failure (#32), from [`ask`]'s message, which has no key, URL or
+/// response body in it.
+pub fn hint(error: &str) -> Option<&'static str> {
+    if error.contains("HTTP 401") || error.contains("HTTP 403") {
+        Some("The service refused the key.")
+    } else if error.contains("HTTP 404") {
+        Some("Nothing answers at that address. Check the base URL and model.")
+    } else {
+        None
     }
 }
 
 /// Something that names an item; [`Endpoint`] asks the AI, and tests use fakes.
 pub trait Namer {
     fn name(&self, meta: &Meta) -> Result<String, String>;
+
+    /// [`Namer::name`] for a naming job (#32): `None` means nothing was asked, so the row keeps
+    /// its name and tag. A namer that has to get ready first sends only while `current()` holds.
+    fn name_if(&self, meta: &Meta, current: &dyn Fn() -> bool) -> Option<Result<String, String>> {
+        let _ = current;
+        Some(self.name(meta))
+    }
 }
 
 impl Namer for Endpoint {
@@ -589,16 +734,60 @@ mod tests {
         );
     }
 
-    /// #25: until #30/#32, no provider resolves to anywhere, so nothing is sent; `Local` can
-    /// only ever mean this computer.
+    fn with(provider: Provider, base: &str, model: &str) -> Settings {
+        Settings {
+            naming_provider: provider,
+            api_base_url: base.into(),
+            api_model: model.into(),
+            ..Default::default()
+        }
+    }
+
+    /// #25/#32: Off and Local (until #30) resolve to nothing; the API only once it has a valid
+    /// base URL and a model. A key is optional; an unreadable store is its own state.
     #[test]
-    fn providers_resolve_to_nothing_until_they_are_set_up() {
-        assert_eq!(endpoint(Provider::Off).err(), Some(Unavailable::Off));
+    fn providers_resolve_only_when_they_are_set_up() {
+        use crate::secrets::Memory;
+        let none = Memory::default();
+        let api = |base: &str, model: &str| with(Provider::Api, base, model);
+        let ready = api("https://api.example.test/v1", "m");
         assert_eq!(
-            endpoint(Provider::Local).err(),
-            Some(Unavailable::ModelMissing)
+            endpoint(&with(Provider::Off, "https://x.test", "m"), &none).err(),
+            Some(Unavailable::Off)
         );
-        assert_eq!(endpoint(Provider::Api).err(), Some(Unavailable::NotSetUp));
+        assert_eq!(
+            endpoint(&with(Provider::Local, "https://x.test", "m"), &none).err(),
+            Some(Unavailable::ModelMissing),
+            "Local never uses the API settings"
+        );
+        for not_set_up in [
+            api("", ""),
+            api("https://x.test", " "),
+            api("http://example.com/v1", "m"),
+        ] {
+            assert_eq!(
+                endpoint(&not_set_up, &none).err(),
+                Some(Unavailable::NotSetUp)
+            );
+            assert!(!askable(&not_set_up));
+        }
+        let keyless = endpoint(&ready, &none).unwrap();
+        assert_eq!(
+            (
+                keyless.base_url.as_str(),
+                keyless.model.as_str(),
+                keyless.key
+            ),
+            ("https://api.example.test/v1", "m", None)
+        );
+        let keyed = endpoint(&ready, &Memory::with("sk-1")).unwrap();
+        assert_eq!(keyed.key.as_deref(), Some("sk-1"));
+        assert_eq!(
+            endpoint(&ready, &Memory::broken()).err(),
+            Some(Unavailable::StoreUnreachable)
+        );
+        assert!(askable(&ready), "decided without reading the key");
+        assert!(!askable(&with(Provider::Local, "https://x.test", "m")));
         assert_eq!(
             Provider::default(),
             Provider::Local,
@@ -608,6 +797,74 @@ mod tests {
             serde_json::to_string(&Unavailable::ModelMissing).unwrap(),
             r#""model_missing""#
         );
+    }
+
+    #[test]
+    fn a_base_url_is_checked_and_saved_without_the_chat_path() {
+        assert_eq!(
+            base_url(" https://api.openai.com/v1/chat/completions/ "),
+            Ok("https://api.openai.com/v1".into())
+        );
+        assert_eq!(
+            base_url("http://localhost:11434/v1/"),
+            Ok("http://localhost:11434/v1".into())
+        );
+        assert_eq!(
+            base_url("http://example.com/v1"),
+            Err("The naming service must use https:// (or http:// on this computer).".into())
+        );
+        assert!(base_url("").is_err());
+        for secret in [
+            "https://user:secret@api.example.test/v1",
+            "https://user@api.example.test/v1",
+            "https://api.example.test/v1?api_key=secret",
+            "https://api.example.test/v1?",
+            "https://api.example.test/v1#secret",
+        ] {
+            let refused = base_url(secret).unwrap_err();
+            assert!(refused.contains("API key field"), "{secret}: {refused}");
+            assert!(!refused.contains("secret"), "the message never echoes it");
+        }
+        let hand_edited = Settings {
+            naming_provider: Provider::Api,
+            api_base_url: "https://user:secret@api.example.test/v1".into(),
+            api_model: "m".into(),
+            ..Default::default()
+        };
+        assert!(
+            !askable(&hand_edited),
+            "a credential-bearing URL is never used"
+        );
+    }
+
+    #[test]
+    fn sent_lists_exactly_what_the_prompt_sends() {
+        let data: serde_json::Value =
+            serde_json::from_str(&prompt(&Meta::default())[1].content).unwrap();
+        let mut keys: Vec<&str> = data
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut sent = SENT.to_vec();
+        keys.sort_unstable();
+        sent.sort_unstable();
+        assert_eq!(keys, sent);
+    }
+
+    #[test]
+    fn test_connection_hints_never_echo_anything() {
+        assert_eq!(
+            hint("The naming service answered with HTTP 401."),
+            Some("The service refused the key.")
+        );
+        assert_eq!(
+            hint("The naming service answered with HTTP 403."),
+            Some("The service refused the key.")
+        );
+        assert!(hint("The naming service answered with HTTP 404.").is_some());
+        assert_eq!(hint("Couldn't reach the naming service."), None);
     }
 
     #[test]

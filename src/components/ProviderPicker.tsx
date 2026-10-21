@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import ApiSetup from "./ApiSetup";
 import { PROVIDERS, namingProvider, setNamingProvider, type NamingStatus, type Provider } from "../settings";
 
 /**
  * Who suggests names (N4, #25): Local (default), API or Off, saved by the backend as it
- * changes. `status` is the main window's (so a saved API choice still says it isn't set up when
+ * changes; choosing API opens its setup (#32) below it. `status` is the main window's (so a saved API choice still says it isn't set up when
  * Settings reopens); `onStatus` gets the new one after a save, so the banner and this note follow.
  */
 export default function ProviderPicker({
@@ -66,9 +67,15 @@ export default function ProviderPicker({
                 Not set up yet. Names come from the rules until it is.
               </span>
             )}
+            {provider === "api" && p.value === "api" && status?.unavailable === "store_unreachable" && (
+              <span data-role="provider-note" className="block text-xs text-amber-700 dark:text-amber-400">
+                Couldn't reach your system's credential store. Names come from the rules for now.
+              </span>
+            )}
           </span>
         </label>
       ))}
+      {provider === "api" && <ApiSetup onStatus={onStatus} />}
       {error && (
         <p role="alert" data-role="provider-error" className="text-xs text-red-600 dark:text-red-400">
           {error}

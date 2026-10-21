@@ -117,11 +117,13 @@ test("N4: choosing API says what's sent and that it isn't set up yet", async () 
     if (command === "queue_list") return [];
     if (command === "naming_status") return LOCAL_MISSING;
     if (command === "settings_naming_provider") return "local";
+    if (command === "settings_api") // #32
+      return { kind: "openai_compatible", baseUrl: "", model: "", keySet: false, storeError: null };
     return { provider: args.provider, unavailable: "not_set_up" };
   });
   await openSettings();
   const group = container.querySelector('[data-role="provider"]');
-  assert.match(group.textContent, /title, channel and description are sent/);
+  assert.match(group.textContent, /title, channel, description and the other details listed below are sent/);
   await act(async () => radios()[1].click());
   assert.equal(radios()[1].checked, true, "the radio isn't disabled");
   assert.match(container.querySelector('[data-role="provider-note"]').textContent, /Not set up yet/);

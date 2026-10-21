@@ -28,14 +28,19 @@ pub const MAX_BYTES: usize = 200;
 /// The name when nothing usable is left.
 pub const UNTITLED: &str = "Untitled";
 
-/// Every template with its name for a fixed sample item, for the live preview (N3, #17).
-pub fn previews() -> Vec<(Template, String)> {
-    let sample = Meta {
+/// The fixed sample item for the live preview (N3, #17) and Test connection (#32).
+pub fn sample() -> Meta {
+    Meta {
         title: Some("Me at the zoo [HD]".into()),
         channel: Some("jawed".into()),
         upload_date: Some("20050423".into()),
         ..Default::default()
-    };
+    }
+}
+
+/// Every template with its name for the [`sample`] item, for the live preview (N3, #17).
+pub fn previews() -> Vec<(Template, String)> {
+    let sample = sample();
     [Template::Title, Template::ChannelTitle, Template::DateTitle]
         .into_iter()
         .map(|t| (t, name(&sample, t)))

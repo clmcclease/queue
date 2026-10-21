@@ -6,6 +6,7 @@ pub mod naming;
 pub mod proc;
 pub mod queue;
 pub mod reveal;
+pub mod secrets;
 pub mod settings;
 pub mod sidecar;
 
@@ -61,45 +62,106 @@ fn fetch_worker(app: AppHandle, jobs: Receiver<(u64, String)>) {
     }
 }
 
-/// Rows waiting for an AI name (#25). One worker asks for them in order.
-struct Naming(Mutex<Sender<u64>>);
+/// Rows waiting for an AI name (#25), each with the naming generation it was queued under. One
+/// worker asks for them in order.
+struct Naming(Mutex<Sender<(u64, u64)>>);
+
+/// Where the API key is kept (#32): the OS credential store.
+struct Vault(Box<dyn secrets::Secrets>);
 
 /// Hands a row to the naming worker, if the chosen provider can be asked. Nothing is sent for
-/// an unavailable one (D-029): the row keeps its Tier-1 name with no tag.
+/// an unavailable one (D-029): the row keeps its Tier-1 name with no tag. This check doesn't
+/// read the key; the job resolves the endpoint itself. The job carries the current generation,
+/// so one queued before a later provider or API change is dropped, not asked twice (#32 review).
 fn ask_for_name(app: &AppHandle, id: u64) {
-    let usable = current_settings(app).is_ok_and(|s| ai::endpoint(s.naming_provider).is_ok());
-    if usable && let Ok(jobs) = app.state::<Naming>().0.lock() {
-        let _ = jobs.send(id);
+    if !current_settings(app).is_ok_and(|s| ai::askable(&s)) {
+        return;
+    }
+    let generation = lock(&app.state::<Mutex<Queue>>())
+        .ok()
+        .and_then(|q| q.naming_job(id))
+        .map(|(_, g)| g);
+    if let Some(generation) = generation
+        && let Ok(jobs) = app.state::<Naming>().0.lock()
+    {
+        let _ = jobs.send((id, generation));
     }
 }
 
 /// Asks for AI names one row at a time. It doesn't hold a quit up (#67): an answer lost at quit
-/// just leaves the Tier-1 name. The provider is read for each row, so a change applies at once.
-fn naming_worker(app: AppHandle, jobs: Receiver<u64>) {
-    for id in jobs {
+/// just leaves the Tier-1 name. The provider is resolved inside each job, after the row's
+/// generation is taken (#32), so a provider changed meanwhile is never sent to.
+fn naming_worker(app: AppHandle, jobs: Receiver<(u64, u64)>) {
+    let mut claims = NamingClaims::default();
+    for (id, generation) in jobs {
         if proc::stopping() {
             return;
         }
-        let Ok(settings) = current_settings(&app) else {
+        if !claims.claim(id, generation) {
             continue;
-        };
-        let Ok(endpoint) = ai::endpoint(settings.naming_provider) else {
-            continue;
-        };
+        }
+        let resolve = ai::Resolving(|| {
+            let settings = current_settings(&app).map_err(|_| ai::Unavailable::Off)?;
+            ai::endpoint(&settings, app.state::<Vault>().0.as_ref())
+        });
         let state = app.state::<Mutex<Queue>>();
-        if let Some(item) = run_naming_job(&state, id, &endpoint) {
+        if let Some(item) = run_naming_job_at(&state, id, Some(generation), &resolve) {
             let _ = app.emit(ITEM_EVENT, item);
         }
     }
 }
 
+/// Which rows the naming worker already took for the newest generation (#32 review). A row can
+/// be queued twice for one generation (a fetch finishing as the API setup changes); only the
+/// first job is asked. Older generations are dropped by [`run_naming_job_at`] anyway.
+#[derive(Default)]
+pub struct NamingClaims {
+    generation: u64,
+    ids: std::collections::HashSet<u64>,
+}
+
+impl NamingClaims {
+    /// Whether this job is the first for `id` at `generation`.
+    pub fn claim(&mut self, id: u64, generation: u64) -> bool {
+        if generation > self.generation {
+            self.generation = generation;
+            self.ids.clear();
+        }
+        generation < self.generation || self.ids.insert(id)
+    }
+}
+
 /// One naming job (#25): takes what it needs under the queue lock, asks `namer` with the lock
-/// released (it can take seconds), then records the answer, which [`Queue::ai_named`] drops if
-/// the row or the provider changed meanwhile. A panicking namer fails just this row.
+/// released (it can take seconds; an [`ai::Resolving`] namer finds its endpoint only then, and
+/// sends only if the job is still current), then records the answer, which [`Queue::ai_named`]
+/// drops if the row or the provider changed meanwhile. A panicking namer fails just this row.
 pub fn run_naming_job(queue: &Mutex<Queue>, id: u64, namer: &dyn ai::Namer) -> Option<Item> {
+    run_naming_job_at(queue, id, None, namer)
+}
+
+/// [`run_naming_job`] for a job queued under `queued_at`: if the generation has moved on since,
+/// a newer job for the row is already queued, so this one does nothing (no second request).
+pub fn run_naming_job_at(
+    queue: &Mutex<Queue>,
+    id: u64,
+    queued_at: Option<u64>,
+    namer: &dyn ai::Namer,
+) -> Option<Item> {
     let (meta, generation) = lock(queue).ok()?.naming_job(id)?;
-    let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| namer.name(&meta)))
-        .unwrap_or_else(|_| Err("Naming failed unexpectedly.".into()));
+    if queued_at.is_some_and(|g| g != generation) {
+        return None;
+    }
+    // Still this row's job: Queued, not edited, and no provider change since the snapshot.
+    let current = || {
+        lock(queue)
+            .ok()
+            .and_then(|q| q.naming_job(id))
+            .is_some_and(|(_, g)| g == generation)
+    };
+    let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        namer.name_if(&meta, &current)
+    }))
+    .unwrap_or_else(|_| Some(Err("Naming failed unexpectedly.".into())))?;
     lock(queue).ok()?.ai_named(id, generation, answer)
 }
 
@@ -251,6 +313,17 @@ fn current_settings(app: &AppHandle) -> Result<settings::Settings, String> {
         .map_err(|_| "settings lock poisoned".to_string())
 }
 
+/// Runs a command's `work` on a blocking thread (#32 review): anything that can wait on the OS
+/// credential store (an unlock prompt, a stalled Secret Service) must never freeze the window.
+async fn off_main<T: Send + 'static>(
+    app: AppHandle,
+    work: impl FnOnce(&AppHandle) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || work(&app))
+        .await
+        .map_err(|_| "That stopped unexpectedly.".to_string())?
+}
+
 /// The AI naming provider (N4, #25).
 #[tauri::command]
 fn settings_naming_provider(app: AppHandle) -> Result<ai::Provider, String> {
@@ -260,10 +333,14 @@ fn settings_naming_provider(app: AppHandle) -> Result<ai::Provider, String> {
 /// Saves the AI naming provider (#25). Answers already on their way are dropped, and if the new
 /// provider can be asked, every Queued row not renamed by hand is asked again.
 #[tauri::command]
-fn settings_set_naming_provider(
+async fn settings_set_naming_provider(
     app: AppHandle,
     provider: ai::Provider,
 ) -> Result<NamingStatus, String> {
+    off_main(app, move |app| set_naming_provider(app, provider)).await
+}
+
+fn set_naming_provider(app: &AppHandle, provider: ai::Provider) -> Result<NamingStatus, String> {
     {
         let state = app.state::<Settings>();
         let mut current = state
@@ -280,9 +357,9 @@ fn settings_set_naming_provider(
     }
     let again = lock(&app.state::<Mutex<Queue>>())?.renaming();
     for id in again {
-        ask_for_name(&app, id);
+        ask_for_name(app, id);
     }
-    naming_status(app)
+    status_of_naming(app)
 }
 
 /// The chosen provider and why it can't be asked yet, if it can't (the banner, PRD §6.3).
@@ -293,12 +370,136 @@ struct NamingStatus {
 }
 
 #[tauri::command]
-fn naming_status(app: AppHandle) -> Result<NamingStatus, String> {
-    let provider = current_settings(&app)?.naming_provider;
+async fn naming_status(app: AppHandle) -> Result<NamingStatus, String> {
+    off_main(app, status_of_naming).await
+}
+
+fn status_of_naming(app: &AppHandle) -> Result<NamingStatus, String> {
+    let settings = current_settings(app)?;
     Ok(NamingStatus {
-        provider,
-        unavailable: ai::endpoint(provider).err(),
+        provider: settings.naming_provider,
+        unavailable: ai::endpoint(&settings, app.state::<Vault>().0.as_ref()).err(),
     })
+}
+
+/// The API service's setup (N8, #32), as the Settings screen shows it. The key itself is never
+/// sent to the window: only whether one is saved.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiSetup {
+    kind: ai::ApiKind,
+    base_url: String,
+    model: String,
+    key_set: bool,
+    /// Why the credential store couldn't be read, if it couldn't.
+    store_error: Option<String>,
+}
+
+fn api_setup(app: &AppHandle) -> Result<ApiSetup, String> {
+    let settings = current_settings(app)?;
+    let key = app.state::<Vault>().0.get();
+    Ok(ApiSetup {
+        kind: settings.api_kind,
+        base_url: settings.api_base_url,
+        model: settings.api_model,
+        key_set: matches!(key, Ok(Some(_))),
+        store_error: key.err(),
+    })
+}
+
+/// The API service changed (#32): if it's the chosen provider, answers on their way are dropped
+/// and every Queued row not renamed by hand is asked again, as for a provider change.
+fn api_changed(app: &AppHandle) -> Result<(), String> {
+    if current_settings(app)?.naming_provider != ai::Provider::Api {
+        return Ok(());
+    }
+    let again = lock(&app.state::<Mutex<Queue>>())?.renaming();
+    for id in again {
+        ask_for_name(app, id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn settings_api(app: AppHandle) -> Result<ApiSetup, String> {
+    off_main(app, api_setup).await
+}
+
+/// Saves the API service's base URL and model (#32). The URL must be https://, or http:// to
+/// this computer, the same rule every request follows.
+#[tauri::command]
+async fn settings_set_api(
+    app: AppHandle,
+    base_url: String,
+    model: String,
+) -> Result<ApiSetup, String> {
+    let base_url = ai::base_url(&base_url)?;
+    let model = model.trim().to_owned();
+    if model.is_empty() {
+        return Err("Enter the model's name.".into());
+    }
+    off_main(app, move |app| set_api(app, base_url, model)).await
+}
+
+fn set_api(app: &AppHandle, base_url: String, model: String) -> Result<ApiSetup, String> {
+    {
+        let state = app.state::<Settings>();
+        let mut current = state
+            .current
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        let mut next = current.clone();
+        next.api_base_url = base_url;
+        next.api_model = model;
+        if let Some(file) = &state.file {
+            next.save(file)
+                .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+        }
+        *current = next;
+    }
+    api_changed(app)?;
+    api_setup(app)
+}
+
+/// Saves the API key in the OS credential store (#32). It's never written to a file, and never
+/// sent back to the window.
+#[tauri::command]
+async fn api_key_set(app: AppHandle, key: String) -> Result<ApiSetup, String> {
+    let key = key.trim().to_owned();
+    if key.is_empty() {
+        return Err("Paste the key first.".into());
+    }
+    off_main(app, move |app| {
+        app.state::<Vault>().0.set(&key)?;
+        api_changed(app)?;
+        api_setup(app)
+    })
+    .await
+}
+
+/// Removes the API key from the credential store (#32). A missing key isn't an error.
+#[tauri::command]
+async fn api_key_remove(app: AppHandle) -> Result<ApiSetup, String> {
+    off_main(app, |app| {
+        app.state::<Vault>().0.remove()?;
+        api_changed(app)?;
+        api_setup(app)
+    })
+    .await
+}
+
+/// Test connection (#32): names the preview sample with the saved service, off the main thread.
+#[tauri::command]
+async fn api_test_connection(app: AppHandle) -> Result<ai::Tested, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = current_settings(&app)?;
+        Ok(ai::test_connection(
+            &settings,
+            app.state::<Vault>().0.as_ref(),
+        ))
+    })
+    .await
+    .map_err(|_| "The test stopped unexpectedly.".to_string())?
 }
 
 /// The download format (D2, #11).
@@ -946,6 +1147,7 @@ pub fn run() {
             // Managed before the fetch worker starts, since a finished fetch asks for a name.
             let (names, named) = mpsc::channel();
             app.manage(Naming(Mutex::new(names)));
+            app.manage(Vault(Box::new(secrets::Keyring::new())));
             let (jobs, queued) = mpsc::channel();
             for job in refetch {
                 let _ = jobs.send(job);
@@ -991,6 +1193,11 @@ pub fn run() {
             settings_naming_provider,
             settings_set_naming_provider,
             naming_status,
+            settings_api,
+            settings_set_api,
+            api_key_set,
+            api_key_remove,
+            api_test_connection,
             open_download_folder,
             reveal_download
         ])
