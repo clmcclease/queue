@@ -45,12 +45,16 @@ fn unknown_totals_still_report_speed_and_eta_without_inventing_percent() {
 fn unusable_byte_counts_fall_back_to_fragments_and_clamp() {
     for (fragment, expected) in [(0, 0.0), (3, 25.0), (24, 100.0)] {
         let json = format!(
-            r#"{{"downloaded":-1,"total":-10,"total_estimate":1e308,"fragment":{fragment},"fragments":12}}"#
+            r#"{{"status":"downloading","downloaded":-1,"total":-10,"total_estimate":1e308,"fragment":{fragment},"fragments":12}}"#
         );
         assert_eq!(progress(&json, &mut 0).percent, Some(expected));
     }
     assert_eq!(
-        progress(r#"{"fragment":3,"fragments":0}"#, &mut 0).percent,
+        progress(
+            r#"{"status":"downloading","fragment":3,"fragments":0}"#,
+            &mut 0
+        )
+        .percent,
         None
     );
 }
@@ -98,7 +102,7 @@ fn malformed_lines_do_not_advance_streams_and_a_later_valid_line_recovers() {
 #[test]
 fn negative_and_out_of_range_numbers_are_removed_before_serializing() {
     let p = progress(
-        r#"{"downloaded":1e308,"total":18446744073709551616,"speed":-1,"eta":-1}"#,
+        r#"{"status":"downloading","downloaded":1e308,"total":18446744073709551616,"speed":-1,"eta":-1}"#,
         &mut 0,
     );
     assert_eq!(

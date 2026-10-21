@@ -87,6 +87,9 @@ fn count(v: Option<f64>) -> Option<u64> {
 pub fn parse_line(line: &str, finished: &mut u32) -> Option<Event> {
     if let Some(json) = line.strip_prefix(PROGRESS_PREFIX) {
         let raw: RawProgress = serde_json::from_str(json.trim()).ok()?;
+        // Real lines always have a status; a bare `{}` could come from an untrusted title that
+        // yt-dlp quoted on stdout (#77 review).
+        raw.status.as_ref()?;
         let part = *finished + 1;
         if raw.status.as_deref() == Some("finished") {
             *finished += 1;
@@ -114,7 +117,10 @@ pub fn parse_line(line: &str, finished: &mut u32) -> Option<Event> {
     if let Some(json) = line.strip_prefix(POST_PREFIX) {
         let raw: RawPost = serde_json::from_str(json.trim()).ok()?;
         let name = raw.postprocessor?;
-        return (raw.status.as_deref() == Some("started") && name != "MoveFiles")
+        // Not reported: the final MoveFiles step, and MetadataParser, which is Queue's own
+        // `--replace-in-metadata` running before the download (#77).
+        let shown = !matches!(name.as_str(), "MoveFiles" | "MetadataParser");
+        return (raw.status.as_deref() == Some("started") && shown)
             .then_some(Event::Processing(name));
     }
     None
@@ -537,7 +543,16 @@ pub fn args_for_format(
         ]
         .map(OsString::from),
     );
-    args.extend(["-o", "%(title)s.%(ext)s"].map(OsString::from));
+    // #77: `--trim-filenames` counts characters, so a long CJK title made a ~600-byte name (over
+    // Linux's 255). The title is cut to 200 bytes instead (`.200B`, at a character boundary), after
+    // its Windows-illegal characters are swapped for the forms `--windows-filenames` would give
+    // them, so nothing grows after the cut. Names that already fit are unchanged.
+    // Transitional: drop `--replace-in-metadata` when #15 passes the naming engine's stem to
+    // `-o`. It changes the `title` field itself, so it would leak into `--embed-metadata` (#23).
+    for (from, to) in FULLWIDTH {
+        args.extend(["--replace-in-metadata", "title", from, to].map(OsString::from));
+    }
+    args.extend(["-o", "%(title).200B.%(ext)s"].map(OsString::from));
     match source {
         Source::Url(url) => {
             args.push("--".into());
@@ -594,6 +609,23 @@ fn readable(line: &str) -> &str {
 /// Where yt-dlp records the finished file's path, relative to the work dir (`-P`). A plain name,
 /// so it means nothing as an output template.
 pub const REPORT: &str = "queue-result.txt";
+
+/// The characters `--windows-filenames` replaces in a title (as `--replace-in-metadata` regexes)
+/// and what it replaces them with (#77). Like yt-dlp, a colon between digits (a timestamp,
+/// `01:02:03`) becomes `_` before the other colons. `"` goes first: yt-dlp prints each changed
+/// title on stdout, and with no ASCII quote left a title can't fake a JSON event line there.
+const FULLWIDTH: [(&str, &str); 10] = [
+    ("\"", "＂"),
+    ("(?<=[0-9]):(?=[0-9])", "_"),
+    (r"\*", "＊"),
+    (":", "："),
+    ("<", "＜"),
+    (">", "＞"),
+    (r"\?", "？"),
+    (r"\|", "｜"),
+    ("/", "⧸"),
+    (r"\\", "⧹"),
+];
 
 /// Where yt-dlp records the chosen `vcodec|acodec` (#11), next to [`REPORT`].
 pub const CODECS: &str = "queue-codecs.txt";
@@ -1927,7 +1959,29 @@ mod tests {
         let a = args(Path::new("bin"), Path::new("work dir"), "https://e.test/v");
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap();
         assert_eq!(a[at("-P") + 1], OsString::from("work dir"));
-        assert_eq!(a[at("-o") + 1], "%(title)s.%(ext)s");
+        assert_eq!(a[at("-o") + 1], "%(title).200B.%(ext)s");
+        // #77: each Windows-illegal character is pre-replaced in the title, before the cut.
+        let replaced: Vec<_> = a
+            .windows(4)
+            .filter(|w| w[0] == "--replace-in-metadata" && w[1] == "title")
+            .map(|w| (w[2].to_str().unwrap(), w[3].to_str().unwrap()))
+            .collect();
+        assert_eq!(
+            replaced,
+            [
+                ("\"", "＂"),
+                ("(?<=[0-9]):(?=[0-9])", "_"),
+                (r"\*", "＊"),
+                (":", "："),
+                ("<", "＜"),
+                (">", "＞"),
+                (r"\?", "？"),
+                (r"\|", "｜"),
+                ("/", "⧸"),
+                (r"\\", "⧹"),
+            ]
+        );
+        assert!(a.iter().position(|x| x == "--replace-in-metadata") < Some(at("-o")));
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap();
         assert_eq!(
             a[at("--print-to-file") + 1..at("--print-to-file") + 3],
@@ -1952,6 +2006,18 @@ mod tests {
             !a.iter().any(|x| x == "-f" || x == "--format"),
             "D-007: yt-dlp picks the format"
         );
+    }
+
+    /// #77: the pre-replacements match what `--windows-filenames` gives the pinned yt-dlp, so a
+    /// title's name is the same as before. Expected text recorded from yt-dlp 2026.08.19.
+    #[test]
+    fn fullwidth_replacements_match_windows_filenames() {
+        let mut name = String::from(r#"AC/DC: "Back" <in> Black? | a*b \ c"#);
+        // The timestamp rule is a lookaround regex; the real-sidecar test (#77) covers it.
+        for (from, to) in FULLWIDTH.into_iter().filter(|(_, to)| *to != "_") {
+            name = name.replace(from.strip_prefix('\\').unwrap_or(from), to);
+        }
+        assert_eq!(name, "AC⧸DC： ＂Back＂ ＜in＞ Black？ ｜ a＊b ⧹ c");
     }
 
     #[test]
@@ -2047,7 +2113,7 @@ mod tests {
             }))
         );
         let over = parse_line(
-            &format!(r#"{PROGRESS_PREFIX}{{"downloaded":300,"total":200}}"#),
+            &format!(r#"{PROGRESS_PREFIX}{{"status":"downloading","downloaded":300,"total":200}}"#),
             &mut finished,
         );
         assert!(
@@ -2057,6 +2123,8 @@ mod tests {
         for junk in [
             "[download] 10%",
             "QUEUE-PROGRESS not json",
+            "QUEUE-PROGRESS {}", // #77: no status, so not a real line
+            "QUEUE-PROGRESS {\"downloaded\":5}",
             "QUEUE-PROGRESS {\"downloaded\":",
             "",
         ] {
@@ -2088,6 +2156,14 @@ mod tests {
                 &mut f
             ),
             None
+        );
+        assert_eq!(
+            parse_line(
+                &post(r#"{"status":"started","postprocessor":"MetadataParser"}"#),
+                &mut f
+            ),
+            None,
+            "#77: Queue's own title rules aren't processing"
         );
         assert_eq!(
             parse_line(

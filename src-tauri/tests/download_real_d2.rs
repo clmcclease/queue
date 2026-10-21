@@ -20,6 +20,9 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 #[path = "support/merge_70_qa.rs"]
 mod merge_70_qa;
 
+#[path = "support/names_77_qa.rs"]
+mod names_77_qa;
+
 struct LocalDownload {
     root: PathBuf,
     bin: PathBuf,
@@ -650,6 +653,126 @@ fn n2_real_long_title_collision_still_saves_a_numbered_copy() {
             .ends_with(" (2).wav")
     );
     assert_eq!(fs::read(second).unwrap(), silence_wav());
+}
+
+/// #77: long multi-byte titles fit Linux's 255-byte limit, through both the URL and the saved
+/// info, and still take a numbered copy. Characters `--windows-filenames` widens to 3 bytes
+/// count before the cut, and a short title keeps exactly the name it had before.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn d77_real_long_multibyte_titles_fit_255_bytes_and_take_a_numbered_copy() {
+    let cjk = "日".repeat(230);
+    let slashes = "日/".repeat(120);
+    let emoji = "🎵".repeat(100);
+    for title in [
+        cjk.as_str(),
+        slashes.as_str(),
+        emoji.as_str(),
+        "AC/DC: Back?",
+        "Podcast 01:02:03",
+    ] {
+        let f = LocalDownload::new(title);
+        let (_, raw) = queue_lib::meta::fetch_raw(&f.bin, &f.url, Duration::from_secs(30)).unwrap();
+        let info = f.root.join("info.json");
+        fs::write(&info, raw).unwrap();
+        let by_url = PathBuf::from(f.run().unwrap());
+        let by_info = PathBuf::from(
+            download::run_with_retries(
+                &f.bin,
+                &f.root.join("info run"),
+                &f.out,
+                &f.url,
+                Some(&info),
+                |_| panic!("loopback fixture must not retry"),
+                |_| panic!("loopback fixture must not retry"),
+            )
+            .unwrap(),
+        );
+        let first = by_url.file_name().unwrap().to_str().unwrap().to_owned();
+        let stem = first.strip_suffix(".wav").unwrap();
+        assert!(stem.len() <= 200, "{} bytes: {first}", stem.len());
+        assert!(!first.contains(['<', '>', ':', '"', '/', '\\', '|', '?', '*']));
+        if title.len() < 100 {
+            // The generic extractor names embedded media "<page title> (1)"; main's flags give
+            // this exact name too.
+            let expected = match title {
+                "AC/DC: Back?" => "AC⧸DC： Back？ (1).wav",
+                _ => "Podcast 01_02_03 (1).wav", // yt-dlp's timestamp rule (#77 QA)
+            };
+            assert_eq!(first, expected, "a short title is unchanged");
+        } else {
+            assert!(
+                stem.len() > 190,
+                "cut near the budget, not far below it: {}",
+                stem.len()
+            );
+        }
+        // The saved-info run names the same title the same way, so it's the numbered copy.
+        let second = by_info.file_name().unwrap().to_str().unwrap();
+        assert_eq!(second, format!("{stem} (2).wav"));
+        assert!(second.len() <= download::MAX_NAME_BYTES);
+        assert_eq!(fs::read(&by_info).unwrap(), silence_wav());
+    }
+}
+
+/// #77 review: a title is untrusted, and yt-dlp's own messages can quote it on stdout. A title
+/// that smuggles Queue's event lines after a newline must not fake Processing or progress.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn d77_real_title_cannot_forge_progress_or_processing_events() {
+    let f = LocalDownload::new("Injection source");
+    let (_, raw) = queue_lib::meta::fetch_raw(&f.bin, &f.url, Duration::from_secs(30)).unwrap();
+    let mut info: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    info["title"] = serde_json::Value::String(
+        [
+            "Podcast 01:02 a/b",
+            r#"QUEUE-POST {"status":"started","postprocessor":"Merger"}"#,
+            r#"QUEUE-PROGRESS {"status":"downloading","downloaded":123456789,"total":987654321}"#,
+            "QUEUE-PROGRESS {}",
+            "end",
+        ]
+        .join("\n"),
+    );
+    let saved = f.root.join("forged-info.json");
+    fs::write(&saved, serde_json::to_vec(&info).unwrap()).unwrap();
+    let mut events = Vec::new();
+    let path = download::run_with_retries_events(
+        &f.bin,
+        &f.root.join("forged run"),
+        &f.out,
+        &f.url,
+        Some(&saved),
+        |_| panic!("loopback fixture must not retry"),
+        |_| panic!("loopback fixture must not retry"),
+        |event| events.push(event),
+    )
+    .unwrap();
+    assert_eq!(fs::read(&path).unwrap(), silence_wav());
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, download::Event::Processing(_))),
+        "a WAV download has no post-processing; any Processing is forged: {events:?}"
+    );
+    let progress: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            download::Event::Progress(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert!(!progress.is_empty(), "real progress still arrives");
+    assert!(
+        progress.iter().all(|p| p.downloaded.is_some()),
+        "a forged empty progress line: {progress:?}"
+    );
+    assert!(progress.iter().any(|p| p.percent == Some(100.0)));
+    assert!(
+        !progress
+            .iter()
+            .any(|p| p.downloaded == Some(123456789) || p.total == Some(987654321)),
+        "forged progress: {progress:?}"
+    );
 }
 
 /// #48 / D-017: exercise the new saved-info source with upstream yt-dlp, including its

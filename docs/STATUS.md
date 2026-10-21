@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #74 (PR #80 green, awaiting squash), then #77
+**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #77 (PR #81 green, awaiting squash), then #14 (in review)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -8,6 +8,10 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Goal (owner):** complete M4. Stop at a good point after 06:00, by 06:30 on 2026-10-21, and wait for the owner.
 - **Approvals:** the `architect` agent (Fable 5.1) gives them under D-028. Its rulings are recorded per item below.
 - **Order (architect):** #74 → #77 → M2 audit → #14 → #15 → #17 → M3 audit → #33(a) → #25 → #32 → #31 → #30 → M4 audit. Scope is in D-029. The architect expects full M4 isn't reachable tonight; every merge must still be complete and safe.
+- **Codex usage limits (D-029):** a limit with a reset time pauses the gate; it re-runs unchanged after the reset.
+  - 19:23–19:25: hit on #77 review round 2 (`qa/reports/20261020-192233-review-trty.log`, `…192429-review-E9Vh.log`) and on #14's review (in the #14 worktree: `20261020-192325-review-Ut9s.log`, `…192448-review-g8Yx.log`). Reset at 19:42. Meanwhile: #77 brought up to `main` and rechecked; STATUS and D-029 updated.
+  - ~19:35: the owner upgraded the Codex plan. Gates resumed with unchanged settings (GPT-6.1-Sol, high effort, from `scripts/codex-qa`).
+  - **For the owner:** on #14's retry, `scripts/codex-qa` exited 0 although Codex hit the limit and wrote an empty report. Worth a fix: treat an empty report as a failure.
 - **Time rules (architect):** no new item after 04:30 unless it's small; stop coding at 05:30; the STATUS handoff with a "For the owner" list is done by 06:00–06:30.
 
 ## Handoff to another computer (2026-10-20)
@@ -103,7 +107,35 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
 
-## In progress: #74 (Q6, D-027) cancel a download in progress (branch `queue/74-cancel-download`)
+## In progress: #77 (D2) long non-ASCII titles over Linux's 255-byte limit (PR #81, branch `download/77-long-names`)
+- **PR #81 (draft, no label):** f970ebd; CI run 39522910567 passed `test` on Linux, Windows and macOS (the real-sidecar suite included). Commit, PR and squash approved by the architect under D-028.
+- **The bug:** `--trim-filenames 200` counts characters, so 230×日 gave a 604-byte name, over ext4's 255 bytes.
+- **Fix (yt-dlp flags only; architect-approved divergence from a title-threading helper):**
+  - `--replace-in-metadata title` rules that run before the name is built: `"` → `＂` first, then digit`:`digit → `_` (yt-dlp's timestamp rule), then `*:<>?|/\` → ＊：＜＞？｜⧸⧹, which is what `--windows-filenames` gives them;
+  - `-o %(title).200B.%(ext)s`, which cuts at 200 bytes on a character boundary after those replacements.
+
+  Names that already fit are byte-identical to before (checked against pinned 2026.08.19 for punctuation, timestamps, mixed colons, `CON`, CJK, emoji and `/`).
+- **Transitional:** drop `--replace-in-metadata` when #15 passes the engine's stem to `-o`. It changes the `title` field, which would leak into `--embed-metadata` (#23).
+- **Stdout hardening (review round 1, P2):** yt-dlp logs each changed title on stdout, so a title with a newline could forge `QUEUE-` event lines. Fixed three ways:
+  - `"` is replaced first, so no ASCII quote reaches stdout;
+  - progress lines need `status`;
+  - `MetadataParser` isn't shown as Processing.
+
+  `--quiet` was rejected because it also hides the postprocess template (the merge tests lost Processing).
+- **Tests:**
+  - argv triples and order;
+  - the mapping matches `--windows-filenames`;
+  - real-sidecar `d77_real_long_multibyte…` (URL and saved-info sources, ≤255 bytes, ` (2)`, short names unchanged) and `d77_real_title_cannot_forge…` (each of the three defenses was removed in turn, and the test failed each time);
+  - Codex's 4 tests in `tests/support/names_77_qa.rs` (D-021);
+  - `progress_d4_qa.rs` inputs now carry `status`.
+- **Known gap, parked (architect, D-028):** a saved-info title that is exactly `CON` gives `CON.wav`, the same as before #77. It's deferred to #14/#15. The test `d77_saved_info_bare_windows_device_title…` only runs with `QUEUE_QA_KNOWN_GAPS=1`.
+- **QA:**
+  - review round 2: **PASS WITH NOTES** (`20261020-193801-review-PZMo`): the P2 is the parked `CON` gap (pre-accepted by the architect); the P3 (a stale "Next bounded action") is fixed. Its suggested tests are **not added** (pre-accepted P3s): long multibyte titles through both audio presets, and titles where a 3-byte replacement or 4-byte character straddles byte 200. #15 replaces this mechanism with the engine's stem, and the engine's cap is unit-tested at UTF-8 boundaries.
+  - `codex-qa test "#77"`: FAIL (`20261020-183658-test-bhRR`; the timestamp regression, fixed; `CON`, parked);
+  - review round 1: FAIL (`20261020-190330-review-qpPD`; the stdout forgery P2, fixed);
+  - review round 2, first attempts: Codex's usage limit, twice (`…192233-review-trty.log`, `…192429-review-E9Vh.log`), re-run after the owner's upgrade.
+
+## Done: #74 (Q6, D-027) cancel a download in progress (squash-merged from PR #80 as a77faf9; 4-OS bundles green)
 - **Backend:**
   - `proc::with_cancel` gives each download thread a cancel flag. `proc::should_stop()` (quitting, or this thread cancelled) replaces `stopping()` at every stop point a download passes: the progress loop, waiting for yt-dlp, draining output, the retry pause, and the chunked copy. A cancel after a retry pause starts no new attempt.
   - The new `download::CANCELLED` reason; a quit still reports `QUITTING`.
@@ -610,5 +642,9 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-On branch `queue/74-cancel-download` (#74 is committed as WIP and pushed; the review gate has passed, and the review fixes plus this STATUS update are uncommitted in `queue.rs`, `lib.rs` and `docs/STATUS.md`):
-#74 is ready to squash-merge (PR #80; CI run 39514852741 green on all 3 OSes and 4 bundles). After the merge, continue the overnight order (see "Overnight run"): #77 (branch `download/77-long-names`, in QA), then the M2 audit, then M3.
+On branch `download/77-long-names` (fast-forwarded onto `main` a77faf9; #77's work is uncommitted):
+1. #77: PR #81 is green; squash-merge it (pre-approved), then sync `main`.
+2. #14 (worktree branch `naming/14-tier1-engine`, uncommitted): through `codex-qa test` (6 bugs fixed); its review gate is next.
+3. #15 (worktree branch `naming/15-name-in-row`, built on #14's files): row names, inline edit and persistence are done and tested. The `-o` stem waits for #77's merge.
+4. Then the M2 audit, #17 and the M3 audit.
+- **#15's checklist (from #77):** drop `--replace-in-metadata` and `.200B`; remove the `QUEUE_QA_KNOWN_GAPS` gate on `d77_saved_info_bare_windows_device_title…`; escape `%` in the stem.
