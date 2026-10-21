@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #77 (QA in progress), then #14 (built, in QA)
+**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #77 (PR #81 green, awaiting squash), then #14 (in review)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -107,7 +107,8 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
 
-## In progress: #77 (D2) long non-ASCII titles over Linux's 255-byte limit (branch `download/77-long-names`)
+## In progress: #77 (D2) long non-ASCII titles over Linux's 255-byte limit (PR #81, branch `download/77-long-names`)
+- **PR #81 (draft, no label):** f970ebd; CI run 39522910567 passed `test` on Linux, Windows and macOS (the real-sidecar suite included). Commit, PR and squash approved by the architect under D-028.
 - **The bug:** `--trim-filenames 200` counts characters, so 230×日 gave a 604-byte name, over ext4's 255 bytes.
 - **Fix (yt-dlp flags only; architect-approved divergence from a title-threading helper):**
   - `--replace-in-metadata title` rules that run before the name is built: `"` → `＂` first, then digit`:`digit → `_` (yt-dlp's timestamp rule), then `*:<>?|/\` → ＊：＜＞？｜⧸⧹, which is what `--windows-filenames` gives them;
@@ -642,7 +643,7 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 
 ## Next bounded action
 On branch `download/77-long-names` (fast-forwarded onto `main` a77faf9; #77's work is uncommitted):
-1. #77: the review gate passed (round 2: PASS WITH NOTES, `qa/reports/20261020-193801-review-PZMo.md`; the P2 is the parked `CON` gap, the P3 was this stale section). Next: the commit request to the architect, then the draft PR, CI, handoff and squash.
+1. #77: PR #81 is green; squash-merge it (pre-approved), then sync `main`.
 2. #14 (worktree branch `naming/14-tier1-engine`, uncommitted): through `codex-qa test` (6 bugs fixed); its review gate is next.
 3. #15 (worktree branch `naming/15-name-in-row`, built on #14's files): row names, inline edit and persistence are done and tested. The `-o` stem waits for #77's merge.
 4. Then the M2 audit, #17 and the M3 audit.
