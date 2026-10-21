@@ -19,6 +19,9 @@ pub struct Settings {
     /// What to download (D2, #11); yt-dlp decides by default.
     #[serde(deserialize_with = "or_default")]
     pub format: crate::download::Format,
+    /// How proposed names are built (N3, #17); `{title}` by default.
+    #[serde(deserialize_with = "or_default")]
+    pub naming_template: crate::naming::Template,
 }
 
 /// Reads one setting, or its default if it can't be understood (e.g. a format from a newer
@@ -132,6 +135,45 @@ mod tests {
             Settings::load(&path).download_dir,
             Some(PathBuf::from("/x")),
             "unknown keys are ignored"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// N3 (#17): the naming template is remembered; files from before #17, or with a template
+    /// from a newer version, mean `{title}`, and only that setting falls back.
+    #[test]
+    fn the_naming_template_is_remembered_and_unknown_values_mean_title() {
+        use crate::naming::Template;
+        let dir = temp("template");
+        let path = dir.join(FILE);
+        let dated = Settings {
+            naming_template: Template::DateTitle,
+            ..Default::default()
+        };
+        dated.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), dated);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains(r#""namingTemplate": "date_title""#)
+        );
+        fs::write(&path, br#"{"format": "audio"}"#).unwrap();
+        assert_eq!(
+            Settings::load(&path).naming_template,
+            Template::Title,
+            "before #17"
+        );
+        fs::write(
+            &path,
+            br#"{"format": "audio", "namingTemplate": "{artist}/{title}"}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.naming_template, Template::Title);
+        assert_eq!(
+            loaded.format,
+            crate::download::Format::Audio,
+            "the rest is kept"
         );
         fs::remove_dir_all(dir).unwrap();
     }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { DownloadFolderState } from "../useDownloadFolder";
 import FolderPicker from "./FolderPicker";
 import FormatPicker from "./FormatPicker";
+import TemplatePicker from "./TemplatePicker";
 
 interface Props {
   folder: DownloadFolderState;
@@ -10,7 +11,7 @@ interface Props {
 
 /**
  * Settings (PRD §6.4, #36): a panel over the queue, in the app's single window. Escape or ✕
- * closes it. Later items add their sections here (naming #17, AI #25/#31/#32,
+ * closes it. Later items add their sections here (AI #25/#31/#32,
  * yt-dlp updates #21, notifications #20). Every change is saved by the backend as it's made.
  */
 export default function SettingsPanel({ folder, onClose }: Props) {
@@ -69,6 +70,12 @@ export default function SettingsPanel({ folder, onClose }: Props) {
           Format
         </h3>
         <FormatPicker />
+      </section>
+      <section aria-labelledby="settings-naming" className="mt-6">
+        <h3 id="settings-naming" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+          File names
+        </h3>
+        <TemplatePicker />
       </section>
     </div>
   );

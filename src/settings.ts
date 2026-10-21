@@ -24,3 +24,19 @@ export const FORMATS: { value: Format; label: string; detail: string }[] = [
 export const formatSetting = () => invoke<Format>("settings_format");
 /** Saves the format; downloads already running keep theirs. */
 export const setFormat = (format: Format) => invoke<Format>("settings_set_format", { format });
+
+/** How proposed names are built (N3, #17); matches src-tauri's `naming::Template`. */
+export type Template = "title" | "channel_title" | "date_title";
+
+export const TEMPLATES: { value: Template; label: string }[] = [
+  { value: "title", label: "Title" },
+  { value: "channel_title", label: "Channel - Title" },
+  { value: "date_title", label: "Upload date Title" },
+];
+
+export const namingTemplate = () => invoke<Template>("settings_naming_template");
+/** Saves the template; queued rows whose name wasn't edited by hand are renamed (as events). */
+export const setNamingTemplate = (template: Template) =>
+  invoke<Template>("settings_set_naming_template", { template });
+/** Each template's name for a fixed sample item, for the live preview. */
+export const namingPreviews = () => invoke<[Template, string][]>("naming_previews");

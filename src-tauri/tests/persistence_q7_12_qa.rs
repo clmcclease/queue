@@ -244,6 +244,7 @@ fn q7_corrupt_files_are_preserved_byte_exactly_and_settings_stay_independent() {
     let settings = Settings {
         download_dir: Some(f.0.join("Vidéos 日本語")),
         format: Format::CompatibleAudio,
+        ..Default::default()
     };
     settings.save(&settings_path).unwrap();
     let mut damaged_seen = 0;

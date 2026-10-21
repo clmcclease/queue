@@ -28,6 +28,20 @@ pub const MAX_BYTES: usize = 200;
 /// The name when nothing usable is left.
 pub const UNTITLED: &str = "Untitled";
 
+/// Every template with its name for a fixed sample item, for the live preview (N3, #17).
+pub fn previews() -> Vec<(Template, String)> {
+    let sample = Meta {
+        title: Some("Me at the zoo [HD]".into()),
+        channel: Some("jawed".into()),
+        upload_date: Some("20050423".into()),
+        ..Default::default()
+    };
+    [Template::Title, Template::ChannelTitle, Template::DateTitle]
+        .into_iter()
+        .map(|t| (t, name(&sample, t)))
+        .collect()
+}
+
 /// The proposed name for an item: its subject (artist – track, series SxxEyy, else the title)
 /// cleaned of noise and emoji, put in `template`, then [`sanitize`]d.
 pub fn name(meta: &Meta, template: Template) -> String {
@@ -589,6 +603,22 @@ mod tests {
             name(&artist_only, Template::Title),
             "A title",
             "needs both fields"
+        );
+    }
+
+    #[test]
+    fn previews_show_every_template_on_one_sample() {
+        assert_eq!(
+            previews(),
+            [
+                (Template::Title, "Me at the zoo".to_owned()),
+                (Template::ChannelTitle, "jawed - Me at the zoo".to_owned()),
+                (Template::DateTitle, "2005-04-23 Me at the zoo".to_owned()),
+            ]
+        );
+        assert_eq!(
+            serde_json::to_string(&Template::ChannelTitle).unwrap(),
+            r#""channel_title""#
         );
     }
 

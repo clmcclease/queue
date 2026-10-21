@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #33(a) (review passed, commit request), #17 (in QA), then the M3 audit
+**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #17 (PR #89), #25 (building), then the M3 audit
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -116,7 +116,23 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #33(a) (N9) AI naming prompt, schema, validation, eval set and runner (PR #88, branch `naming/33-ai-prompt-eval`)
+## In progress: #17 (N3) naming template picker with live preview (PR #89, branch `naming/17-template-picker`)
+- **PR #89 (draft, no label):** 534d1ac; CI run 39532876018 passed `test` on Linux, Windows and macOS. `main` (b26a1a0, #33(a)) was merged into the branch afterwards; the only conflict was this file.
+- **Setting:** `namingTemplate` in settings.json (`title` | `channel_title` | `date_title`). Missing or unknown values mean `{title}`, and only that setting falls back.
+- **Queue:** `Queue::set_template` renames Queued rows whose name wasn't edited by hand and returns them. Rows fetched later use the template. Running and finished rows keep their names.
+- **Startup** applies the saved template to the loaded queue.
+- **Commands:** `settings_naming_template`; `settings_set_naming_template` (saves, then sends the renamed rows as `queue://item`); `naming_previews` (each template on a fixed sample item: "Me at the zoo", "jawed - Me at the zoo", "2005-04-23 Me at the zoo").
+- **UI:** a "File names" section in Settings (`TemplatePicker.tsx`): three radios with previews. A failed save restores the previous choice and shows the reason; the choices still work without previews. Older UI tests' IPC mocks now answer the two new read commands.
+- **Tests:** unit tests (`set_template`, previews, the settings fallback); 4 UI tests in `template-n3-17.test.mjs`. Codex's tests are added (D-021): `tests/template_n3_17_qa.rs` (7) and 6 UI tests.
+- `codex-qa test "#17"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261020-210655-test-SAjA.md`, in the #17 worktree).
+- `codex-qa review`, round 1: **FAIL**, P2 (`…211532-review-4y61`): a row that was Failed or downloading when the template changed kept its old name after Retry or a cancel. Fixed: whenever a row comes back to Queued (`retry`, `cancelled`), its rules name is recomputed with the current template, unless it was edited by hand. Test: `retried_and_cancelled_rows_take_the_current_template`.
+- `codex-qa review`, round 2: **PASS WITH NOTES**, no findings (`…212023-review-dUDm`). Of its suggested tests, I added "a hand-edited row keeps its name through a template change and Retry" (in the same test). Not added (pre-accepted P3s): a forced settings-write failure through the command (Tauri glue, #84's class), and a template change during Download all (the runner reads each row's name when it starts it, which is covered by `start` capturing the name).
+  - Its third suggested test (a failed settings save changes nothing) holds by construction: `settings_set_naming_template` returns before touching the queue. That's Tauri glue, the same class as #84, so it isn't separately tested.
+- **Branch:** it was built on #15's commit and moved onto `main` (cd81134) after #15's squash. It had no commits and had never been pushed.
+- **Checks (macOS arm64, on cd81134):** `npm test` 233/233, fmt, clippy `-D warnings`, `cargo test` 376.
+- **Checks (macOS arm64, after merging `main` at b26a1a0):** fmt, clippy `-D warnings`, `cargo test` 409 passed, `npm test` 233/233.
+- **Owner check:** Settings → File names: pick each template and watch a Queued row's name change; a hand-edited row keeps its name.
+## Done: #33(a) (N9) AI naming prompt, schema, validation, eval set and runner (squash-merged from PR #88 as b26a1a0; Linux/macOS/Windows tests green; #33 stays open for (b))
 - **PR #88 (draft, no label):** f874061; CI run 39531584183 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
 - **Dependency (D-029):** `ureq =3.4.2`, `default-features = false`, `rustls` + `json`. It's blocking, with no OpenSSL. New lock entries are only ureq's own stack (rustls, ring, webpki-roots and friends); no native-tls, tokio or hyper (the latter two were already there via Tauri).
 - **`src-tauri/src/ai.rs`:**
@@ -734,6 +750,6 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#33(a):** PR #88 is green; squash-merge it (pre-approved), then sync `main`. #33 stays open for (b).
-2. **#17** (worktree branch `naming/17-template-picker`, on #15's commit): `codex-qa test "#17"` is running. Bring `main` in after #15's merge, then review.
-3. Then the M3 audit (after #17), then #25.
+1. **#17:** PR #89; push this handoff, wait for green, then ask the architect for the squash.
+2. **#25** (worktree branch `naming/25-provider-toggle`, built on #33's commit, uncommitted): its `codex-qa test "#25"` run at 21:23 left an empty report; re-run it once, after bringing `main` in.
+3. Then the M3 audit (after #17 merges).

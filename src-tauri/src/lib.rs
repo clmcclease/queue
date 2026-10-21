@@ -232,6 +232,46 @@ fn settings_set_format(
     Ok(format)
 }
 
+/// The naming template (N3, #17).
+#[tauri::command]
+fn settings_naming_template(app: AppHandle) -> Result<naming::Template, String> {
+    Ok(current_settings(&app)?.naming_template)
+}
+
+/// Saves the naming template (#17), then renames the Queued rows whose name wasn't edited and
+/// sends them as [`ITEM_EVENT`]s. Downloads already running keep the name they started with.
+#[tauri::command]
+fn settings_set_naming_template(
+    app: AppHandle,
+    template: naming::Template,
+) -> Result<naming::Template, String> {
+    {
+        let state = app.state::<Settings>();
+        let mut current = state
+            .current
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        let mut next = current.clone();
+        next.naming_template = template;
+        if let Some(file) = &state.file {
+            next.save(file)
+                .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+        }
+        *current = next;
+    }
+    let changed = lock(&app.state::<Mutex<Queue>>())?.set_template(template);
+    for item in changed {
+        let _ = app.emit(ITEM_EVENT, item);
+    }
+    Ok(template)
+}
+
+/// Each template's name for a fixed sample item: the live preview in Settings (N3, #17).
+#[tauri::command]
+fn naming_previews() -> Vec<(naming::Template, String)> {
+    naming::previews()
+}
+
 /// The download folder as the UI shows it. `error` says why it can't be used right now (a
 /// chosen folder that's gone), while `path` still names it.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -752,6 +792,7 @@ pub fn run() {
                 .as_deref()
                 .map(settings::Settings::load)
                 .unwrap_or_default();
+            let template = current.naming_template;
             app.manage(Settings {
                 file,
                 current: Mutex::new(current),
@@ -780,10 +821,12 @@ pub fn run() {
                     });
                 }
             }
-            let (queue, writable) = queue_file
+            let (mut queue, writable) = queue_file
                 .as_deref()
                 .map(Queue::load_checked)
                 .unwrap_or_default();
+            // Names follow the saved template (#17); hand-edited ones are kept.
+            queue.set_template(template);
             let problem = match (&queue_file, lock.is_some(), writable) {
                 (None, ..) => Some("Queue couldn't find its data folder, so this list won't be saved.".to_string()),
                 (Some(_), false, _) => Some("Another copy of Queue is still using the saved list, so changes made now won't be saved. Quit and reopen Queue.".to_string()),
@@ -833,6 +876,9 @@ pub fn run() {
             settings_choose_download_folder,
             settings_format,
             settings_set_format,
+            settings_naming_template,
+            settings_set_naming_template,
+            naming_previews,
             open_download_folder,
             reveal_download
         ])
