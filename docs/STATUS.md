@@ -21,7 +21,30 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Still unconfirmed: D-029's provisional bullets, PRD Q5's lifecycle amendment, D-016's runtime amendments for #30(b).
   - #31's hand checks above; #91's Test connection against api.anthropic.com with your key; the dev-app Local checks once #30(b) merges.
   - Carried forward: `scripts/codex-qa` exits 0 on an empty report.
-- **Next bounded action:** squash-merge #96 on green `test` (pre-approved), then start #30(b) on a branch from `main`.
+- **#96 merged** as b63e867. #30(b) is in PR #98 (its own handoff is on that branch).
+- **Next bounded action:** merge order per the architect (D-029, 2026-10-21): #98 first, then #99 (#91) merges `main` into its branch, fixes the conflicts and adds `kind` to #30(b)'s `Endpoint` literals, reruns every check and gets a fresh Codex review before its squash. If #98 isn't green and squash-approved by 14:00, the order swaps.
+
+## In progress: #91 (N8) Anthropic Messages API provider (PR #99, branch `naming/91-anthropic`, no `ci:bundle`; closes #91)
+- **What changed:**
+  - `ai.rs`: `ApiKind::Anthropic` and `Endpoint.kind`. `ask_content` branches on the kind: `<base>/v1/messages`, with a pasted `/v1` or `/v1/messages` used once; `x-api-key` and `anthropic-version: 2023-06-01`. The body (`anthropic_body`) is the same system rules and data as the OpenAI request, `max_tokens` 1024, and structured outputs with `anthropic_schema()` (`response_format`'s schema minus length limits). There's no forced tool, sampling, thinking or effort. Only an `end_turn` with a `text` block is an answer.
+  - No key means `NotSetUp`, so nothing is sent. Test connection says "Anthropic needs an API key."; for Anthropic, a 400 adds "Check the model name."
+  - `settings_set_api(kind, base_url, model)`.
+  - The UI's Service picker (switching fills the default URL and clears the model).
+- **Checks (macOS arm64):** fmt; clippy `-D warnings`; `cargo test --locked` 495 passed / 0 failed / 28 ignored; `npm run build` + `npm test` 305/305; tsc. No live Anthropic request has been made by anyone.
+- **QA (reports in the #91 worktree's `qa/reports/`):**
+  - `test "#91"` **PASS WITH NOTES** (`20261021-122413-test-70LR`). Added tests: `src-tauri/tests/api_anthropic_91_qa.rs` (10) and 3 UI tests in `qa/tests/api-anthropic-91.test.mjs`. The agent's own: `api_anthropic_91.rs` (9) and 3 UI tests.
+  - Review **PASS WITH NOTES** (`…123200-review-bOjP`), no blocking defects.
+- **Architect rulings (12:50):**
+  - The commit, push and draft PR are approved; this handoff is pre-approved.
+  - P3, the unbounded `accept()` in `api_anthropic_91.rs`: accepted for now. It's folded into the merge-from-main round if that happens; otherwise it goes in a P3 follow-up "Loopback test fixtures: bounded accept with a deadline", covering all three such fixtures.
+  - Codex's three missing tests aren't required. They go on that same follow-up: a kind switch while resolving, error-then-success through the worker, and a `set_api` save failure with a kind change.
+  - The squash needs its own request with green CI on the final head.
+- **A correction to the process:** the architect's earlier clarification, "post-PASS fixes confined to test files need no new review", was withdrawn as outside D-028. QA gates are the owner's to change. It stays here only as a **proposal for the owner**: *Post-PASS fixes confined to test files that change no assertion, test logic or production code (unused imports, cfg gates, formatting) don't need a new review round; they're named in STATUS and the squash request.* Every commit still gets its Codex review.
+- **For the owner:**
+  - **Test connection against api.anthropic.com with your key:** Service: Anthropic, model `claude-haiku-5-5`. Then name a real row, and check Keychain Access still shows only `dev.mcclease.queue` / `api-key`.
+  - **One key slot across services:** after switching the Service, the previously saved key stays and is sent to the new service's URL on the next ask or Test connection (over https, to a URL you chose). Decide whether a kind change should clear the key, or the field should say which service it was saved for. The architect would file it as P3 unless you want it fixed before release.
+  - Is the "not set up" banner clear enough when Anthropic has a URL and model but no key?
+  - Confirm or reject the proposal above, and D-029's provisional bullets, including the #91 request shape.
 
 ## Overnight run (2026-10-20 → 21, under D-028)
 - **Goal (owner):** complete M4. Stop at a good point after 06:00, by 06:30 on 2026-10-21, and wait for the owner.
