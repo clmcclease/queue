@@ -61,9 +61,18 @@ export const namingProvider = () => invoke<Provider>("settings_naming_provider")
 export const setNamingProvider = (provider: Provider) =>
   invoke<NamingStatus>("settings_set_naming_provider", { provider });
 
+/** The API service's wire format (#32, #91). */
+export type ApiKind = "openai_compatible" | "anthropic";
+
+/** Each kind's usual base URL, filled in when the service is switched (#91). */
+export const DEFAULT_BASE_URL: Record<ApiKind, string> = {
+  openai_compatible: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com",
+};
+
 /** The API service's setup (N8, #32). The key never comes back: only whether one is saved. */
 export interface ApiSetup {
-  kind: "openai_compatible";
+  kind: ApiKind;
   baseUrl: string;
   model: string;
   keySet: boolean;
@@ -85,8 +94,9 @@ export const SENT = [
 ];
 
 export const apiSetup = () => invoke<ApiSetup>("settings_api");
-/** Saves the base URL and model; the backend checks the URL (https://, or http:// on this computer). */
-export const setApi = (baseUrl: string, model: string) => invoke<ApiSetup>("settings_set_api", { baseUrl, model });
+/** Saves the service, base URL and model; the backend checks the URL (https://, or http:// on this computer). */
+export const setApi = (kind: ApiKind, baseUrl: string, model: string) =>
+  invoke<ApiSetup>("settings_set_api", { kind, baseUrl, model });
 /** Stores the key in the OS credential store. */
 export const setApiKey = (key: string) => invoke<ApiSetup>("api_key_set", { key });
 export const removeApiKey = () => invoke<ApiSetup>("api_key_remove");

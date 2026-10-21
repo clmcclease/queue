@@ -436,11 +436,13 @@ async fn settings_api(app: AppHandle) -> Result<ApiSetup, String> {
     off_main(app, api_setup).await
 }
 
-/// Saves the API service's base URL and model (#32). The URL must be https://, or http:// to
-/// this computer, the same rule every request follows.
+/// Saves the API service's kind (#91), base URL and model (#32). The URL must be https://, or
+/// http:// to this computer, the same rule every request follows. Saved together, so a kind
+/// change asks rows again like any other API change.
 #[tauri::command]
 async fn settings_set_api(
     app: AppHandle,
+    kind: ai::ApiKind,
     base_url: String,
     model: String,
 ) -> Result<ApiSetup, String> {
@@ -449,10 +451,15 @@ async fn settings_set_api(
     if model.is_empty() {
         return Err("Enter the model's name.".into());
     }
-    off_main(app, move |app| set_api(app, base_url, model)).await
+    off_main(app, move |app| set_api(app, kind, base_url, model)).await
 }
 
-fn set_api(app: &AppHandle, base_url: String, model: String) -> Result<ApiSetup, String> {
+fn set_api(
+    app: &AppHandle,
+    kind: ai::ApiKind,
+    base_url: String,
+    model: String,
+) -> Result<ApiSetup, String> {
     {
         let state = app.state::<Settings>();
         let mut current = state
@@ -460,6 +467,7 @@ fn set_api(app: &AppHandle, base_url: String, model: String) -> Result<ApiSetup,
             .lock()
             .map_err(|_| "settings lock poisoned".to_string())?;
         let mut next = current.clone();
+        next.api_kind = kind;
         next.api_base_url = base_url;
         next.api_model = model;
         if let Some(file) = &state.file {

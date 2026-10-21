@@ -37,6 +37,7 @@ fn chat(content: &str) -> String {
 fn service(body: Option<String>) -> (Endpoint, mpsc::Sender<()>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = Endpoint {
+        kind: queue_lib::ai::ApiKind::OpenaiCompatible,
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         model: "qa-fixture".into(),
         key: None,

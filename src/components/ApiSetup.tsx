@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  DEFAULT_BASE_URL,
   SENT,
   apiSetup,
   namingStatus,
@@ -7,6 +8,7 @@ import {
   setApi,
   setApiKey,
   testConnection,
+  type ApiKind,
   type ApiSetup as Setup,
   type NamingStatus,
 } from "../settings";
@@ -17,12 +19,13 @@ const button =
   "shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-200";
 
 /**
- * The API service (N8, #32): an OpenAI-compatible base URL and model, a key kept in the OS
+ * The API service (N8, #32, #91): OpenAI-compatible or Anthropic, a base URL and model, a key kept in the OS
  * credential store (write-only: it's never shown again), Test connection, and exactly what is
  * sent. `onStatus` gets the naming status after each change, so the banner and notes follow.
  */
 export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatus) => void }) {
   const [setup, setSetup] = useState<Setup | null>(null);
+  const [kind, setKind] = useState<ApiKind>("openai_compatible");
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [key, setKey] = useState("");
@@ -45,6 +48,7 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
       (s) => {
         if (cancelled || !s) return;
         setSetup(s);
+        setKind(s.kind);
         setBaseUrl(s.baseUrl);
         setModel(s.model);
       },
@@ -89,17 +93,38 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
   }
 
   const saved = setup !== null && setup.baseUrl !== "" && setup.model !== "";
-  const unsaved = setup !== null && (baseUrl.trim() !== setup.baseUrl || model.trim() !== setup.model);
+  const unsaved =
+    setup !== null && (kind !== setup.kind || baseUrl.trim() !== setup.baseUrl || model.trim() !== setup.model);
+  const anthropic = kind === "anthropic";
 
   return (
     <div data-role="api-setup" className="mt-2 flex flex-col gap-2 border-l-2 border-neutral-200 pl-3 dark:border-neutral-700">
+      <label className="flex flex-col gap-0.5 text-xs text-neutral-600 dark:text-neutral-400">
+        Service
+        <select
+          data-role="api-kind"
+          className={field}
+          value={kind}
+          disabled={setup === null || busy}
+          onChange={(e) => {
+            // Each service has its own address and model names; nothing is saved until Save.
+            const next = e.target.value as ApiKind;
+            setKind(next);
+            setBaseUrl(DEFAULT_BASE_URL[next]);
+            setModel("");
+          }}
+        >
+          <option value="openai_compatible">OpenAI-compatible</option>
+          <option value="anthropic">Anthropic</option>
+        </select>
+      </label>
       <label className="flex flex-col gap-0.5 text-xs text-neutral-600 dark:text-neutral-400">
         Base URL
         <input
           data-role="api-base-url"
           className={field}
           value={baseUrl}
-          placeholder="https://api.openai.com/v1"
+          placeholder={DEFAULT_BASE_URL[kind]}
           spellCheck={false}
           disabled={setup === null || busy}
           onChange={(e) => setBaseUrl(e.target.value)}
@@ -111,6 +136,7 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           data-role="api-model"
           className={field}
           value={model}
+          placeholder={anthropic ? "claude-haiku-5-5" : undefined}
           spellCheck={false}
           disabled={setup === null || busy}
           onChange={(e) => setModel(e.target.value)}
@@ -124,9 +150,10 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           disabled={setup === null || busy || !unsaved}
           onClick={() =>
             run(
-              () => setApi(baseUrl, model),
+              () => setApi(kind, baseUrl, model),
               // Show what was saved: the backend trims the model and drops a pasted /chat/completions.
               (saved) => {
+                setKind(saved.kind);
                 setBaseUrl(saved.baseUrl);
                 setModel(saved.model);
               },
@@ -144,7 +171,13 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           autoComplete="off"
           className={field}
           value={key}
-          placeholder={setup?.keySet ? "Key saved. Paste a new one to replace it." : "Optional for Ollama and LM Studio"}
+          placeholder={
+            setup?.keySet
+              ? "Key saved. Paste a new one to replace it."
+              : anthropic
+                ? "Required for Anthropic"
+                : "Optional for Ollama and LM Studio"
+          }
           disabled={setup === null || busy}
           onChange={(e) => setKey(e.target.value)}
         />
