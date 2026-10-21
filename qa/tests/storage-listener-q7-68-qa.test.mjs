@@ -75,6 +75,8 @@ function backend({ listen = "fail", read = () => null } = {}) {
     if (command === "queue_list") return [];
     if (command === "queue_runner_state") return false;
     if (command === "settings_download_folder") return { path: "/tmp/Downloads", error: null };
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return "default";
     throw new Error(`unexpected command ${command}`);
   };

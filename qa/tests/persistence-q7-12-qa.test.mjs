@@ -55,6 +55,8 @@ async function mount(list, handler) {
     if (command === "queue_list") return typeof list === "function" ? list() : list;
     if (command === "queue_runner_state") return false;
     if (command === "settings_download_folder") return { path: "/Downloads 日本語", error: null };
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return "compatibleAudio";
     return handler(command, args);
   }, { shouldMockEvents: true });

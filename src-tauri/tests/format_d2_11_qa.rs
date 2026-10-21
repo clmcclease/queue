@@ -203,6 +203,7 @@ fn every_format_roundtrips_without_losing_the_unicode_download_folder() {
         let settings = Settings {
             download_dir: Some(folder.clone()),
             format,
+            ..Default::default()
         };
         settings.save(&file).unwrap();
         assert_eq!(Settings::load(&file), settings);

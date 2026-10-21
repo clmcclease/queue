@@ -50,6 +50,8 @@ async function mount(handler, { strict = false } = {}) {
     if (command === "queue_list") return [];
     if (command === "queue_runner_state") return false;
     if (command === "settings_download_folder") return { path: "/Downloads 日本語", error: null };
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return "default";
     return null;
   }, { shouldMockEvents: true });
@@ -71,6 +73,8 @@ test("#11 QA: a pending save disables every choice, prevents a second write, and
   const saves = [];
   let saved = "default";
   await mount((command, args) => {
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return saved;
     if (command === "settings_set_format") {
       saves.push(args.format);
@@ -94,6 +98,8 @@ test("#11 QA: each preset is sent to IPC once and remains selected after reopeni
   let saved = "default";
   const saves = [];
   await mount((command, args) => {
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return saved;
     if (command === "settings_set_format") { saves.push(args.format); saved = args.format; return saved; }
   });
@@ -112,6 +118,8 @@ test("#11 QA: each preset is sent to IPC once and remains selected after reopeni
 test("#11 QA: a failed initial settings read disables writes and reopening can recover", async () => {
   let fail = true;
   await mount((command) => {
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") {
       if (fail) throw "read failed <b>日本語</b>";
       return "compatibleAudio";
@@ -134,6 +142,8 @@ test("#11 QA: StrictMode ignores a stale read failure after a newer successful r
   const stale = deferred();
   let reads = 0;
   await mount((command) => {
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return ++reads === 1 ? stale.promise : "audio";
   }, { strict: true });
   await click(gear());
@@ -147,6 +157,8 @@ test("#11 QA: StrictMode ignores a stale read failure after a newer successful r
 test("#11 QA: a failed save restores the saved choice and a successful retry clears the error", async () => {
   let fail = true;
   await mount((command, args) => {
+    if (command === "settings_naming_template") return "title"; // #17
+    if (command === "naming_previews") return [];
     if (command === "settings_format") return "compatibleVideo";
     if (command === "settings_set_format") {
       if (fail) throw "disk full 日本語";

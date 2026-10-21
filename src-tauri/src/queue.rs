@@ -188,6 +188,30 @@ impl Queue {
         Some(item.clone())
     }
 
+    /// Sets the template new names use (N3, #17), and renames the Queued rows whose name wasn't
+    /// typed by the user. Returns the rows that changed, to show.
+    pub fn set_template(&mut self, template: Template) -> Vec<Item> {
+        self.template = template;
+        let mut changed = Vec::new();
+        for item in &mut self.items {
+            if item.status != Status::Queued || item.name_source == Some(NameSource::Edited) {
+                continue;
+            }
+            let Some(meta) = &item.meta else { continue };
+            let name = naming::name(meta, template);
+            if item.name.as_deref() != Some(name.as_str()) {
+                item.name = Some(name);
+                item.name_source = Some(NameSource::Rules);
+                item.rev += 1;
+                changed.push(item.clone());
+            }
+        }
+        if !changed.is_empty() {
+            self.changes += 1;
+        }
+        changed
+    }
+
     /// Renames a Queued row (N1, #15). The name is sanitized like any other (never trusted), and
     /// an edited name is never replaced automatically.
     pub fn rename(&mut self, id: u64, name: &str) -> Result<Item, String> {
@@ -344,6 +368,7 @@ impl Queue {
         {
             return Err("That link is already in the queue again.".into());
         }
+        let template = self.template;
         let item = self
             .items
             .iter_mut()
@@ -354,6 +379,8 @@ impl Queue {
         } else {
             Status::Fetching
         };
+        // A template chosen while it was Failed applies now (#17 review).
+        refresh_name(item, template);
         item.progress = None;
         item.attempt = 0;
         item.rev += 1;
@@ -399,11 +426,14 @@ impl Queue {
     /// a later Download all) can start it again. Only an active row changes: one that finished
     /// first keeps its result.
     pub fn cancelled(&mut self, id: u64) -> Option<Item> {
+        let template = self.template;
         let item = self.items.iter_mut().find(|i| i.id == id)?;
         if !matches!(item.status, Status::Downloading | Status::Processing) {
             return None;
         }
         item.status = Status::Queued;
+        // A template chosen while it was downloading applies now (#17 review).
+        refresh_name(item, template);
         item.progress = None;
         item.attempt = 0;
         item.notice = Some(CANCELLED.to_string());
@@ -437,6 +467,18 @@ pub const INTERRUPTED: &str = "Interrupted when Queue closed. Download it again 
 
 /// The note on a row whose download was cancelled (#74).
 pub const CANCELLED: &str = "Cancelled. Download it again when you're ready.";
+
+/// A row back in the queue (retried, or cancelled) takes the current template, unless its name
+/// was typed by hand.
+fn refresh_name(item: &mut Item, template: Template) {
+    if item.status == Status::Queued
+        && item.name_source != Some(NameSource::Edited)
+        && let Some(meta) = &item.meta
+    {
+        item.name = Some(naming::name(meta, template));
+        item.name_source = Some(NameSource::Rules);
+    }
+}
 
 /// What `queue.json` keeps of a row (#12): enough to show it again. Live progress, retry attempts
 /// and saved `-J` info don't survive a restart; the link's duplicate key is rebuilt from `url`.
@@ -712,6 +754,93 @@ mod tests {
         q.start(id).unwrap();
         assert!(q.rename(id, "late").is_err(), "not while downloading");
         assert!(q.rename(999, "x").is_err());
+    }
+
+    /// N3 (#17): a new template renames Queued rows, but never a hand-edited name or a row
+    /// that's already downloading or done; rows fetched later use it too.
+    #[test]
+    fn a_new_template_renames_queued_rows_except_edited_ones() {
+        let mut q = Queue::default();
+        let meta = |title: &str| Meta {
+            title: Some(title.into()),
+            channel: Some("Chan".into()),
+            upload_date: Some("20240102".into()),
+            ..Default::default()
+        };
+        let mut row = |url: &str, title: &str| {
+            let id = q.add(url).unwrap().id;
+            q.fetched(id, Ok(meta(title))).unwrap();
+            id
+        };
+        let (plain, edited, running) = (
+            row("https://e.test/a", "A"),
+            row("https://e.test/b", "B"),
+            row("https://e.test/c", "C"),
+        );
+        q.rename(edited, "Mine").unwrap();
+        q.start(running).unwrap();
+        let later = q.add("https://e.test/d").unwrap().id;
+        let before = q.changes();
+        let changed = q.set_template(Template::ChannelTitle);
+        assert_eq!(changed.iter().map(|i| i.id).collect::<Vec<_>>(), [plain]);
+        assert_eq!(changed[0].name.as_deref(), Some("Chan - A"));
+        assert!(q.changes() > before, "worth saving");
+        let name = |q: &Queue, id| q.items().iter().find(|i| i.id == id).unwrap().name.clone();
+        assert_eq!(name(&q, edited).as_deref(), Some("Mine"));
+        assert_eq!(
+            name(&q, running).as_deref(),
+            Some("C"),
+            "a running download keeps its name"
+        );
+        q.fetched(later, Ok(meta("D"))).unwrap();
+        assert_eq!(name(&q, later).as_deref(), Some("Chan - D"));
+        assert!(
+            q.set_template(Template::ChannelTitle).is_empty(),
+            "no change, nothing sent"
+        );
+        let dated = q.set_template(Template::DateTitle);
+        assert_eq!(dated.len(), 2);
+        assert_eq!(name(&q, plain).as_deref(), Some("2024-01-02 A"));
+    }
+
+    /// #17 review: a row that was Failed or downloading when the template changed takes the
+    /// new template when it comes back to the queue; a hand-edited one keeps its name.
+    #[test]
+    fn retried_and_cancelled_rows_take_the_current_template() {
+        let mut q = Queue::default();
+        let meta = Meta {
+            title: Some("T".into()),
+            channel: Some("Chan".into()),
+            ..Default::default()
+        };
+        let mut row = |url: &str| {
+            let id = q.add(url).unwrap().id;
+            q.fetched(id, Ok(meta.clone())).unwrap();
+            id
+        };
+        let (failed, running, edited) = (
+            row("https://e.test/a"),
+            row("https://e.test/b"),
+            row("https://e.test/c"),
+        );
+        q.rename(edited, "Mine").unwrap();
+        q.start(failed).unwrap();
+        q.finish(failed, Err("x".into())).unwrap();
+        q.start(running).unwrap();
+        q.set_template(Template::ChannelTitle);
+        assert_eq!(q.retry(failed).unwrap().name.as_deref(), Some("Chan - T"));
+        assert_eq!(
+            q.cancelled(running).unwrap().name.as_deref(),
+            Some("Chan - T")
+        );
+        q.start(edited).unwrap();
+        q.set_template(Template::DateTitle);
+        assert_eq!(q.cancelled(edited).unwrap().name.as_deref(), Some("Mine"));
+        // A hand-edited row that failed keeps its name through a template change and Retry.
+        q.start(edited).unwrap();
+        q.finish(edited, Err("x".into())).unwrap();
+        q.set_template(Template::ChannelTitle);
+        assert_eq!(q.retry(edited).unwrap().name.as_deref(), Some("Mine"));
     }
 
     /// N1 (#15): names survive a restart; a row saved before #15 gets its Tier-1 name, and a
