@@ -1066,7 +1066,7 @@ test("Q6 QA #9: retry remains usable during Download all and newer download even
     status: { state: "downloading" } }));
   await act(async () => retry.resolve({ ...row, rev: 5, status: { state: "queued" } }));
   assert.deepEqual(statusText(), ["Downloading…"]);
-  assert.deepEqual(buttonsIn(0), []);
+  assert.deepEqual(buttonsIn(0), ["Cancel"], "#74: only Cancel while downloading");
   assert.equal(container.querySelector('[data-role="title"]').textContent, metadata.title);
   assert.equal(container.querySelectorAll("li img").length, 0);
 });
@@ -1548,4 +1548,118 @@ test("Q8: a single-line paste goes into the field as usual", async () => {
   const event = await pasteText("https://example.test/one\n");
   assert.equal(event.defaultPrevented, false);
   assert.ok(!calls.includes("queue_add"));
+});
+
+// #74 / Q6: Cancel on a downloading or processing row.
+const rowButtons = (index) => [...container.querySelectorAll("li")[index].querySelectorAll("button")].map((b) => b.textContent);
+
+test("Q6 #74: only downloading and processing rows have Cancel, and they have no ✕", async () => {
+  const items = [
+    { id: 1, url: "https://example.test/fetching", status: { state: "fetching" }, rev: 1 },
+    { id: 2, url: "https://example.test/queued", ...QUEUED },
+    { id: 3, url: "https://example.test/downloading", status: { state: "downloading" }, rev: 2, attempt: 1 },
+    { id: 4, url: "https://example.test/processing", status: { state: "processing" }, rev: 3 },
+    { id: 5, url: "https://example.test/done", status: { state: "done", path: "/d/a.webm" }, rev: 3 },
+    { id: 6, url: "https://example.test/failed", status: { state: "failed", reason: "x" }, rev: 3 },
+  ];
+  await mount((command) => (command === "queue_list" ? items : null));
+  const cancels = items.map((_, i) => rowButtons(i).includes("Cancel"));
+  assert.deepEqual(cancels, [false, false, true, true, false, false]);
+  assert.deepEqual(rowButtons(2), ["Cancel"], "no ✕ while downloading");
+  assert.deepEqual(rowButtons(3), ["Cancel"], "no ✕ while processing");
+});
+
+test("Q6 #74: Cancel waits for the row to stop, which comes back Queued with its note", async () => {
+  const calls = [];
+  const item = { id: 7, url: "https://example.test/v", status: { state: "downloading" }, rev: 2, attempt: 1 };
+  await mount((command, args) => {
+    calls.push({ command, args });
+    return command === "queue_list" ? [item] : null;
+  });
+  const cancel = () => [...container.querySelectorAll("li button")].find((b) => b.textContent.startsWith("Cancel"));
+  await act(async () => cancel().click());
+  assert.deepEqual(calls.at(-1), { command: "queue_cancel", args: { id: 7 } });
+  assert.equal(cancel().textContent, "Cancelling…");
+  assert.equal(cancel().disabled, true, "pressed once");
+  const note = "Cancelled. Download it again when you're ready.";
+  await act(async () => emit("queue://item", { ...item, status: { state: "queued" }, notice: note, attempt: 0, rev: 3 }));
+  assert.equal(cancel(), undefined, "a queued row has no Cancel");
+  assert.deepEqual(statusText(), [note]);
+  assert.equal(downloadButtons().length, 1, "it can be downloaded again");
+  assert.equal(container.querySelector('[role="alert"]'), null);
+});
+
+test("Q6 #74: a Cancel the backend refuses shows why, and the button works again", async () => {
+  const item = { id: 8, url: "https://example.test/v", status: { state: "processing" }, rev: 3 };
+  await mount((command) => {
+    if (command === "queue_list") return [item];
+    if (command === "queue_cancel") throw "Only a download in progress can be cancelled.";
+    return null;
+  });
+  const cancel = () => [...container.querySelectorAll("li button")].find((b) => b.textContent.startsWith("Cancel"));
+  await act(async () => cancel().click());
+  assert.equal(container.querySelector('[role="alert"]').textContent, "Only a download in progress can be cancelled.");
+  assert.equal(cancel().textContent, "Cancel");
+  assert.equal(cancel().disabled, false);
+  // It finished first: the row is Done, with no Cancel left.
+  await act(async () => emit("queue://item", { ...item, status: { state: "done", path: "/d/v.webm" }, rev: 4 }));
+  assert.equal(cancel(), undefined);
+});
+
+test("Q6 QA #74: completion before the cancel reply stays Done despite late progress", async () => {
+  const reply = deferred();
+  const item = { id: 74, url: "https://example.test/race", status: { state: "processing" }, rev: 5 };
+  await mount((command) => command === "queue_list" ? [item] : command === "queue_cancel" ? reply.promise : null);
+  await act(async () => container.querySelector("li button").click());
+  await act(async () => emit("queue://item", { ...item, status: { state: "done", path: "/d/日本語.webm" }, rev: 6 }));
+  await act(async () => reply.resolve());
+  await act(async () => emit("queue://item", { ...item, rev: 5 }));
+  assert.ok(!rowButtons(0).some((label) => label.startsWith("Cancel")));
+  assert.match(container.querySelector("li").textContent, /日本語.webm/);
+  assert.equal(container.querySelector('[role="alert"]'), null);
+});
+
+test("Q6 QA #74: processing can be cancelled during Download all and the row waits for that run to finish", async () => {
+  const item = { id: 74, url: "https://example.test/all", status: { state: "processing" }, rev: 5 };
+  const calls = [];
+  await mount((command, args) => {
+    calls.push({ command, args });
+    return command === "queue_list" ? [item] : null;
+  });
+  await act(async () => emit("queue://runner", { running: true }));
+  const cancel = container.querySelector("li button");
+  assert.equal(cancel.disabled, false);
+  await act(async () => cancel.click());
+  await act(async () => cancel.click());
+  assert.equal(calls.filter(({ command }) => command === "queue_cancel").length, 1, "one request per pending cancellation");
+  await act(async () => emit("queue://item", { ...item, status: { state: "queued" }, notice: "Cancelled. Download it again when you're ready.", rev: 6 }));
+  const download = () => [...container.querySelectorAll("li button")].find((b) => b.textContent === "Download");
+  assert.equal(download().disabled, true);
+  assert.ok(rowButtons(0).some((label) => label === "✕"));
+  await act(async () => emit("queue://runner", { running: false }));
+  assert.equal(download().disabled, false);
+});
+
+test("Q6 QA #74: a cancelled row can restart before its old acknowledgement and accept a fresh Cancel", async () => {
+  const oldReply = deferred();
+  const newReply = deferred();
+  const item = { id: 74, url: "https://example.test/restart", status: { state: "downloading" }, rev: 5 };
+  const restarted = { ...item, rev: 7, notice: null };
+  let cancels = 0;
+  await mount((command) => {
+    if (command === "queue_list") return [item];
+    if (command === "queue_cancel") return ++cancels === 1 ? oldReply.promise : newReply.promise;
+    if (command === "queue_download") return restarted;
+    return null;
+  });
+  await act(async () => container.querySelector("li button").click());
+  await act(async () => emit("queue://item", { ...item, status: { state: "queued" }, notice: "Cancelled. Download it again when you're ready.", rev: 6 }));
+  await act(async () => [...container.querySelectorAll("li button")].find((b) => b.textContent === "Download").click());
+  assert.equal(container.querySelector("li button").textContent, "Cancel");
+  await act(async () => container.querySelector("li button").click());
+  await act(async () => oldReply.resolve());
+  assert.equal(container.querySelector("li button").textContent, "Cancelling…");
+  assert.equal(container.querySelector("li button").disabled, true);
+  assert.equal(cancels, 2);
+  await act(async () => newReply.resolve());
 });

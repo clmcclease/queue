@@ -60,6 +60,11 @@ export function isAddError(e: unknown): e is AddError {
 export const addItem = (url: string) => invoke<QueueItem>("queue_add", { url });
 export const listItems = () => invoke<QueueItem[]>("queue_list");
 export const downloadItem = (id: number) => invoke<QueueItem>("queue_download", { id });
+/**
+ * Q6 (#74): cancels a download in progress. Its row comes back Queued, marked Cancelled, as a
+ * `queue://item` event once the download has stopped (or Done, if it finished first).
+ */
+export const cancelItem = (id: number) => invoke<void>("queue_cancel", { id });
 /** Q6: removes a row that isn't downloading (a Done row's file stays on disk). */
 export const removeItem = (id: number) => invoke<void>("queue_remove", { id });
 /** D7: opens the download folder in the OS file manager. */

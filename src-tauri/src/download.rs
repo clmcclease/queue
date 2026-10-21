@@ -1009,15 +1009,15 @@ fn verbatim(path: &Path) -> io::Result<Vec<u16>> {
     Ok(out)
 }
 
-/// Copies in 1 MiB chunks, stopping if Queue starts quitting (#67): a quit mid-copy then
-/// removes the temporary copy.
+/// Copies in 1 MiB chunks, stopping if Queue starts quitting (#67) or the download is cancelled
+/// (#74): the temporary copy is then removed.
 fn copy_unless_quitting(from: &mut fs::File, to: &mut fs::File) -> io::Result<u64> {
     use std::io::{Read, Write};
     let mut buf = vec![0u8; 1 << 20];
     let mut total = 0;
     loop {
-        if proc::stopping() {
-            return Err(io::Error::other(QUITTING));
+        if proc::should_stop() {
+            return Err(io::Error::other(stopped()));
         }
         let n = match from.read(&mut buf) {
             Ok(0) => return Ok(total),
@@ -1033,6 +1033,19 @@ fn copy_unless_quitting(from: &mut fs::File, to: &mut fs::File) -> io::Result<u6
 /// Why a download or fetch stopped early: Queue is quitting (#67). The row isn't marked failed;
 /// it comes back after a restart like any other interrupted download.
 pub const QUITTING: &str = "Queue is quitting";
+
+/// Why a download stopped early because it was cancelled (#74). The row goes back to Queued.
+pub const CANCELLED: &str = "Cancelled";
+
+/// Why this thread's download stopped early: a quit wins over a cancel, so the row is kept as
+/// an interrupted download for the next launch.
+fn stopped() -> &'static str {
+    if proc::stopping() {
+        QUITTING
+    } else {
+        CANCELLED
+    }
+}
 
 /// Highest ` (n)` tried before giving up (N2).
 pub const MAX_COPIES: u32 = 999;
@@ -1209,9 +1222,9 @@ fn run_in(
             tree.terminate(); // a descendant still holds stdout open
             break;
         }
-        if proc::stopping() {
-            tree.terminate(); // Queue is quitting (#67)
-            return Err(QUITTING.to_string().into());
+        if proc::should_stop() {
+            tree.terminate(); // Queue is quitting (#67), or the download was cancelled (#74)
+            return Err(stopped().to_string().into());
         }
     }
     // stdout closed, but yt-dlp may still be running: wait for it, unless Queue quits.
@@ -1221,7 +1234,7 @@ fn run_in(
             Ok(Some(status)) => status,
             Ok(None) => {
                 tree.terminate();
-                return Err(QUITTING.to_string().into());
+                return Err(stopped().to_string().into());
             }
             Err(e) => {
                 tree.terminate();
@@ -1238,7 +1251,7 @@ fn run_in(
         }
         proc::Waited::Quitting => {
             tree.terminate();
-            return Err(QUITTING.to_string().into());
+            return Err(stopped().to_string().into());
         }
     };
     tree.finish(); // yt-dlp is done: stop anything it left running
@@ -1507,6 +1520,11 @@ pub fn run_with_retries_saved(
             Err(f) if f.retryable && attempt < attempts => {
                 on_retry(attempt + 1);
                 wait(RETRY_WAITS[attempt as usize - 1]);
+                // A cancel (#74) or a quit cuts the pause short: don't start another attempt.
+                if proc::should_stop() {
+                    result = Err(Failure::from(stopped().to_string()));
+                    break;
+                }
             }
             _ => break,
         }
@@ -2449,6 +2467,23 @@ mod tests {
         assert_eq!(COPIES.load(Ordering::Relaxed), 1);
         assert_eq!(fs::read(out.join("Title.webm")).unwrap(), b"first");
         assert_eq!(names(&out), ["Title (3).webm", "Title.webm"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #74: a cancel during a cross-volume copy stops it between chunks: nothing appears in the
+    /// download folder, and the download is still in its work folder.
+    #[test]
+    fn a_cancel_mid_copy_leaves_nothing_in_the_download_folder() {
+        let (dir, work, out) = work_and_out("cancel-copy");
+        let src = work.join("Title.webm");
+        fs::write(&src, vec![7u8; 3 << 20]).unwrap();
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let err = proc::with_cancel(flag, || {
+            place_via(&src, &out.join("Title.webm"), &CROSS_VOLUME).unwrap_err()
+        });
+        assert_eq!(err.to_string(), CANCELLED);
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+        assert_eq!(names(&work), ["Title.webm"]);
         fs::remove_dir_all(dir).unwrap();
     }
 

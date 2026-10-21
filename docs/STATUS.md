@@ -1,8 +1,41 @@
 # Status
 
-**Updated:** 2026-10-19 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit follow-ups: #74 next, then #77
+**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #74 (PR #80 green, awaiting squash), then #77
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## Overnight run (2026-10-20 → 21, under D-028)
+- **Goal (owner):** complete M4. Stop at a good point after 06:00, by 06:30 on 2026-10-21, and wait for the owner.
+- **Approvals:** the `architect` agent (Fable 5.1) gives them under D-028. Its rulings are recorded per item below.
+- **Order (architect):** #74 → #77 → M2 audit → #14 → #15 → #17 → M3 audit → #33(a) → #25 → #32 → #31 → #30 → M4 audit. Scope is in D-029. The architect expects full M4 isn't reachable tonight; every merge must still be complete and safe.
+- **Time rules (architect):** no new item after 04:30 unless it's small; stop coding at 05:30; the STATUS handoff with a "For the owner" list is done by 06:00–06:30.
+
+## Handoff to another computer (2026-10-20)
+The owner is moving to another computer. #74 is pushed as a **work-in-progress commit on `queue/74-cancel-download`**, with no PR yet, at the owner's request.
+- **Resume:**
+  ```sh
+  git fetch && git checkout queue/74-cancel-download
+  ```
+  Then do the "Next bounded action" at the end of this file.
+- **Done on the new Mac (2026-10-20):** the branch is checked out, `npm ci` has run, the sidecars are built and pass `--check`, and Codex is signed in. Rust 1.99.0 is at `~/.cargo/bin` (now on the owner's PATH via `~/.zshrc`; the agent shell needs `export PATH="$HOME/.cargo/bin:$PATH"`). Node 24.21.0 comes from fnm, which matches `mise.toml`, so mise isn't installed.
+- **Set up the machine** first, as in README "Development":
+  - `mise install`, then `npm ci`;
+  - `scripts/build-ffmpeg.sh <triple>`, then `node scripts/fetch-sidecars.mjs --check`. `src-tauri/binaries/` is git-ignored.
+  - On the old Mac, cargo was at `/opt/homebrew/opt/rustup/bin` and node came from `~/.local/share/mise/shims`. Neither was on the agent shell's PATH by default.
+- **`qa/reports/` is git-ignored,** so report paths named in this file exist only on the old Mac. The verdicts and findings are summarised here.
+- **Codex CLI:** `scripts/codex-qa` needs Codex installed and signed in on the new machine (docs/QA.md).
+- **Working practice** (from Claude's local memory on the old Mac, which doesn't travel):
+  - **Per item:**
+    1. QA gates as in CLAUDE.md.
+    2. Ask for commit approval with the diff summary, the checks, the QA verdicts with report paths, the limitations and the proposed message.
+    3. On approval: commit on `<area>/<issue>-<slug>`, push, open a **draft** PR (`ci:bundle` label only for per-OS or native code), and watch CI by run ID. A labelled PR starts a duplicate run that gets cancelled.
+    4. When green: push a "Docs: STATUS handoff after #N" commit.
+    5. Wait for green again, then ask for squash approval. On approval: `gh pr ready`, then `gh pr merge --squash --delete-branch`, then sync `main`.
+  - **Approvals:** every commit needs its own approval (the STATUS handoff commit is the accepted exception). "proceed" means start the next item.
+  - **Codex's tests:** apply each `codex-qa test` patch with `git apply --exclude=docs/STATUS.md <patch>` once its tests pass. Don't ask first; the owner said "always add them". Remove the QA worktree afterwards.
+  - **codex-qa relay prompts:** for uncommitted work, say "no scope arguments, don't pass --base, don't kill processes by broad patterns, wait for the run to finish before handing back". `--base main` is right only on a feature branch whose work is committed, like #74 now. On `main` it reviews an empty diff, and `--base HEAD` reviews nothing. For a re-review, name the round, the earlier report and what changed, and which findings the owner accepted. If a relay's final report never arrives, read the newest `qa/reports/*-<mode>-*.md`.
+  - **Real sidecars:** Codex's sandbox can't run the real yt-dlp (`semctl`), so run `QUEUE_QA_REAL_SIDECARS=$PWD/binaries cargo test --locked --test download_real_d2 -- --ignored --test-threads=1` locally.
+  - **The dev app:** don't send keystrokes to it without asking the owner. Prefer CLI and fixture tests, and ask the owner to click through in-app checks.
 
 ## Current state
 - **M1 is complete on `main` (87b0d2d).** All five issues are closed:
@@ -69,6 +102,40 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
+
+## In progress: #74 (Q6, D-027) cancel a download in progress (branch `queue/74-cancel-download`)
+- **Backend:**
+  - `proc::with_cancel` gives each download thread a cancel flag. `proc::should_stop()` (quitting, or this thread cancelled) replaces `stopping()` at every stop point a download passes: the progress loop, waiting for yt-dlp, draining output, the retry pause, and the chunked copy. A cancel after a retry pause starts no new attempt.
+  - The new `download::CANCELLED` reason; a quit still reports `QUITTING`.
+  - `Queue::cancelled` puts an active row back to Queued with the note `queue::CANCELLED`. `run_all` skips rows cancelled during its run.
+  - `lib.rs` keeps each running download's flag in `Cancels`, changed only under the queue lock. The new command `queue_cancel(id)` sets the flag of a downloading or processing row. `complete_download` records a cancelled run as `cancelled`, but one that finished first as Done.
+- **UI:** a Cancel button on downloading and processing rows only (they still have no ✕). After a click it shows "Cancelling…", disabled, until the row's update arrives. A refused cancel shows the reason and re-enables the button.
+- **Tests:**
+  - `tests/cancel_q6_74.rs` (4, the native fake on every OS): cancel mid-download, while processing (a new `processing-hang` fixture scenario), and during a 403 retry pause (no second attempt), each with no process surviving and no staging left; a cancel stops only its own download.
+  - Unit tests: `Queue::cancelled`, `run_all` moving on, the flag's thread scoping (including after a panic), and a cancel mid-copy.
+  - 3 UI tests.
+  - Codex's #9 UI test now expects Cancel on a downloading row; it expected no buttons there before #74.
+  - Fault tests: without `run_all`'s skip a cancelled row restarts, and without the stop after the pause a second attempt runs.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test` 319 passed, the real-sidecar suite 13/13, `npm run build`, `npm test` 207/207.
+- `codex-qa test "#74"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261020-064044-test-tQFj.md`). Its 14 tests are added (D-021):
+  - `tests/cancel_q6_74_qa.rs` (9): pipe-boundary cancels, cleanup, restart and persistence of a cancelled row, and the runner;
+  - `tests/cancel_quit_q6_74_qa.rs`: a quit wins over a cancel. It's its own binary because `shut_down` can't be undone;
+  - a cancel after partial bytes are copied, in `partial_d2_72_qa.rs`;
+  - 3 UI tests for cancel and event ordering.
+- **Checks after adding them (macOS arm64):** fmt, clippy `-D warnings`, `cargo test` 330 passed, the real-sidecar suite 13/13, `npm test` 210/210. Windows and Linux haven't run yet (the PR's CI will).
+- **Not tested automatically:** the `lib.rs` glue (`Cancels`, `queue_cancel`, `complete_download`'s outcome), which needs a Tauri app, and cancelling a real yt-dlp/ffmpeg download. To check in the dev app (the owner clicks): cancel a real download, cancel during Download all, and cancel right as one finishes.
+- `codex-qa review --base main`, round 1: **FAIL**, two P2s, then fixed (`qa/reports/20261020-092229-review-LmIM.md`, on the new Mac):
+  - P2: `run_all` only skipped rows whose download it had started itself, so a manual download it was waiting for restarted after a cancel. Now `Queue` stamps each cancel with a counter (`cancels`, `cancelled_at`; not saved), and `run_all` skips Queued rows cancelled after it began, whoever started them. Rows cancelled before the run are still downloaded. The old post-download skip set is gone.
+  - P2: `complete_download` read the cancel flag before taking the queue lock, so a cancel `queue_cancel` had accepted could be recorded as Failed. The finalisation is now `lib.rs::record_download`, which reads the flag under the queue lock.
+  - New tests: `runner::a_manual_download_cancelled_while_the_run_waits_is_skipped` and `tests::a_cancel_accepted_before_the_outcome_is_recorded_is_never_a_failure` (that test also checks a finished file wins over a late cancel). Each one fails with its bug put back.
+- `codex-qa review` round 2 (the uncommitted fixes): **PASS WITH NOTES**, two P3s (`qa/reports/20261020-104116-review-Xspc.md`):
+  - P3: `cancelled_at` kept removed rows until restart. Fixed: `Queue::remove` drops the entry, tested by `removing_cancelled_rows_releases_their_cancel_history`.
+  - P3: the race test waits 100 ms for the recorder to reach the lock, so under heavy load it could miss a regression. **Accepted by the owner (2026-10-20):** a deterministic version would need a test hook in the production lock path. The test did catch the bug when it was put back.
+- **Checks after the review fixes (macOS arm64, new Mac):** fmt, clippy `-D warnings`, `cargo test` 333 passed, the real-sidecar suite 13/13, `npm run build`, `npm test` 210/210.
+- **Owner's dev-app check (2026-10-20):** all three cancel checks passed (see "Owner checks").
+- **Accepted by the architect (D-028):** `Queue::start` doesn't clear `cancelled_at`, so a row cancelled during a run, restarted by hand, failed and retried stays skipped until the next Download all. That's "the run moves on" (D-027).
+- **Architect rulings (D-028, 2026-10-20 ~18:15):** commit the review fixes, then D-028's docs as a second commit on this branch, push, and open the draft PR with `ci:bundle`. Both approved, and done: 8fdea44 (fixes) and ffe5d17 (D-028/D-029 docs).
+- **PR #80 (draft, `ci:bundle`):** CI run 39514852741 passed: tests on Linux, Windows and macOS, and bundles for macOS arm64/x64, Windows x64 and Linux x64.
 
 ## Done: #72 (D2, D-014) never leave a partial file under the final name; the macOS test flake (squash-merged from PR #79; 4-OS bundles green)
 - **The bug:** across volumes, `download::place` copied straight into the final filename, so a crash, or a quit whose write blocked past the 5 s wait, could leave a cut-off file under the real name.
@@ -540,6 +607,8 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-14: #39's Open folder opened the download folder in Finder, and Show in Finder selected the saved file (macOS).
 - 2026-10-15: #11's Format setting worked: Best quality gave `.webm`, Most compatible video gave `.mp4`, and Audio only gave `.opus`. Re-adding that link for Most compatible audio was refused, which is bug #59.
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
+- 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-Start #74 (cancel a download in progress, owner request; row goes back to Queued, marked Cancelled). Then #77 (long names on Linux), each through the QA gates. Then a fresh M2 `codex-qa audit` and closing M2.
+On branch `queue/74-cancel-download` (#74 is committed as WIP and pushed; the review gate has passed, and the review fixes plus this STATUS update are uncommitted in `queue.rs`, `lib.rs` and `docs/STATUS.md`):
+#74 is ready to squash-merge (PR #80; CI run 39514852741 green on all 3 OSes and 4 bundles). After the merge, continue the overnight order (see "Overnight run"): #77 (branch `download/77-long-names`, in QA), then the M2 audit, then M3.

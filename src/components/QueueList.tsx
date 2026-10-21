@@ -8,6 +8,10 @@ interface Props {
   onRetry: (id: number) => void;
   /** Q6: removes a row that isn't downloading. */
   onRemove: (id: number) => void;
+  /** Q6 (#74): stops a downloading or processing row. */
+  onCancel: (id: number) => void;
+  /** Rows whose Cancel was pressed and that haven't stopped yet. */
+  cancelling: ReadonlySet<number>;
   /** D7: reveals a Done row's file in the OS file manager. */
   onReveal: (id: number) => void;
   /** Updates are arriving (the event listener is up), so a retried row can be followed. */
@@ -73,7 +77,18 @@ function Thumbnail({ src }: { src: string | null }) {
   );
 }
 
-export default function QueueList({ items, onDownload, onRetry, onRemove, onReveal, connected, busy, highlight }: Props) {
+export default function QueueList({
+  items,
+  onDownload,
+  onRetry,
+  onRemove,
+  onCancel,
+  cancelling,
+  onReveal,
+  connected,
+  busy,
+  highlight,
+}: Props) {
   if (items.length === 0) {
     return <p className="mt-16 text-center text-sm text-neutral-500 dark:text-neutral-400">Queue is empty.</p>;
   }
@@ -149,6 +164,17 @@ export default function QueueList({ items, onDownload, onRetry, onRemove, onReve
               className="shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 dark:border-neutral-700 dark:text-neutral-200 disabled:opacity-40"
             >
               Retry
+            </button>
+          )}
+          {(item.status.state === "downloading" || item.status.state === "processing") && (
+            <button
+              type="button"
+              onClick={() => onCancel(item.id)}
+              disabled={cancelling.has(item.id)}
+              title="Stop this download. It goes back to the queue."
+              className="shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 dark:border-neutral-700 dark:text-neutral-200 disabled:opacity-40"
+            >
+              {cancelling.has(item.id) ? "Cancelling…" : "Cancel"}
             </button>
           )}
           {item.status.state !== "downloading" && item.status.state !== "processing" && (

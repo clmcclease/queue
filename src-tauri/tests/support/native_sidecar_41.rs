@@ -67,9 +67,13 @@ fn main() {
         .position(|a| a == "-P")
         .expect("download must pass -P");
     let work = PathBuf::from(&args[p + 1]);
-    if scenario == "hang" {
+    if scenario == "hang" || scenario == "processing-hang" {
         // #67: a download that never finishes, with a descendant holding its pipes (like
-        // ffmpeg under yt-dlp), until Queue quits.
+        // ffmpeg under yt-dlp), until Queue quits. #74: or while merging, until it's cancelled.
+        if scenario == "processing-hang" {
+            println!("QUEUE-POST {{\"status\":\"started\",\"postprocessor\":\"Merger\"}}");
+            io::stdout().flush().unwrap();
+        }
         fs::write(work.join("Title.webm.part"), b"partial").unwrap();
         fs::write(root.join("leader.pid"), process::id().to_string()).unwrap();
         let _child = Command::new(env::current_exe().unwrap())

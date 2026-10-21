@@ -144,3 +144,27 @@ For #70, the owner chose to commit three tiny media files (about 9 KB in all) un
 - **Why committed:** our ffmpeg can't encode H.264 or AAC (D-012), so they were made once on macOS with `avconvert` and `afconvert` (`make-fixtures.sh`, with the recipe and sha256 in the folder's README). The FLAC stream is made at test time by the bundled ffmpeg.
 - **Not covered:** VP9 + Opus `.webm`. That needs a full ffmpeg once; the no-H.264 fallback is covered by MJPEG + FLAC instead, which yt-dlp saves as `.mkv`.
 - `.gitattributes` marks `*.mp4` and `*.m4a` binary, and the test checks each fixture's size.
+
+## D-027 Cancelling a download returns the row to Queued — Confirmed (2026-10-17, built 2026-10-20)
+For #74 (Q6), the owner chose this behaviour when splitting cancel from #22:
+- **What Cancel does:** it stops that download's whole yt-dlp/ffmpeg tree and removes its staging folder and any partial or temporary file (D-014). The row goes back to **Queued** with the note "Cancelled. Download it again when you're ready.", and ✕ still removes it. A cancel is never a failure.
+- **Mechanism:** each download runs on its own thread with a cancel flag (`proc::with_cancel`). Every wait the download already stops at when Queue quits (#67) checks `proc::should_stop()`: the progress loop, waiting for yt-dlp, draining its output, the 403 retry pause (D-017) and the chunked cross-volume copy. A cancel stops exactly like a quit, but only for that download. A quit wins if both happen, so the row comes back as interrupted.
+- **Download all** skips rows cancelled during its run and moves on. A later Download all includes them again.
+- **A cancel that loses the race** to the finished file leaves the row Done. Once placement has finished, the download can't be undone.
+
+## D-028 Owner approvals delegated to the architect agent — Confirmed (2026-10-20)
+The owner asked for a software architect agent on Fable 5.1 (`.claude/agents/architect.md`) to give the approvals the implementing agent would otherwise ask the owner for, so work can continue overnight toward the goal of completing M4.
+- **Delegated:** commits, opening draft PRs, squash merges into `main` once CI is green, accepting or rejecting QA findings, design/scope/acceptance questions and new decisions, and backlog order. Each ruling is recorded in `docs/STATUS.md`; new decisions are marked "decided by the architect under D-028" so the owner can revisit them.
+- **Still the owner's:** releases, tags and publishing; GitHub settings, secrets and branch protection; spending money, accounts and credentials (API keys); force-pushes, history rewrites and other destructive actions; reversing an owner-confirmed decision; skipping or weakening a QA gate; anything that changes the privacy stance (local by default, no telemetry).
+- **Unchanged:** the QA gates (CLAUDE.md) still run for every item. If Codex itself fails twice, that item waits for the owner and work moves to the next unblocked item. Hand checks in the real app are batched for the owner in STATUS.
+- **Time box (first run):** work until M4 is complete or 06:30 on 2026-10-21, stopping at a good point after 06:00 and waiting for the owner.
+- **Ends** when the owner says so; until then it applies to later sessions too.
+
+## D-029 M3/M4 scope and order for the overnight run — Provisional (2026-10-20, decided by the architect under D-028)
+- Naming never blocks a download: the Tier-1 name is set as the row becomes Queued; the AI name replaces it later only if the row is still Queued and not user-edited. Edited names are re-sanitized and `%` is escaped in `-o`.
+- Templates in v1 are exactly the three N3 presets; no template language.
+- Names are capped at 150 characters and fit a 200-byte stem budget on every OS (#77), counting yt-dlp's fullwidth replacements.
+- API base URLs must be `https://` except loopback hosts. Keys only via `keyring`; tests use a fake store.
+- #33 is split: prompt, schema, validation and the eval set + runner first; the real model runs on the pinned files remain the owner's and gate M4 completion.
+- llama-server ships CPU/Metal builds (Vulkan only within D-013); no CUDA. Shared libs go in `bundle.resources`.
+- M2/M3 audits: fix RED/P1 tonight; file the rest.

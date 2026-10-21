@@ -8,12 +8,14 @@
 //!   is terminated or its handle closes.
 //!
 //! When Queue quits, [`shut_down`] refuses new trees and tells the running ones to stop (each
-//! wait loop checks [`stopping`] and terminates its own tree), and [`wait_for_trees`] waits for
-//! them (#67). Without it, a Unix process group would outlive Queue.
+//! wait loop checks [`should_stop`] and terminates its own tree), and [`wait_for_trees`] waits
+//! for them (#67). Without it, a Unix process group would outlive Queue. Cancelling one download
+//! (#74) uses the same wait loops through a per-thread flag ([`with_cancel`]).
 use std::io::{self, Read};
 use std::process::{Child, Command, ExitStatus};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// Whether Queue is quitting, how many trees are still alive, and how many jobs (a download or
@@ -46,6 +48,39 @@ pub fn stopping() -> bool {
     trees().stopping
 }
 
+thread_local! {
+    /// The cancel flag of the download running on this thread (#74), if any.
+    static CANCEL: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f` with `flag` as this thread's cancel flag (#74). Once the flag is set, every wait in
+/// `f` stops early and terminates its tree, as a quit does, but only for this one run.
+pub fn with_cancel<T>(flag: Arc<AtomicBool>, f: impl FnOnce() -> T) -> T {
+    struct Reset(Option<Arc<AtomicBool>>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            CANCEL.with(|c| *c.borrow_mut() = previous);
+        }
+    }
+    let _reset = Reset(CANCEL.with(|c| c.borrow_mut().replace(flag)));
+    f()
+}
+
+/// Whether this thread's run was cancelled ([`with_cancel`]).
+pub fn cancelled() -> bool {
+    CANCEL.with(|c| {
+        c.borrow()
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::SeqCst))
+    })
+}
+
+/// Whether this thread's work should stop: Queue is quitting, or its run was cancelled.
+pub fn should_stop() -> bool {
+    stopping() || cancelled()
+}
+
 /// Waits up to `limit` for every tree to end. Returns false if some are still alive.
 pub fn wait_for_trees(limit: Duration) -> bool {
     wait_until(limit, |t| t.live == 0)
@@ -73,10 +108,11 @@ fn wait_until(limit: Duration, done: impl Fn(&Trees) -> bool) -> bool {
     true
 }
 
-/// Sleeps for `d`, waking early if Queue starts quitting (a retry's pause, D-017).
+/// Sleeps for `d`, waking early if Queue starts quitting or the run is cancelled (a retry's
+/// pause, D-017).
 pub fn sleep_unless_quitting(d: Duration) {
     let until = Instant::now() + d;
-    while !stopping() {
+    while !should_stop() {
         let left = until.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return;
@@ -126,6 +162,7 @@ pub enum Waited<T> {
     Got(T),
     /// The time ran out, or the sender is gone.
     TimedOut,
+    /// Queue is quitting, or this thread's run was cancelled ([`should_stop`]).
     Quitting,
 }
 
@@ -133,7 +170,7 @@ pub enum Waited<T> {
 /// open by a descendant can't keep a tree alive through a quit (#67).
 pub fn recv_until<T>(rx: &Receiver<T>, until: Instant) -> Waited<T> {
     loop {
-        if stopping() {
+        if should_stop() {
             return Waited::Quitting;
         }
         let left = until.saturating_duration_since(Instant::now());
@@ -248,14 +285,14 @@ impl Tree {
         self.done = true;
     }
 
-    /// Waits for the child to exit, or returns `None` once Queue starts quitting (the caller
-    /// then terminates the tree).
+    /// Waits for the child to exit, or returns `None` once Queue starts quitting or the run is
+    /// cancelled (the caller then terminates the tree).
     pub fn wait_unless_quitting(&mut self) -> io::Result<Option<ExitStatus>> {
         loop {
             if let Some(status) = self.child.try_wait()? {
                 return Ok(Some(status));
             }
-            if stopping() {
+            if should_stop() {
                 return Ok(None);
             }
             std::thread::sleep(POLL);
@@ -475,6 +512,29 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #74: a cancel flag applies only to the thread running [`with_cancel`], and only for
+    /// its duration; a cancelled retry pause ends at once.
+    #[test]
+    fn a_cancel_flag_stops_only_its_own_thread_and_only_inside_with_cancel() {
+        let flag = Arc::new(AtomicBool::new(true));
+        assert!(!cancelled());
+        let other = std::thread::spawn(should_stop);
+        with_cancel(flag.clone(), || {
+            assert!(cancelled() && should_stop());
+            let paused = Instant::now();
+            sleep_unless_quitting(Duration::from_secs(10));
+            assert!(paused.elapsed() < Duration::from_secs(1));
+            // A nested run (none today) gets its own flag, then this one is back.
+            with_cancel(Arc::new(AtomicBool::new(false)), || assert!(!cancelled()));
+            assert!(cancelled());
+        });
+        assert!(!cancelled(), "reset after the run");
+        assert!(!other.join().unwrap(), "another thread isn't cancelled");
+        let reset = std::panic::catch_unwind(|| with_cancel(flag, || panic!("run panicked")));
+        assert!(reset.is_err());
+        assert!(!cancelled(), "reset even after a panic");
+    }
 
     #[test]
     fn read_capped_returns_everything_up_to_the_cap_and_errors_beyond() {

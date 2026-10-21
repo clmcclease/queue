@@ -25,7 +25,7 @@
 
 ## Item lifecycle
 
-Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. Failed rows can be retried, and a row interrupted by quitting comes back `Queued` (D-025). M3/M4 add a naming step between fetching and `Queued`.
+Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. Failed rows can be retried, a row interrupted by quitting comes back `Queued` (D-025), and a cancelled download goes back to `Queued`, marked Cancelled (D-027). M3/M4 add a naming step between fetching and `Queued`.
 
 1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, and store the metadata. The name is the title for now; from M3 the active naming provider computes it here, with Tier 1 first so a name is always available instantly.
 2. **Start:** the runner takes the next `Queued` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
