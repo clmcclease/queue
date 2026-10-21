@@ -196,3 +196,9 @@ The owner asked for a software architect agent on Fable 5.1 (`.claude/agents/arc
 - Upstream's Windows archive carries no llama.cpp `LICENSE`, so Windows installs the MIT text from `scripts/licenses/llama.cpp-b11669-LICENSE` (byte-identical to the macOS and Linux archives' copy) via the manifest's `repoFiles`; a pin bump must re-check that identity. Decided by the architect under D-028, 2026-10-21.
 - `--list-devices` lists accelerators only and prints `Available devices:` / `(none)` on a CPU-only machine; on Windows and Linux ggml loads the CPU backend only when a model is loaded, so `--check` requires the device list and (b) must prove the CPU backend loads on Windows and Linux, either in CI with a small sha256-pinned test GGUF (a fixture, not the user's model: CI still never downloads the pinned models) or, failing that, as an owner hand check listed in STATUS. Decided by the architect under D-028, 2026-10-21.
 - #91 is not started tonight; #30(a) is the last item of the run. Decided by the architect under D-028, 2026-10-21.
+
+## D-030 A running download keeps the folder it started with — Confirmed (2026-10-21)
+The owner found this while testing #31 in the app, and chose to keep it:
+- **Rule:** each download reads the download folder once, when it starts, and places its finished file there (D-014). Changing the folder in Settings applies to downloads that start afterwards. A running download is never moved to the new folder.
+- **Why:** a file never lands in a folder the user picked after starting it, perhaps by mistake, and a job never ends up half in one place and half in another. Browsers behave the same way.
+- **In the app:** while a download is running, Settings shows "Downloads in progress keep the folder they started in." under the folder picker.

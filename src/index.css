@@ -1,1 +1,11 @@
 @import "tailwindcss" source("../src");
+
+/* The page behind the panels, so overscroll never shows a white gap in dark mode. */
+body {
+  background: var(--color-white);
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background: var(--color-neutral-900);
+  }
+}

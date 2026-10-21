@@ -354,6 +354,7 @@ export default function App() {
   }
 
   const anyQueued = items.some((item) => item.status.state === "queued");
+  const anyActive = items.some((item) => item.status.state === "downloading" || item.status.state === "processing");
 
   return (
     <main className="relative flex h-screen flex-col bg-white p-4 dark:bg-neutral-900">
@@ -422,7 +423,7 @@ export default function App() {
             cancelling={cancelling}
             onReveal={reveal}
             connected={listening}
-            busy={!listening || running || items.some((item) => item.status.state === "downloading" || item.status.state === "processing")}
+            busy={!listening || running || anyActive}
             highlight={highlight}
           />
         </div>
@@ -436,7 +437,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {settingsOpen && <SettingsPanel folder={folder} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={savedNaming} models={models} onModels={trackModels} />}
+      {settingsOpen && <SettingsPanel folder={folder} downloading={anyActive} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={savedNaming} models={models} onModels={trackModels} />}
     </main>
   );
 }
