@@ -10,7 +10,7 @@
 #[path = "support/native.rs"]
 mod native;
 
-use queue_lib::{ai, local, models, naming};
+use queue_lib::{ai, local, models};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -140,10 +140,10 @@ fn the_real_4b_model_loads_and_names_within_the_budget() {
     let pid = runtime.pid().unwrap();
     let loaded = rss_mib(pid);
     let asked = Instant::now();
-    let first = ai::ask(&endpoint, &naming::sample());
+    let first = ai::ask(&endpoint, &queue_lib::naming::sample());
     let first_latency = asked.elapsed();
     let asked = Instant::now();
-    let second = ai::ask(&endpoint, &naming::sample());
+    let second = ai::ask(&endpoint, &queue_lib::naming::sample());
     let second_latency = asked.elapsed();
     let after = rss_mib(pid);
     std::thread::sleep(idle + Duration::from_millis(500));
