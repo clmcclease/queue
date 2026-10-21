@@ -27,6 +27,9 @@ url = "=2.5.8"
 serde_json = "=1.0.151"
 tauri-plugin-dialog = "=2.8.1"
 tauri-plugin-single-instance = "=2.5.1"
+# One blocking HTTP client for naming providers, the local model server and the model download
+# (D-029); rustls, so there's no OpenSSL on Linux.
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "json"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"
