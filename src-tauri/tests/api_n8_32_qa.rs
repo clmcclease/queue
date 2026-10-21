@@ -128,7 +128,7 @@ fn n8_saved_keyless_setup_names_unicode_and_reserved_output_through_the_real_job
         let service = Service::start(200, chat(answer), false);
         let setup = settings(&service.url);
         let store = Memory::default();
-        let resolve = ai::Resolving(|| ai::endpoint(&setup, &store));
+        let resolve = ai::Resolving(|| ai::endpoint(&setup, &store, ai::LocalModel::Missing));
         let title = if answer.starts_with("NUL") {
             "Original"
         } else {
@@ -156,7 +156,7 @@ fn n8_resolving_each_job_uses_the_replaced_key_then_no_key_after_removal() {
         }
         let service = Service::start(200, chat("Café 日本語"), false);
         let setup = settings(&service.url);
-        let resolve = ai::Resolving(|| ai::endpoint(&setup, &store));
+        let resolve = ai::Resolving(|| ai::endpoint(&setup, &store, ai::LocalModel::Missing));
         let (queue, id) = queued("  Café 日本語 [4K] 🔥  ");
         assert!(run_naming_job(&queue, id, &resolve).is_some());
         let request = service.finish().unwrap().to_ascii_lowercase();
@@ -238,7 +238,7 @@ fn n8_switching_off_during_key_resolution_must_prevent_the_old_request() {
     };
     let resolve = ai::Resolving(|| {
         let snapshot = current.lock().unwrap().clone(); // same ordering as naming_worker
-        ai::endpoint(&snapshot, &store)
+        ai::endpoint(&snapshot, &store, ai::LocalModel::Missing)
     });
     let result = run_naming_job(&queue, id, &resolve);
     let received = service.finish();
@@ -262,7 +262,7 @@ fn n8_a_job_already_queued_when_off_is_saved_must_keep_an_unasked_rules_name() {
         ..Default::default()
     };
     let store = Memory::broken();
-    let resolve = ai::Resolving(|| ai::endpoint(&setup, &store));
+    let resolve = ai::Resolving(|| ai::endpoint(&setup, &store, ai::LocalModel::Missing));
     let _ = run_naming_job(&queue, id, &resolve); // the worker still receives the queued id
     let queue = queue.lock().unwrap();
     assert_eq!(

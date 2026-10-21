@@ -33,12 +33,14 @@ ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "js
 # API keys (#32, D-029): macOS Keychain, Windows Credential Manager, and on Linux the Secret
 # Service over zbus (pure Rust, no libdbus). Only through `secrets.rs`; tests never touch it.
 keyring = { version = "=4.2.0", default-features = false, features = ["v1"] }
+# Checks a downloaded model's sha256 (#31, D-029); already in the lock via Tauri.
+sha2 = "=0.10.9"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
 
 # Only Linux and the BSDs reveal through the opener plugin (FileManager1 over D-Bus); macOS and
 # Windows use Queue's own launchers in reveal.rs (D-022).

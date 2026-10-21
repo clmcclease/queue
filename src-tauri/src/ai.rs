@@ -279,19 +279,37 @@ pub enum Unavailable {
     Off,
     /// The local model isn't downloaded or running yet (#30, #31).
     ModelMissing,
+    /// The local model is downloaded, but this version of Queue can't run it yet (#31; #30
+    /// replaces this with the running server).
+    RuntimeMissing,
     /// No API service is set up: no valid base URL or no model (#32). A missing key is fine.
     NotSetUp,
     /// The OS credential store couldn't be read (#32). It never stops the app.
     StoreUnreachable,
 }
 
+/// Whether the chosen local model is downloaded and checked (#31). The caller looks at the disk;
+/// this module never does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalModel {
+    Missing,
+    Downloaded,
+}
+
 /// Where the chosen provider names things, or why nowhere. Nothing is sent for an unavailable
 /// one. `Local` never reads the API settings or the key: it only ever means this computer.
-pub fn endpoint(settings: &Settings, secrets: &dyn Secrets) -> Result<Endpoint, Unavailable> {
+pub fn endpoint(
+    settings: &Settings,
+    secrets: &dyn Secrets,
+    local: LocalModel,
+) -> Result<Endpoint, Unavailable> {
     match settings.naming_provider {
         Provider::Off => Err(Unavailable::Off),
-        // #30/#31 return the running local server here (http://127.0.0.1:<port>/v1).
-        Provider::Local => Err(Unavailable::ModelMissing),
+        // #30 returns the running local server here (http://127.0.0.1:<port>/v1).
+        Provider::Local => Err(match local {
+            LocalModel::Missing => Unavailable::ModelMissing,
+            LocalModel::Downloaded => Unavailable::RuntimeMissing,
+        }),
         Provider::Api => api_endpoint(settings, secrets),
     }
 }
@@ -752,13 +770,33 @@ mod tests {
         let api = |base: &str, model: &str| with(Provider::Api, base, model);
         let ready = api("https://api.example.test/v1", "m");
         assert_eq!(
-            endpoint(&with(Provider::Off, "https://x.test", "m"), &none).err(),
+            endpoint(
+                &with(Provider::Off, "https://x.test", "m"),
+                &none,
+                LocalModel::Missing
+            )
+            .err(),
             Some(Unavailable::Off)
         );
         assert_eq!(
-            endpoint(&with(Provider::Local, "https://x.test", "m"), &none).err(),
+            endpoint(
+                &with(Provider::Local, "https://x.test", "m"),
+                &none,
+                LocalModel::Missing
+            )
+            .err(),
             Some(Unavailable::ModelMissing),
             "Local never uses the API settings"
+        );
+        assert_eq!(
+            endpoint(
+                &with(Provider::Local, "https://x.test", "m"),
+                &none,
+                LocalModel::Downloaded
+            )
+            .err(),
+            Some(Unavailable::RuntimeMissing),
+            "a downloaded model still can't be asked until #30"
         );
         for not_set_up in [
             api("", ""),
@@ -766,12 +804,12 @@ mod tests {
             api("http://example.com/v1", "m"),
         ] {
             assert_eq!(
-                endpoint(&not_set_up, &none).err(),
+                endpoint(&not_set_up, &none, LocalModel::Missing).err(),
                 Some(Unavailable::NotSetUp)
             );
             assert!(!askable(&not_set_up));
         }
-        let keyless = endpoint(&ready, &none).unwrap();
+        let keyless = endpoint(&ready, &none, LocalModel::Missing).unwrap();
         assert_eq!(
             (
                 keyless.base_url.as_str(),
@@ -780,10 +818,10 @@ mod tests {
             ),
             ("https://api.example.test/v1", "m", None)
         );
-        let keyed = endpoint(&ready, &Memory::with("sk-1")).unwrap();
+        let keyed = endpoint(&ready, &Memory::with("sk-1"), LocalModel::Missing).unwrap();
         assert_eq!(keyed.key.as_deref(), Some("sk-1"));
         assert_eq!(
-            endpoint(&ready, &Memory::broken()).err(),
+            endpoint(&ready, &Memory::broken(), LocalModel::Missing).err(),
             Some(Unavailable::StoreUnreachable)
         );
         assert!(askable(&ready), "decided without reading the key");

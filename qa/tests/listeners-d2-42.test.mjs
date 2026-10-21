@@ -70,6 +70,7 @@ function backend() {
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return "default";
     if (command === "queue_storage_problem") return null;
@@ -166,10 +167,10 @@ for (const order of ["oldest", "newest"]) {
     assert.equal(ipc.active.size, 0);
     await releaseAll(ipc, order);
 
-    for (const event of ["queue://item", "queue://runner", "queue://storage"]) {
+    for (const event of ["queue://item", "queue://runner", "queue://storage", "queue://model"]) {
       assert.equal(ipc.count(event), 1, `${event}: one active listener after the replay's cleanup`);
     }
-    assert.equal(ipc.active.size, 3);
+    assert.equal(ipc.active.size, 4);
 
     let calls = 0;
     const done = { ...ITEM, rev: 3, status: { state: "done", path: "/Users/me/Downloads/Song.m4a" } };

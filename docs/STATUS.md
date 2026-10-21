@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #32(a) (PR #92), then #31
+**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #31 (built, QA next), then #30
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -110,7 +110,59 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #32(a) (N8) OpenAI-compatible API provider (PR #92, branch `naming/32-api-provider`)
+## In progress: #31 (N7) local model manager: first-run download (branch `naming/31-model-manager`, on 90a5106, uncommitted)
+- **Design ruled by the architect under D-028** (D-029's #31 bullets). `Local` stays unavailable until #30: `ModelMissing` without the file, `RuntimeMissing` with it. The PR gets `ci:bundle` (per-OS memory detection).
+- **`models.rs`:**
+  - **Pins:** both from bartowski, verified. Qwen3 4B Instruct 2507 Q4_K_M is 2,497,280,736 bytes (the default). Qwen3.5 2B Q4_K_M is 1,396,198,496 bytes: **1.4 GB, not D-016's 1.28 GB** (that was unsloth's file).
+  - **Files:** `app_local_data_dir()/models/`: `<file>`, `<file>.part`, and `<file>.sha256` (sha256sum format).
+  - **`state()`** (Missing, Partial, Ready, Unverified) never hashes.
+  - **`download()`:**
+    - chunked ranged GETs: 16 MiB per request, 180 s per request, since ureq has no per-read timeout;
+    - redirects followed by hand, at most 5 hops, https only (or loopback);
+    - Hugging Face's `x-linked-size`/`x-linked-etag` checked before any body;
+    - 206 with the pinned total required, a 200 refused without writing, a 416 discarded, and the `GGUF` magic checked;
+    - two empty attempts stop with the `.part` kept, and a slow attempt that moved bytes continues;
+    - the whole sha256 is checked before a no-clobber hard link; a mismatch deletes the `.part` and says so.
+  - **`suggested()`:** the small model under 7.5 GiB, or without a GPU backend (Apple silicon only, tonight). `total_memory()` uses `sysctlbyname`, `/proc/meminfo` or `GlobalMemoryStatusEx`.
+  - `sha2 =0.10.9` is the one new direct dependency (already in the lock; one lock line).
+- **`ai.rs`:** `endpoint(settings, secrets, local)` with `LocalModel { Missing, Downloaded }`; `Unavailable::RuntimeMissing`.
+- **Settings:** `localModel` (`Option`; `None` follows the suggestion).
+- **Commands** (async via `off_main`): `model_status`, `settings_set_local_model`, `model_download` (one at a time, on a `proc::job()` thread under `proc::with_cancel`, so Cancel and quit stop it and keep the `.part`), `model_cancel`, `model_delete` (refused while that model downloads). One `queue://model` event, throttled to 250 ms.
+- **UI:**
+  - `ModelBanner.tsx`: Download (the size and huggingface.co in the same sentence: the consent), Downloading with Cancel, paused with Resume, Checking, the error with Try again, a stray file, and "downloaded, can't run yet".
+  - `ModelManager.tsx`, under Local in Settings: the two models with sizes and the suggestion, the state, the full path, the source, Download, Cancel, Resume, and a two-step Delete.
+  - App refreshes the naming status after each model event; a refresh asked for before a save can't overwrite it.
+- **Tests:**
+  - unit: the pin table, `state()`, `suggested()`, the meminfo and Content-Range parsers, Local with a downloaded model gives `RuntimeMissing`;
+  - `tests/model_n7_31.rs` (11, a loopback fake): full, cut-off then resume, resuming a `.part`, checksum mismatch, cancel within a second, Range ignored, a wrong total and mismatching `x-linked-*`, redirects (relative, http refused, a 6th hop), stall versus slow, never overwrite, not a GGUF;
+  - `tests/model_quit_n7_31.rs` (quit within a second, `.part` kept);
+  - `qa/tests/model-n7-31.test.mjs` (7 UI tests).
+  - Older UI mocks answer `model_status`, and #42's listener test expects `queue://model`.
+- **Real pins, by hand on macOS (2026-10-21, 01:0x):** `QUEUE_QA_REAL_PINS=1 cargo test --lib real_pins -- --ignored` gave both files with "size, sha256 and GGUF magic match" (16 bytes each, nothing downloaded).
+- **Docs:** PRD §7 and §10, and D-016's consequence line, now say ~1.4 GB for the small model.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test` 461 passed, `tsc`, `npm test` 262/262, `git diff --check`. The real-sidecar suite wasn't run: #31 doesn't touch yt-dlp downloads.
+- `codex-qa test "#31"`: **FAIL**, 2 P2s, both fixed (`qa/reports/20261021-010559-test-IE3a.md`, in the #31 worktree):
+  - Cancel during a stalled response waited for the request's 180 s budget: a blocked read can't see the flag. Now each chunk's request and reads run on a helper thread that only reads the network and streams pieces through a bounded channel. The download thread writes the file and checks for a cancel or a quit every 50 ms, so it stops at once. An abandoned helper ends at its next read or budget, and can never write. A 416 is now `Chunk::Restart` (the download thread deletes the `.part`).
+  - A late command reply (Cancel) could replace a newer `queue://model` event and show "Downloading… 99%" after the download finished. Now `useModelStatus` counts events and returns a `track` wrapper: a reply is used only if no event arrived while it was on its way. `ModelBanner` and `ModelManager` go through it.
+
+  Its tests are added (D-021): `tests/model_n7_31_qa.rs` (10: resume recovery, checksums, malformed ranges, collisions, Unicode paths, persistence, timeouts, the stalled cancel) and 4 UI tests in `model-n7-31.test.mjs` (stale snapshots, Windows paths, a failed switch, the Cancel race). Codex re-ran the real pin check: both match.
+- **Checks (macOS arm64, after the fixes):** fmt, clippy `-D warnings`, `cargo test` 471 passed, `tsc`, `npm test` 266/266, `git diff --check`.
+- `codex-qa review`, round 1: **FAIL**, 1 P1 and 2 P2s, all fixed (`qa/reports/20261021-011706-review-Iuff.md`):
+  - **P1:** the final `sync_all` ran on a read-only handle, which Windows can't flush, so no download could finish there. Now the `.part` is opened with write access. The model download tests run on Windows in CI.
+  - **P2:** without hard links, the fallback was a check-then-rename, which could replace a file created in between. Now `copy_new` copies into a file created with `create_new` (atomic no-replace), and a cut-off copy has no marker, so it's Unverified. Test: `the_copy_fallback_never_replaces_a_file`.
+  - **P2:** a model switch's reply could lose to an older progress event, with nothing sent after it. Now `settings_set_local_model` and the start of a download also emit `queue://model`, so the newest state always arrives as an event. Test: "a switch survives an older download event that arrives while it's saving".
+  - A model download failing during Download all is independent (its own thread and state); checking that needs the running app, so it's on #84.
+- **Checks (macOS arm64, after round 1's fixes):** fmt, clippy `-D warnings`, `cargo test` 472 passed, `tsc`, `npm test` 267/267, `git diff --check`.
+- `codex-qa review`, round 2: **FAIL**, 2 P2s and a P3, all fixed (`qa/reports/20261021-012322-review-9WzD.md`):
+  - **P2:** snapshots were built and sent concurrently, so a late one could undo a completion, and `track`'s event counting couldn't tell. Now every `ModelStatus` has a `rev`, given under one lock (`MODEL_REV`) that is also held while an event is sent, so revisions follow the state and events go out in order. The window shows only a newer `rev`, from an event or a reply; this replaces `track`'s heuristic. Codex's two stale-snapshot UI tests now take their old snapshot first, as the backend does.
+  - **P2:** the first snapshot was asked for before the listener was registered, so a completion in between was lost, and a failed registration was silent. Now it listens, then asks; if listening fails, it asks every second. Tests: "the model status is asked for only after its listener is registered", "…polled instead", and "an older event never replaces a newer reply".
+  - **P3:** serde named the default model `qwen3_4b_instruct2507`, not the window's `qwen3_4b_instruct_2507`. It's renamed explicitly, and a test checks that both ids read both ways.
+- **Checks (macOS arm64, after round 2's fixes):** fmt, clippy `-D warnings`, `cargo test` 472 passed, `tsc`, `npm test` 270/270, `git diff --check`.
+- `codex-qa review`, round 3: **FAIL**, 1 P2, fixed (`qa/reports/20261021-013227-review-jkLG.md`): the copy fallback (no hard links) copied the whole model in one `io::copy`, ignoring a cancel or a quit; a quit could pass the 5 s shutdown wait and leave a cut-off file. Now `copy_new` copies 1 MiB at a time, checking `should_stop()`; on a stop it removes the unfinished copy, keeps the `.part`, and returns `Stopped` (`place` now reports an `Outcome`). Test: `the_copy_fallback_stops_on_cancel_and_keeps_the_partial_file` (a quit takes the same check).
+- **Checks (macOS arm64, after round 3's fix, Rust only):** fmt, clippy `-D warnings`, `cargo test` 473 passed, `git diff --check`. The UI is unchanged since `npm test` passed 270/270.
+- `codex-qa review`, round 4: **PASS WITH NOTES**, no findings (`qa/reports/20261021-013755-review-1t92.md`). Its suggested tests aren't added (P3s, for the architect): a cancel after the copy has written several blocks (the stop check is the same per block; a real mid-copy test would race a fast local copy), injected write/sync/marker failures (each already maps to a message, and the `.part` survives), and a rejected first `model_status` (a later event or poll brings it). The model-download-during-Download-all test is on #84.
+
+## Done: #32(a) (N8) OpenAI-compatible API provider (squash-merged from PR #92 as 90a5106; 3-OS tests and 4-target bundles green; #32 closed, (b) is #91)
 - **Design ruled by the architect under D-028** (D-029's #32 bullets): OpenAI-compatible only; the native Anthropic API is #32(b), filed as **#91** (P1, gates M4). The PR gets the `ci:bundle` label.
 - **Keys (`secrets.rs`):**
   - the `Secrets` trait: `Keyring` (the real store, `keyring =4.2.0` with only `v1`: Keychain, Credential Manager, and Secret Service over zbus, pure Rust with no libdbus or OpenSSL in the lock) and `Memory` (tests);
@@ -859,5 +911,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#32(a):** PR #92 (`ci:bundle`); when `test` (3 OSes) and `bundle` (4 targets) are green on this handoff, squash-merge it (pre-approved), post "(a) shipped in PR #92; (b) is #91" on #32, then sync `main`.
-2. Then **#31** (model manager: first-run model download), then #30, #91 and the M4 audit (D-029 order).
+1. **#31** (worktree branch `naming/31-model-manager`, on 90a5106, uncommitted): `codex-qa test` FAIL (2 fixed), review rounds 1–3 FAIL (3 + 3 + 1 fixed), round 4 PASS WITH NOTES. Next: the commit request to the architect; a `ci:bundle` draft PR.
+2. Then **#30** (llama-server runtime), #91 and the M4 audit (D-029 order).

@@ -52,7 +52,7 @@ export const PROVIDERS: { value: Provider; label: string; detail: string }[] = [
 /** The chosen provider and why it can't be asked yet (`null` when it can). */
 export interface NamingStatus {
   provider: Provider;
-  unavailable: "off" | "model_missing" | "not_set_up" | "store_unreachable" | null;
+  unavailable: "off" | "model_missing" | "runtime_missing" | "not_set_up" | "store_unreachable" | null;
 }
 
 export const namingStatus = () => invoke<NamingStatus>("naming_status");

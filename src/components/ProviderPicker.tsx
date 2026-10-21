@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
 import ApiSetup from "./ApiSetup";
+import ModelManager from "./ModelManager";
+import type { ModelStatus, Track } from "../models";
 import { PROVIDERS, namingProvider, setNamingProvider, type NamingStatus, type Provider } from "../settings";
 
 /**
  * Who suggests names (N4, #25): Local (default), API or Off, saved by the backend as it
- * changes; choosing API opens its setup (#32) below it. `status` is the main window's (so a saved API choice still says it isn't set up when
+ * changes; choosing API opens its setup (#32) below it, and Local its model (#31). `status` is the main window's (so a saved API choice still says it isn't set up when
  * Settings reopens); `onStatus` gets the new one after a save, so the banner and this note follow.
  */
 export default function ProviderPicker({
   status,
   onStatus,
+  models,
+  onModels,
 }: {
   status?: NamingStatus | null;
   onStatus?: (status: NamingStatus) => void;
+  models?: ModelStatus | null;
+  onModels?: Track;
 }) {
   const [provider, setShown] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +82,7 @@ export default function ProviderPicker({
         </label>
       ))}
       {provider === "api" && <ApiSetup onStatus={onStatus} />}
+      {provider === "local" && onModels && <ModelManager status={models ?? null} track={onModels} />}
       {error && (
         <p role="alert" data-role="provider-error" className="text-xs text-red-600 dark:text-red-400">
           {error}

@@ -4,6 +4,7 @@ import FolderPicker from "./FolderPicker";
 import FormatPicker from "./FormatPicker";
 import TemplatePicker from "./TemplatePicker";
 import ProviderPicker from "./ProviderPicker";
+import type { ModelStatus, Track } from "../models";
 import type { NamingStatus } from "../settings";
 
 interface Props {
@@ -12,6 +13,9 @@ interface Props {
   /** The AI naming provider changed (#25). */
   namingStatus?: NamingStatus | null;
   onNamingStatus?: (status: NamingStatus) => void;
+  /** The local model's download (#31). */
+  models?: ModelStatus | null;
+  onModels?: Track;
 }
 
 /**
@@ -19,7 +23,7 @@ interface Props {
  * closes it. Later items add their sections here (AI #25/#31/#32,
  * yt-dlp updates #21, notifications #20). Every change is saved by the backend as it's made.
  */
-export default function SettingsPanel({ folder, onClose, namingStatus, onNamingStatus }: Props) {
+export default function SettingsPanel({ folder, onClose, namingStatus, onNamingStatus, models, onModels }: Props) {
   const close = useRef<HTMLButtonElement>(null);
 
   // Focus moves into the panel; App puts it back on the opener once the queue isn't inert.
@@ -86,7 +90,7 @@ export default function SettingsPanel({ folder, onClose, namingStatus, onNamingS
         <h3 id="settings-ai" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           AI naming
         </h3>
-        <ProviderPicker status={namingStatus} onStatus={onNamingStatus} />
+        <ProviderPicker status={namingStatus} onStatus={onNamingStatus} models={models} onModels={onModels} />
       </section>
     </div>
   );

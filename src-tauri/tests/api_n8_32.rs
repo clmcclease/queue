@@ -186,10 +186,10 @@ fn n8_local_never_contacts_the_stored_api_service() {
     let mut q = Queue::default();
     let id = queued(&mut q, "Title");
     let q = Mutex::new(q);
-    let resolve = ai::Resolving(|| ai::endpoint(&settings, &store));
+    let resolve = ai::Resolving(|| ai::endpoint(&settings, &store, ai::LocalModel::Missing));
     assert!(run_naming_job(&q, id, &resolve).is_none(), "nothing asked");
     assert_eq!(
-        ai::endpoint(&settings, &store).err(),
+        ai::endpoint(&settings, &store, ai::LocalModel::Missing).err(),
         Some(ai::Unavailable::ModelMissing)
     );
     assert!(!connected(&listener), "no connection to the API service");
@@ -220,7 +220,7 @@ fn n8_a_provider_changed_during_the_job_is_never_sent_to() {
             naming_provider: *provider.lock().unwrap(),
             ..api(&url)
         };
-        ai::endpoint(&settings, &store)
+        ai::endpoint(&settings, &store, ai::LocalModel::Missing)
     });
     assert!(
         run_naming_job(&q, id, &resolve).is_none(),

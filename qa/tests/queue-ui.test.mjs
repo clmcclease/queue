@@ -57,6 +57,7 @@ function ambient(handler) {
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return "default";
     if (command === "queue_storage_problem") return null;
@@ -1372,6 +1373,7 @@ test("D2: the choices stay disabled until the saved format is known, then reflec
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return pending.promise;
     if (command === "settings_set_format") return args.format;
@@ -1471,6 +1473,7 @@ test("Q7 #68: if the save-warning listener can't register, the save status is st
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return "default";
     if (command === "queue_storage_problem") {

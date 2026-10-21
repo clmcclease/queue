@@ -53,6 +53,7 @@ async function mount(handler, { strict = false } = {}) {
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return "default";
     return null;
@@ -78,6 +79,7 @@ test("#11 QA: a pending save disables every choice, prevents a second write, and
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return saved;
     if (command === "settings_set_format") {
@@ -105,6 +107,7 @@ test("#11 QA: each preset is sent to IPC once and remains selected after reopeni
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return saved;
     if (command === "settings_set_format") { saves.push(args.format); saved = args.format; return saved; }
@@ -127,6 +130,7 @@ test("#11 QA: a failed initial settings read disables writes and reopening can r
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") {
       if (fail) throw "read failed <b>日本語</b>";
@@ -153,6 +157,7 @@ test("#11 QA: StrictMode ignores a stale read failure after a newer successful r
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return ++reads === 1 ? stale.promise : "audio";
   }, { strict: true });
@@ -170,6 +175,7 @@ test("#11 QA: a failed save restores the saved choice and a successful retry cle
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return "compatibleVideo";
     if (command === "settings_set_format") {
