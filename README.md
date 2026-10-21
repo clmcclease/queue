@@ -29,7 +29,7 @@ export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 mise install                       # installs the pinned Node; rustup reads rust-toolchain.toml on first cargo run
 npm ci
 scripts/build-ffmpeg.sh aarch64-apple-darwin   # minimal LGPL ffmpeg/ffprobe from source (~30 s; use your target triple)
-node scripts/fetch-sidecars.mjs --check         # pinned yt-dlp + deno, checks yt-dlp sees all of them
+node scripts/fetch-sidecars.mjs --check         # pinned yt-dlp, deno and llama-server; checks they all run
 
 npm run tauri dev                  # opens the app window
 npm run build && npm test          # frontend build + scaffold tests
