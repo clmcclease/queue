@@ -75,6 +75,7 @@ fn q7_round_trips_messy_unicode_metadata_and_exact_completed_paths() {
                 duration: Some(123.25),
                 thumbnail: Some("https://img.test/a?x=1&x=2".into()),
                 site: Some("Generic".into()),
+                ..Default::default()
             }),
         )
         .unwrap();

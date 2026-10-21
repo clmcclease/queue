@@ -20,14 +20,14 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #5 | Q2 | P0 | queue | **Validate URLs and reject duplicates** — Inline error for invalid URLs; a duplicate shows a toast instead of a second row. |
 | #6 | Q3 | P0 | queue | **Fetch metadata on add (yt-dlp -J)** — Row fills in thumbnail, title, channel, and duration before any download. |
 | #48 | D2 | P0 | download | **Auto-retry YouTube 403s and reuse fetched info** — Retry a 403 up to 2× with backoff (~10 s/30 s); download from the saved `-J` via `--load-info-json` when it's under 5 h old, a margin before YouTube's ~6 h link expiry (D-017). |
-| #7 | Q4,Q5 | P0 | queue | **Sequential queue runner with item states** — Download all processes ready items one at a time, in order by id; rows still fetching info don't block ready rows (D-019), and a failure doesn't stop the run. Current lifecycle: Fetching → Queued → Downloading → Done/Failed. The Naming stage comes with #14/#25 and Processing with #8. |
+| #7 | Q4,Q5 | P0 | queue | **Sequential queue runner with item states** — Download all processes ready items one at a time, in order by id; rows still fetching info don't block ready rows (D-019), and a failure doesn't stop the run. Lifecycle: Fetching → Queued → Downloading → Processing (#8) → Done/Failed; the proposed name is set as a row becomes Queued (#15). |
 | #8 | D4 | P0 | download | **Live progress (percent, speed, ETA)** — Parse --newline JSON progress-template output and stream events to the UI. |
 | #9 | Q6 | P0 | queue | **Remove and retry items with readable failure reasons** — A failed item shows a short reason (last stderr line) and Retry; the queue continues. |
 | #10 | D1 | P0 | download | **Output folder picker, remembered** — Native folder dialog; persisted in settings. |
 | #59 | Q2 | P0 | queue | **Re-add a link whose download finished** — Owner-reported bug: only active rows (fetching, queued, downloading, processing) make a link a duplicate, so a finished link can be downloaded again (e.g. in another format). |
-| #36 | 6.4 | P0 | ui | **Settings screen** — One screen for all settings, persisted in app-data and built with #10 (its first control). #11, #17, #25/#31/#32, #20, #21, and #37 add their controls here. |
+| #36 | 6.4 | P0 | ui | **Settings screen** — One screen for all settings, persisted in the app's config folder (D-020) and built with #10 (its first control). #11, #17, #25/#31/#32, #20, #21, and #37 add their controls here. |
 | #39 | D7 | P0 | ui | **Open downloads folder and Show in folder** — An Open folder button (Finder / File Explorer / file manager, per OS) and Show in folder on finished rows, through two of Queue's own commands that take no path from the UI (the folder, or a row id), with per-OS launchers that report failures (D-022). |
-| #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only / Most compatible (MP4)** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Most compatible uses D-015's `-S` flags (strict H.264/AAC, honest fallback notice), and the ffmpeg build adds the VP9 decoder + AVI demuxer. Default preset is Default. |
+| #11 | D2 | P0 | download | **Format presets: Default (yt-dlp decides) / Audio only / Most compatible video (MP4) / Most compatible audio (M4A)** — Default passes no -f and forces no container. Audio only uses -x and keeps the best native audio with no re-encode. Most compatible uses D-015's `-S` flags (strict H.264/AAC, honest fallback notice), and the ffmpeg build adds the VP9 decoder + AVI demuxer. Default preset is Default. |
 | #12 | Q7 | P1 | queue | **Persist queue and settings across restarts** — JSON or SQLite in the app-data directory; in-flight items resume as Ready. |
 | #13 | Q8 | P1 | queue | **Paste multiple URLs at once** — Newline-separated paste creates one row per URL. |
 | #41 | NFR | P1 | infra | **Native macOS/Windows download tests in CI** — Run the download tests (and opt-in real-sidecar loopback tests) in the per-OS bundle jobs, and add a Windows executable fixture. M1 audit. |
@@ -75,6 +75,10 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #43 | NFR | P1 | infra | **Content Security Policy for the webview** — `app.security.csp` is null; set a strict CSP and verify it on all three webviews. |
 | #44 | NFR | P2 | infra | **Verify yt-dlp release GPG signatures** — Check `SHA2-256SUMS.sig` against upstream's key when pins change (and the ffmpeg `.asc`). |
 | #71 | NFR | P2 | ui | **Native UI smoke checks on Windows and Linux** — Folder picker (#10), Open folder / Show in folder (#39) and multi-line paste (#13), checked in the real app on each OS. M2 audit. |
+| #83 | Q7 | P2 | queue | **Check queue.json's version before loading or saving over it** — A newer-format file is refused and preserved, not downgraded on the next save. M2 audit (`20261020-200119-audit-CgC4`). |
+| #84 | Q6,Q7 | P2 | queue | **Command-level tests for cancel and quit** — Drive `queue_cancel`, `complete_download` and quit through the commands, especially a finish racing a cancel. M2 audit. |
+| #85 | Q7 | P2 | queue | **Keep row ids within JavaScript's safe integer range** — Cap restored and allocated ids at 2^53 − 1 (or send them as strings). M2 audit (P3). |
+| #86 | NFR | P2 | infra | **Make ffmpeg rebuilds reproducible** — Record the build environment, include it in the CI cache key, and pin it if needed. M2 audit (P3). |
 
 ## Later
 
