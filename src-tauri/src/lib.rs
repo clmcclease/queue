@@ -1,6 +1,7 @@
 pub mod download;
 pub mod link;
 pub mod meta;
+pub mod naming;
 pub mod proc;
 pub mod queue;
 pub mod reveal;

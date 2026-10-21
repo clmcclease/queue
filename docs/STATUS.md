@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** #77 (PR #81 green, awaiting squash), then #14 (in review)
+**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit; #14 (review passed, commit request), then #15
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -107,7 +107,31 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
 
-## In progress: #77 (D2) long non-ASCII titles over Linux's 255-byte limit (PR #81, branch `download/77-long-names`)
+## In progress: #14 (N-T1) Tier-1 naming engine (branch `naming/14-tier1-engine`)
+- **What:**
+  - new `src-tauri/src/naming.rs`: `name(meta, Template) -> stem` and `sanitize(text) -> stem`. Pure, with no I/O;
+  - `Template` has exactly the three N3 presets (D-029).
+- **Rules:**
+  - structured fields first (`artist - track`; `series SxxEyy - title`), used only if something is left of them after cleanup;
+  - noise: a bracket group (balanced, nested) is dropped only if every word in it is a noise word, so "(Live at Wembley - Official Video)" stays;
+  - `#shorts` is removed;
+  - emoji are removed using Unicode's `Emoji` property in the older symbol blocks, plus the pictograph blocks. ♯ ♭ ⌘ ⌀ ★ ✓ 🄰 ♔ are kept;
+  - illegal characters get yt-dlp's fullwidth forms, and a timestamp's `01:02` becomes `01_02`, so names match what users had before;
+  - bidi controls are removed;
+  - leading and trailing dots and spaces are removed (a leading dot would hide the file on macOS and Linux);
+  - Windows device names (base before the first dot, any case, COM¹/LPT³) get `_`;
+  - the name is capped at 150 characters and 200 bytes; empty becomes `Untitled`.
+- **Metadata:** `meta.rs` reads optional `upload_date`, `artist` (`artists` joined), `track`, `series`, `season_number`, `episode_number` and `description` (≤300 chars) loosely from `-J`; odd values are dropped, never fatal. They're `serde(default)` and skipped when None, so `queue.json` v1 and the UI JSON are unchanged.
+- **Not wired into downloads yet:** #15 does that.
+- **QA:**
+  - `codex-qa test "#14"`: FAIL, 6 bugs, all fixed (`wt14 qa/reports/20261020-190442-test-G6Sb`): emoji-only brackets, keycaps, ⌘/⌀ stripped, live-version text dropped, channel and series prefixes without a word boundary. Its 15 tests are added (`tests/naming_nt1_14_qa.rs`, D-021).
+  - review round 1: FAIL, P2 (`20261020-194045-review-xnCm`): ♯ ♭ ♮ were stripped. Fixed with the `Emoji`-property table.
+  - review round 2: FAIL, P2 (`20261020-194416-review-xnUg`): enclosed letters 🄰 were stripped. Fixed with precise ranges in the U+1F000 planes. Its missing tests uncovered two bugs, both fixed: structured fields that clean to nothing, and nested noise. Its P3s: the local `src-tauri/binaries` symlink isn't committed, and D-029 is present after the fast-forward.
+  - review round 3: **PASS WITH NOTES** (`20261020-194939-review-HeU9`). The P3 (`Song (Official (Video))` → `Song )`) is fixed with balanced bracket matching; its suggested tests are added.
+  - The review attempts at 19:23–19:25 hit Codex's usage limit (see "Overnight run").
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 355 passed.
+
+## Done: #77 (D2) long non-ASCII titles over Linux's 255-byte limit (squash-merged from PR #81 as 217e18c; Linux/macOS/Windows tests green)
 - **PR #81 (draft, no label):** f970ebd; CI run 39522910567 passed `test` on Linux, Windows and macOS (the real-sidecar suite included). Commit, PR and squash approved by the architect under D-028.
 - **The bug:** `--trim-filenames 200` counts characters, so 230×日 gave a 604-byte name, over ext4's 255 bytes.
 - **Fix (yt-dlp flags only; architect-approved divergence from a title-threading helper):**
@@ -642,9 +666,8 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-On branch `download/77-long-names` (fast-forwarded onto `main` a77faf9; #77's work is uncommitted):
-1. #77: PR #81 is green; squash-merge it (pre-approved), then sync `main`.
-2. #14 (worktree branch `naming/14-tier1-engine`, uncommitted): through `codex-qa test` (6 bugs fixed); its review gate is next.
-3. #15 (worktree branch `naming/15-name-in-row`, built on #14's files): row names, inline edit and persistence are done and tested. The `-o` stem waits for #77's merge.
-4. Then the M2 audit, #17 and the M3 audit.
+1. **M2 audit** (`codex-qa audit` on `main` 217e18c) is running. Fix RED/P1, file P2/P3 as issues (D-029), then close M2.
+2. **#14** (worktree branch `naming/14-tier1-engine`, uncommitted, on 217e18c): the review gate has passed. Next: the commit request to the architect, the draft PR, CI, handoff and squash.
+3. **#15** (worktree branch `naming/15-name-in-row`, built on #14's files): row names, inline edit and persistence are done and tested. Next: pass the stem to `-o`, now that #77 has merged.
+4. Then #17 and the M3 audit.
 - **#15's checklist (from #77):** drop `--replace-in-metadata` and `.200B`; remove the `QUEUE_QA_KNOWN_GAPS` gate on `d77_saved_info_bare_windows_device_title…`; escape `%` in the stem.

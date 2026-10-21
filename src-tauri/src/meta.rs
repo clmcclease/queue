@@ -24,6 +24,24 @@ pub struct Meta {
     pub thumbnail: Option<String>,
     /// yt-dlp's extractor key, e.g. `Youtube`, `Vimeo`.
     pub site: Option<String>,
+    /// For naming (#14): `YYYYMMDD`, when the site gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_date: Option<String>,
+    /// Music: `artists` joined with ", " (else `artist`) and `track`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<String>,
+    /// Shows: the series and its season/episode numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season_number: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_number: Option<u32>,
+    /// The start of the description, for the AI naming prompt (M4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -36,10 +54,22 @@ struct Info {
     duration: Option<f64>,
     thumbnail: Option<String>,
     extractor_key: Option<String>,
+    // Naming fields (#14). Types vary between extractors, so the loose ones are read as JSON
+    // values: an odd value is dropped instead of failing the whole fetch.
+    upload_date: Option<serde_json::Value>,
+    artists: Option<serde_json::Value>,
+    artist: Option<serde_json::Value>,
+    track: Option<serde_json::Value>,
+    series: Option<serde_json::Value>,
+    season_number: Option<serde_json::Value>,
+    episode_number: Option<serde_json::Value>,
+    description: Option<serde_json::Value>,
 }
 
 /// Longest title/channel kept; yt-dlp metadata can be arbitrarily long.
 const MAX_TEXT: usize = 500;
+/// Longest description kept, for the AI prompt (#14, D-029).
+const MAX_DESCRIPTION: usize = 300;
 /// Longest thumbnail URL kept. URLs are never truncated (that breaks signed CDN links); an
 /// absurdly long one is dropped instead.
 const MAX_URL: usize = 8192;
@@ -53,6 +83,36 @@ fn clean(text: Option<String>) -> Option<String> {
         .collect();
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// A JSON string (or a number, which some extractors use for text fields) as clean text.
+fn text(value: Option<serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(s) => clean(Some(s)),
+        serde_json::Value::Number(n) => clean(Some(n.to_string())),
+        _ => None,
+    }
+}
+
+/// A small whole number (season/episode), from a number or a numeric string.
+fn number(value: Option<serde_json::Value>) -> Option<u32> {
+    match value? {
+        serde_json::Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// `artists` (a list) joined with ", ", else the older `artist` text.
+fn artists(list: Option<serde_json::Value>, single: Option<serde_json::Value>) -> Option<String> {
+    let joined = match list {
+        Some(serde_json::Value::Array(items)) => {
+            let names: Vec<String> = items.into_iter().filter_map(|v| text(Some(v))).collect();
+            clean(Some(names.join(", ")))
+        }
+        _ => None,
+    };
+    joined.or_else(|| text(single))
 }
 
 /// Parses `yt-dlp -J` output. Playlists are refused until #27 expands them into items.
@@ -74,6 +134,22 @@ pub fn parse(json: &[u8]) -> Result<Meta, String> {
         duration: info.duration.filter(|d| d.is_finite() && *d >= 0.0),
         thumbnail,
         site: clean(info.extractor_key),
+        upload_date: text(info.upload_date)
+            .filter(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit())),
+        artist: artists(info.artists, info.artist),
+        track: text(info.track),
+        series: text(info.series),
+        season_number: number(info.season_number),
+        episode_number: number(info.episode_number),
+        description: text(info.description)
+            .map(|d| {
+                d.chars()
+                    .take(MAX_DESCRIPTION)
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            })
+            .filter(|d| !d.is_empty()),
     })
 }
 
@@ -266,7 +342,57 @@ mod tests {
                 duration: Some(19.0),
                 thumbnail: Some("https://i.ytimg.com/vi/jNQXAC9IVRw/hq.jpg".into()),
                 site: Some("Youtube".into()),
+                ..Default::default()
             }
+        );
+    }
+
+    /// #14: the structured naming fields, read loosely; odd values are dropped, never fatal.
+    #[test]
+    fn parses_naming_fields_and_drops_odd_values() {
+        let json = br#"{"title":"Get Lucky","upload_date":"20130419",
+            "artists":["Daft Punk","Pharrell Williams"],"artist":"ignored","track":"Get Lucky",
+            "series":"The Office","season_number":2,"episode_number":"7",
+            "description":"  A song.  "}"#;
+        let meta = parse(json).unwrap();
+        assert_eq!(meta.upload_date.as_deref(), Some("20130419"));
+        assert_eq!(meta.artist.as_deref(), Some("Daft Punk, Pharrell Williams"));
+        assert_eq!(meta.track.as_deref(), Some("Get Lucky"));
+        assert_eq!(meta.series.as_deref(), Some("The Office"));
+        assert_eq!(
+            (meta.season_number, meta.episode_number),
+            (Some(2), Some(7))
+        );
+        assert_eq!(meta.description.as_deref(), Some("A song."));
+
+        let odd = br#"{"upload_date":"2013-04-19","artists":"not a list","artist":"Solo",
+            "season_number":-1,"episode_number":{"x":1},"track":["a"],"description":"x"}"#;
+        let meta = parse(odd).unwrap();
+        assert_eq!(meta.upload_date, None, "only YYYYMMDD");
+        assert_eq!(meta.artist.as_deref(), Some("Solo"), "falls back to artist");
+        assert_eq!(
+            (meta.season_number, meta.episode_number, meta.track),
+            (None, None, None)
+        );
+
+        let long = format!(r#"{{"description":"{}"}}"#, "é".repeat(1000));
+        let meta = parse(long.as_bytes()).unwrap();
+        assert_eq!(meta.description.unwrap().chars().count(), 300);
+    }
+
+    /// #14: a `queue.json` saved before the naming fields existed still loads, and a row
+    /// without them serializes exactly as before.
+    #[test]
+    fn naming_fields_are_optional_in_saved_and_sent_json() {
+        let old: Meta = serde_json::from_str(
+            r#"{"title":"T","channel":null,"duration":null,
+            "thumbnail":null,"site":null}"#,
+        )
+        .unwrap();
+        assert_eq!(old.title.as_deref(), Some("T"));
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"title":"T","channel":null,"duration":null,"thumbnail":null,"site":null}"#
         );
     }
 
