@@ -45,6 +45,10 @@ export interface QueueItem {
   notice?: string | null;
   /** Bumped by the backend on every change; higher wins when replies arrive out of order. */
   rev: number;
+  /** N1 (#15): the file name it will be saved as, without extension; set once the info arrives. */
+  name?: string | null;
+  /** Where the name came from; an `edited` name is never replaced automatically. */
+  name_source?: "rules" | "ai" | "edited" | null;
 }
 
 /** Why `addItem` rejected a link (src-tauri/src/queue.rs `AddError`). */
@@ -74,6 +78,8 @@ export const openDownloadFolder = () => invoke<void>("open_download_folder");
  * notice when only its folder could be opened (Linux without a file manager that can select).
  */
 export const revealDownload = (id: number) => invoke<string | null>("reveal_download", { id });
+/** N1 (#15): renames a Queued row. The backend sanitizes the name and returns the updated row. */
+export const renameItem = (id: number, name: string) => invoke<QueueItem>("queue_rename", { id, name });
 /** Q6: a Failed row goes back to Fetching (its info never arrived) or Queued. */
 export const retryItem = (id: number) => invoke<QueueItem>("queue_retry", { id });
 /** "Download all" (Q4): resolves false if a run was already in progress. */

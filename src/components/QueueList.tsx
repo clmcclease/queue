@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { SHOW_FILE } from "../platform";
 import { formatDuration, progressText, type QueueItem } from "../queue";
 
@@ -8,6 +9,8 @@ interface Props {
   onRetry: (id: number) => void;
   /** Q6: removes a row that isn't downloading. */
   onRemove: (id: number) => void;
+  /** N1 (#15): renames a Queued row's file (the backend sanitizes it). */
+  onRename: (id: number, name: string) => void;
   /** Q6 (#74): stops a downloading or processing row. */
   onCancel: (id: number) => void;
   /** Rows whose Cancel was pressed and that haven't stopped yet. */
@@ -68,6 +71,76 @@ function StatusLabel({ item }: { item: QueueItem }) {
   }
 }
 
+/**
+ * N1 (#15): the name the file will be saved as. On a Queued row a click edits it inline: Enter or
+ * leaving the field saves, Escape cancels. Other rows just show it.
+ */
+function NameField({ item, onRename }: { item: QueueItem; onRename: (id: number, name: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const cancelled = useRef(false);
+  const queued = item.status.state === "queued";
+  // A download that starts (e.g. from Download all) closes an open editor without saving: the
+  // name was captured when it started.
+  useEffect(() => {
+    if (!queued) {
+      cancelled.current = true;
+      setDraft(null);
+    }
+  }, [queued]);
+  if (!item.name) return null;
+  const name = item.name;
+  if (draft !== null && queued) {
+    const finish = () => {
+      const next = draft.trim();
+      setDraft(null);
+      if (!cancelled.current && next && next !== name) onRename(item.id, next);
+      cancelled.current = false;
+    };
+    return (
+      <input
+        aria-label="File name"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={finish}
+        onKeyDown={(e) => {
+          // Enter while an input method is composing (Japanese, Chinese, Korean…) picks the
+          // candidate; it doesn't save.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancelled.current = true;
+            e.currentTarget.blur();
+          }
+        }}
+        className="mt-0.5 w-full rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+      />
+    );
+  }
+  const text = "truncate text-xs text-neutral-600 dark:text-neutral-300";
+  return queued ? (
+    <button
+      type="button"
+      data-role="name"
+      onClick={() => {
+        cancelled.current = false;
+        setDraft(name);
+      }}
+      title="Saved as this name. Click to change it."
+      className={`block max-w-full text-left hover:underline ${text}`}
+    >
+      {name}
+    </button>
+  ) : (
+    <div data-role="name" title={name} className={text}>
+      {name}
+    </div>
+  );
+}
+
 /** 16:9 thumbnail from the site's CDN; a neutral box while fetching or when there is none. */
 function Thumbnail({ src }: { src: string | null }) {
   return (
@@ -81,6 +154,7 @@ export default function QueueList({
   items,
   onDownload,
   onRetry,
+  onRename,
   onRemove,
   onCancel,
   cancelling,
@@ -108,6 +182,7 @@ export default function QueueList({
                 {item.meta.title}
               </div>
             )}
+            <NameField item={item} onRename={onRename} />
             {(item.meta?.channel || item.meta?.duration != null) && (
               <div data-role="byline" className="truncate text-xs text-neutral-500 dark:text-neutral-400">
                 {[item.meta?.channel, formatDuration(item.meta?.duration)].filter(Boolean).join(" · ")}

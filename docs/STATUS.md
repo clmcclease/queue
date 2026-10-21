@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #14 (PR #82), then #15
+**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #15 (PR), #33(a) (in QA), then #17
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -116,7 +116,46 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #14 (N-T1) Tier-1 naming engine (PR #82, branch `naming/14-tier1-engine`)
+## In progress: #15 (N1) proposed file name in each row, edited inline (PR #87, branch `naming/15-name-in-row`)
+- **PR #87 (draft, no label):** fdcbe1a; CI run 39529223379 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
+- **Backend (`queue.rs`):**
+  - `Item.name` and `Item.name_source` (`rules` | `ai` | `edited`), additive in `queue.json` and skipped when None;
+  - `Queue::fetched` sets the Tier-1 name under the same lock that makes the row Queued (D-029), using `Queue.template` (private, `{title}` until #17);
+  - `Queue::rename(id, name)` works on Queued rows only, re-sanitizes the name, and marks it `edited`;
+  - `from_json` re-sanitizes saved names and gives rows saved before #15 their Tier-1 name.
+- **A Queued row always has a name in the app:** Tier-1 at `fetched`, or from `from_json`. A row without info is Fetching, never Queued. So the title-based `-o` path (#77) is unreachable from the UI; it stays only for tests and the low-level wrappers without a name.
+- **Downloads (`download.rs`, `lib.rs`):** `DownloadJob` captures the row's name when it starts. `run_with_retries_named` and `args_named` pass `-o "<stem with % doubled>.%(ext)s"` with no `--replace-in-metadata`. `--trim-filenames 200` stays as a belt. Collisions stay in placement (D-018).
+- **Command:** `queue_rename(id, name)` returns the updated row.
+- **UI (`QueueList.tsx`):**
+  - a name line on each row that has one;
+  - on a Queued row a click edits it inline: Enter or leaving the field saves, Escape cancels, and a blank or unchanged name sends nothing;
+  - other rows show it read-only;
+  - a refused rename shows the reason.
+- **Tests:**
+  - queue unit tests: naming at fetch, rename limits and sanitizing, round trips and older saved queues;
+  - argv: the literal `-o`, `%%` escaping, no title rules;
+  - real-sidecar `n1_real_download_is_saved_under_its_proposed_name`: `100% Legit %(title)s %(id)s`, fullwidth, CJK and emoji stems land exactly, from both sources, with ` (2)`;
+  - 5 UI tests in `qa/tests/naming-n1-15.test.mjs`;
+  - the `CON` test's `QUEUE_QA_KNOWN_GAPS` gate is removed: it downloads through the engine and saves `CON_.wav`.
+- **Checks (macOS arm64, before the move onto 646552e):** `npm test` 215/215, fmt, clippy, `cargo test` 360, real-sidecar suite 19/19.
+- `codex-qa test "#15"`: **FAIL**, 2 UI bugs, both fixed (`qa/reports/20261020-202814-test-PhMU.md`, in the #15 worktree):
+  - P2: Enter while an input method was composing (Japanese and others) saved and closed the field. Now Enter during composition (`isComposing` or keyCode 229) is ignored.
+  - P3: an open editor stayed editable after a download started. Now it closes, without saving, when the row leaves Queued.
+
+  Its tests are added (D-021): `tests/naming_n1_15_qa.rs` (6) and 6 UI tests in `naming-n1-15.test.mjs`. I added a test that a row cancelled back to Queued can be renamed again. Codex's sandbox couldn't run the real-sidecar test; it passes locally.
+- `codex-qa review`: **PASS WITH NOTES**, no findings (`qa/reports/20261020-204100-review-g5ST.md`, in the #15 worktree). Its suggested tests:
+  - **Added after the review (UI-only; the architect accepted it without another round under D-028):** edit a name, then click Download at once. That exposed a race: the rename and the download were separate commands, so the download could start under the old name. Now Download and Download all wait for any rename still in flight. Without the wait, the test fails.
+  - **Not added (pre-accepted P3s):** real audio-extraction and merge downloads with a stem near 200 bytes (the engine caps at 200 bytes, and #77's tests cover merges near the limit); and a failed first item followed by a renamed second one (the runner's failure handling is unchanged and already tested).
+- ARCHITECTURE's naming sections now describe what's built.
+- **Owner checks for the morning (dev app):**
+  - rename a row inline;
+  - Japanese IME composition in the name field on macOS (Enter picks the candidate and doesn't save);
+  - a download is saved under an edited name;
+  - editing a row while Download all is running shows "Only a queued item can be renamed." rather than losing the edit silently;
+  - rename, then Download all at once, saves under the new name.
+- **Checks (macOS arm64, on 646552e, after the fixes):** fmt, clippy, `cargo test` 366, real-sidecar suite 19/19 (before the UI-only race fix), `npm test` 223/223.
+
+## Done: #14 (N-T1) Tier-1 naming engine (squash-merged from PR #82 as 646552e; Linux/macOS/Windows tests green)
 - **PR #82 (draft, no label):** 878f3ad; CI run 39525201831 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
 - **What:**
   - new `src-tauri/src/naming.rs`: `name(meta, Template) -> stem` and `sanitize(text) -> stem`. Pure, with no I/O;
@@ -676,8 +715,6 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **M2 is closed.** Its audit was YELLOW (`qa/reports/20261020-200119-audit-CgC4.md`) with no RED or P1. Its P2/P3s are filed as #83–#86 (M5); the stale STATUS, the BACKLOG wording and the `CON` gap (#15) are handled.
-2. **#14:** PR #82 is green; squash-merge it (pre-approved), then sync `main`.
-3. **#15** (worktree branch `naming/15-name-in-row`, built on #14's files): row names, inline edit and persistence are done and tested. Next: pass the stem to `-o`, now that #77 has merged.
-4. Then #17 and the M3 audit.
-- **#15's checklist (from #77):** drop `--replace-in-metadata` and `.200B`; remove the `QUEUE_QA_KNOWN_GAPS` gate on `d77_saved_info_bare_windows_device_title…`; escape `%` in the stem.
+1. **#15:** PR #87 is green; squash-merge it (pre-approved), then sync `main`.
+1. **#33(a)** (worktree branch `naming/33-ai-prompt-eval`, uncommitted, on 646552e): built, and its QA gates are next (the architect: don't wait for #17).
+2. Then **#17** (template picker, live preview; recompute Queued names that aren't `edited`), then the M3 audit, then #33(a) (design approved; see D-029).

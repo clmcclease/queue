@@ -775,6 +775,45 @@ fn d77_real_title_cannot_forge_progress_or_processing_events() {
     );
 }
 
+/// #15 / N1: a download is saved under its proposed name exactly, through the URL and the
+/// saved info, whatever yt-dlp makes of the title; `%` in the name is literal text, never a
+/// template field; a second copy is ` (2)`.
+#[test]
+#[ignore = "requires installed pinned sidecars; loopback HTTP only"]
+fn n1_real_download_is_saved_under_its_proposed_name() {
+    let f = LocalDownload::new("The page's own title: ignored");
+    let (_, raw) = queue_lib::meta::fetch_raw(&f.bin, &f.url, Duration::from_secs(30)).unwrap();
+    let info = f.root.join("info.json");
+    fs::write(&info, raw).unwrap();
+    for stem in [
+        "100% Legit %(title)s %(id)s",
+        "AC⧸DC： Back in Black 日本語 🎵",
+        "Edited by hand",
+    ] {
+        let run = |dir: &str, saved: Option<&Path>| {
+            download::run_with_retries_named(
+                &f.bin,
+                &f.root.join(dir),
+                &f.out,
+                &f.url,
+                saved,
+                download::Format::Default,
+                Some(stem),
+                |_| panic!("loopback fixture must not retry"),
+                |_| panic!("loopback fixture must not retry"),
+                |_| {},
+            )
+            .unwrap()
+            .path
+        };
+        let first = PathBuf::from(run(&format!("{stem} url"), None));
+        assert_eq!(first, f.out.join(format!("{stem}.wav")));
+        assert_eq!(fs::read(&first).unwrap(), silence_wav());
+        let second = PathBuf::from(run(&format!("{stem} info"), Some(&info)));
+        assert_eq!(second, f.out.join(format!("{stem} (2).wav")));
+    }
+}
+
 /// #48 / D-017: exercise the new saved-info source with upstream yt-dlp, including its
 /// Windows filename sanitization. Loopback only; no external media or user output folder.
 #[test]

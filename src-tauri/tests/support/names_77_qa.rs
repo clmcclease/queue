@@ -105,12 +105,8 @@ fn d77_short_reserved_and_messy_names_match_previous_windows_rules() {
 #[test]
 #[ignore = "requires installed pinned sidecars; loopback HTTP only"]
 fn d77_saved_info_bare_windows_device_title_is_sanitized_before_download() {
-    // A known gap older than #77, deferred to #14/#15 (architect, D-028): the suite runs with
-    // `--ignored`, so this is parked by an env var instead. Remove the gate at #15.
-    if std::env::var_os("QUEUE_QA_KNOWN_GAPS").is_none() {
-        eprintln!("skipped until #15: Windows reserved names move to the naming engine");
-        return;
-    }
+    // #15: downloads are named by the naming engine (#14), which handles device names. The
+    // gate this test had until #15 (`QUEUE_QA_KNOWN_GAPS`) is gone.
     let f = LocalDownload::new("reserved title source");
     let info = f.root.join("reserved-info.json");
     fs::write(
@@ -122,17 +118,25 @@ fn d77_saved_info_bare_windows_device_title_is_sanitized_before_download() {
         .unwrap(),
     )
     .unwrap();
-    let result = download::run_with_retries(
+    let meta = queue_lib::meta::Meta {
+        title: Some("CON".into()),
+        ..Default::default()
+    };
+    let stem = queue_lib::naming::name(&meta, queue_lib::naming::Template::Title);
+    let result = download::run_with_retries_named(
         &f.bin,
         &f.root.join("reserved-run"),
         &f.out,
         &f.url,
         Some(&info),
+        download::Format::Default,
+        Some(&stem),
         |_| panic!("loopback must not retry"),
         |_| panic!("loopback must not retry"),
+        |_| {},
     )
     .unwrap();
-    let saved = PathBuf::from(result);
+    let saved = PathBuf::from(result.path);
     assert_eq!(fs::read(&saved).unwrap(), silence_wav());
     // Safety, not a spelling: Windows checks the name up to the first dot, ignoring trailing
     // spaces, case-insensitively (so `CON.wav` and `con .wav` are both the device).
