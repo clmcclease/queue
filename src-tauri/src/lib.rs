@@ -143,6 +143,16 @@ fn queue_remove(queue: tauri::State<'_, Mutex<Queue>>, id: u64) -> Result<(), St
     Ok(())
 }
 
+/// Renames a Queued row (N1, #15); the name is sanitized and returned as the updated row.
+#[tauri::command]
+fn queue_rename(
+    queue: tauri::State<'_, Mutex<Queue>>,
+    id: u64,
+    name: String,
+) -> Result<Item, String> {
+    lock(&queue)?.rename(id, &name)
+}
+
 /// Retries a Failed row (Q6). A row whose info fetch failed goes back to the metadata worker;
 /// otherwise it's Queued again for Download or "Download all".
 #[tauri::command]
@@ -453,6 +463,8 @@ struct DownloadJob {
     out_dir: std::path::PathBuf,
     /// The format chosen in Settings when the download started (#11).
     format: download::Format,
+    /// The row's proposed name when the download started (N1, #15).
+    name: Option<String>,
 }
 
 /// Marks a queued item Downloading (one at a time, see `Queue::start`) and prepares its paths:
@@ -490,6 +502,7 @@ fn begin_download(
         work_dir,
         out_dir,
         format,
+        name: item.name.clone(),
     };
     Ok((item, job))
 }
@@ -512,13 +525,14 @@ fn complete_download(app: &AppHandle, job: DownloadJob) {
     // Progress arrives already throttled (download::PROGRESS_EVERY); state changes always do.
     // A cancel (#74) stops it like a quit, but only this download.
     let outcome = proc::with_cancel(job.cancel.clone(), || {
-        download::run_with_retries_saved(
+        download::run_with_retries_named(
             &job.sidecar_dir,
             &job.work_dir,
             &job.out_dir,
             &job.url,
             job.info.as_deref(),
             job.format,
+            job.name.as_deref(),
             proc::sleep_unless_quitting,
             |attempt| emit(lock(&state).ok().and_then(|mut q| q.retrying(id, attempt))),
             |event| match event {
@@ -809,6 +823,7 @@ pub fn run() {
             queue_download,
             queue_cancel,
             queue_remove,
+            queue_rename,
             queue_retry,
             queue_run_all,
             queue_runner_state,

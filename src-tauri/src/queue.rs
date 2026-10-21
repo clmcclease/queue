@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::link;
 use crate::meta::Meta;
+use crate::naming::{self, Template};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -28,6 +29,18 @@ pub enum Status {
     },
 }
 
+/// Where a row's file name came from (N1, #15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NameSource {
+    /// The Tier-1 rules (#14).
+    Rules,
+    /// The AI naming provider (M4).
+    Ai,
+    /// Typed by the user; never replaced automatically.
+    Edited,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Item {
     pub id: u64,
@@ -44,6 +57,10 @@ pub struct Item {
     /// Something to know about a Done row's file, e.g. a "most compatible" format that wasn't
     /// available (D-015, #11). Cleared when the row starts again.
     pub notice: Option<String>,
+    /// The proposed file name, without extension (N1, #15): set once the info arrives, always
+    /// [`naming::sanitize`]d, and passed to yt-dlp when the download starts.
+    pub name: Option<String>,
+    pub name_source: Option<NameSource>,
     /// Duplicate identity from [`link::parse`]; internal only.
     #[serde(skip)]
     key: String,
@@ -89,6 +106,8 @@ pub struct Queue {
     items: Vec<Item>,
     /// Bumped by every change worth saving (#12); live progress doesn't count.
     changes: u64,
+    /// The naming template new names use (N3, #17 sets it).
+    template: Template,
     /// Bumped by every cancel (#74), and each row's latest value, so "Download all" can tell a
     /// cancel during its run from an earlier one. Not saved.
     cancels: u64,
@@ -129,6 +148,8 @@ impl Queue {
             url: link.text,
             status: Status::Fetching,
             meta: None,
+            name: None,
+            name_source: None,
             progress: None,
             rev: 1,
             attempt: 0,
@@ -154,6 +175,9 @@ impl Queue {
         }
         match outcome {
             Ok(meta) => {
+                // N1 (#15): the row has its Tier-1 name the moment it can be downloaded.
+                item.name = Some(naming::name(&meta, self.template));
+                item.name_source = Some(NameSource::Rules);
                 item.meta = Some(meta);
                 item.status = Status::Queued;
             }
@@ -162,6 +186,24 @@ impl Queue {
         item.rev += 1;
         self.changes += 1;
         Some(item.clone())
+    }
+
+    /// Renames a Queued row (N1, #15). The name is sanitized like any other (never trusted), and
+    /// an edited name is never replaced automatically.
+    pub fn rename(&mut self, id: u64, name: &str) -> Result<Item, String> {
+        let item = self
+            .items
+            .iter_mut()
+            .find(|i| i.id == id)
+            .ok_or("That item is no longer in the queue.")?;
+        if item.status != Status::Queued {
+            return Err("Only a queued item can be renamed.".into());
+        }
+        item.name = Some(naming::sanitize(name));
+        item.name_source = Some(NameSource::Edited);
+        item.rev += 1;
+        self.changes += 1;
+        Ok(item.clone())
     }
 
     /// Marks a queued item as downloading. One download at a time (Q4 default): concurrent runs
@@ -405,6 +447,11 @@ struct SavedItem {
     status: Status,
     meta: Option<Meta>,
     notice: Option<String>,
+    /// Added in #15; a row saved before then gets its Tier-1 name when loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name_source: Option<NameSource>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -432,6 +479,8 @@ impl Queue {
                     status: i.status.clone(),
                     meta: i.meta.clone(),
                     notice: i.notice.clone(),
+                    name: i.name.clone(),
+                    name_source: i.name_source,
                 })
                 .collect(),
         };
@@ -461,11 +510,26 @@ impl Queue {
                 status => (status, row.notice),
             };
             queue.next_id = queue.next_id.max(row.id);
+            // A saved name is sanitized again (the file could have been edited); a row from
+            // before #15 gets its Tier-1 name.
+            let (name, name_source) = match (&row.meta, row.name) {
+                (_, Some(name)) => (
+                    Some(naming::sanitize(&name)),
+                    row.name_source.or(Some(NameSource::Rules)),
+                ),
+                (Some(meta), None) => (
+                    Some(naming::name(meta, Template::default())),
+                    Some(NameSource::Rules),
+                ),
+                (None, None) => (None, None),
+            };
             queue.items.push(Item {
                 id: row.id,
                 url: row.url,
                 status,
                 meta: row.meta,
+                name,
+                name_source,
                 progress: None,
                 rev: 1,
                 attempt: 0,
@@ -617,6 +681,78 @@ mod tests {
         }
         assert!(q.items().is_empty());
         assert!(q.cancelled_at.is_empty(), "{:?}", q.cancelled_at);
+    }
+
+    /// N1 (#15): a row gets its Tier-1 name when its info arrives; only a Queued row can be
+    /// renamed, and the new name is sanitized.
+    #[test]
+    fn a_fetched_row_is_named_and_a_queued_row_can_be_renamed() {
+        let mut q = Queue::default();
+        let id = q.add("https://e.test/a").unwrap().id;
+        assert_eq!(
+            q.rename(id, "x").unwrap_err(),
+            "Only a queued item can be renamed."
+        );
+        let meta = Meta {
+            title: Some("Song (Official Video) 🔥".into()),
+            ..Default::default()
+        };
+        let item = q.fetched(id, Ok(meta)).unwrap();
+        assert_eq!(item.name.as_deref(), Some("Song"));
+        assert_eq!(item.name_source, Some(NameSource::Rules));
+        let before = (item.rev, q.changes());
+        let renamed = q.rename(id, "  My/song: CON  ").unwrap();
+        assert_eq!(renamed.name.as_deref(), Some("My⧸song： CON"));
+        assert_eq!(renamed.name_source, Some(NameSource::Edited));
+        assert!(renamed.rev > before.0 && q.changes() > before.1);
+        assert_eq!(
+            q.rename(id, "   ").unwrap().name.as_deref(),
+            Some(naming::UNTITLED)
+        );
+        q.start(id).unwrap();
+        assert!(q.rename(id, "late").is_err(), "not while downloading");
+        assert!(q.rename(999, "x").is_err());
+    }
+
+    /// N1 (#15): names survive a restart; a row saved before #15 gets its Tier-1 name, and a
+    /// tampered saved name is sanitized again.
+    #[test]
+    fn names_are_saved_and_older_queues_get_one() {
+        let mut q = Queue::default();
+        let id = ready(&mut q, "https://e.test/a");
+        q.rename(id, "Kept name").unwrap();
+        let loaded = Queue::from_json(&q.to_json()).unwrap();
+        let row = &loaded.items()[0];
+        assert_eq!(row.name.as_deref(), Some("Kept name"));
+        assert_eq!(row.name_source, Some(NameSource::Edited));
+
+        let old = br#"{"version":1,"items":[
+            {"id":1,"url":"https://e.test/a","status":{"state":"queued"},
+             "meta":{"title":"Old [4K]","channel":null,"duration":null,"thumbnail":null,"site":null},"notice":null},
+            {"id":2,"url":"https://e.test/b","status":{"state":"queued"},
+             "meta":{"title":"t","channel":null,"duration":null,"thumbnail":null,"site":null},"notice":null,
+             "name":"../evil/NUL","name_source":"edited"},
+            {"id":3,"url":"https://e.test/c","status":{"state":"fetching"},"meta":null,"notice":null}]}"#;
+        let loaded = Queue::from_json(old).unwrap();
+        let names: Vec<_> = loaded
+            .items()
+            .iter()
+            .map(|i| (i.name.as_deref(), i.name_source))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                (Some("Old"), Some(NameSource::Rules)),
+                (Some("⧸evil⧸NUL"), Some(NameSource::Edited)),
+                (None, None),
+            ]
+        );
+        assert!(
+            !String::from_utf8(Queue::default().to_json())
+                .unwrap()
+                .contains("name"),
+            "an empty queue saves as before"
+        );
     }
 
     #[test]

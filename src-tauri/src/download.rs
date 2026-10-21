@@ -499,12 +499,30 @@ pub fn args_for(sidecar_dir: &Path, work_dir: &Path, source: Source) -> Vec<OsSt
     args_for_format(sidecar_dir, work_dir, source, Format::Default)
 }
 
-/// The full yt-dlp argv for `source` downloaded as `format`.
+/// The full yt-dlp argv for `source` downloaded as `format`, named after its title.
 pub fn args_for_format(
     sidecar_dir: &Path,
     work_dir: &Path,
     source: Source,
     format: Format,
+) -> Vec<OsString> {
+    args_named(sidecar_dir, work_dir, source, format, None)
+}
+
+/// yt-dlp's `-o` for a proposed name (N1, #15): the stem as literal text (`%` doubled, so
+/// "100% Legit" isn't read as a field), then the extension yt-dlp picks. The stem comes from
+/// [`crate::naming`], so it's already safe on every OS and at most 200 bytes.
+pub fn output_template(stem: &str) -> String {
+    format!("{}.%(ext)s", stem.replace('%', "%%"))
+}
+
+/// [`args_for_format`], saving as `name` (a [`crate::naming`] stem) when there is one (#15).
+pub fn args_named(
+    sidecar_dir: &Path,
+    work_dir: &Path,
+    source: Source,
+    format: Format,
+    name: Option<&str>,
 ) -> Vec<OsString> {
     let mut args = sidecar::ytdlp_base_args(sidecar_dir);
     args.extend(format.args().iter().map(OsString::from));
@@ -547,12 +565,20 @@ pub fn args_for_format(
     // Linux's 255). The title is cut to 200 bytes instead (`.200B`, at a character boundary), after
     // its Windows-illegal characters are swapped for the forms `--windows-filenames` would give
     // them, so nothing grows after the cut. Names that already fit are unchanged.
-    // Transitional: drop `--replace-in-metadata` when #15 passes the naming engine's stem to
-    // `-o`. It changes the `title` field itself, so it would leak into `--embed-metadata` (#23).
-    for (from, to) in FULLWIDTH {
-        args.extend(["--replace-in-metadata", "title", from, to].map(OsString::from));
+    // Only without a proposed name: Queue's downloads always have one (#15), and these rules
+    // change the `title` field itself, which would leak into `--embed-metadata` (#23).
+    match name {
+        Some(stem) => {
+            args.push("-o".into());
+            args.push(output_template(stem).into());
+        }
+        None => {
+            for (from, to) in FULLWIDTH {
+                args.extend(["--replace-in-metadata", "title", from, to].map(OsString::from));
+            }
+            args.extend(["-o", "%(title).200B.%(ext)s"].map(OsString::from));
+        }
     }
-    args.extend(["-o", "%(title).200B.%(ext)s"].map(OsString::from));
     match source {
         Source::Url(url) => {
             args.push("--".into());
@@ -1145,6 +1171,7 @@ pub fn run_source(
         out_dir,
         source,
         Format::Default,
+        None,
         &mut |_| {},
     )
     .map(|saved| saved.path)
@@ -1175,12 +1202,13 @@ fn run_in(
     out_dir: &Path,
     source: Source,
     format: Format,
+    name: Option<&str>,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Saved, Failure> {
     let _ = fs::remove_file(work_dir.join(REPORT)); // a previous attempt's report
     let _ = fs::remove_file(work_dir.join(CODECS));
     let mut cmd = Command::new(Sidecar::YtDlp.path_in(sidecar_dir));
-    cmd.args(args_for_format(sidecar_dir, work_dir, source, format))
+    cmd.args(args_named(sidecar_dir, work_dir, source, format, name))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1525,6 +1553,34 @@ pub fn run_with_retries_saved(
     url: &str,
     info: Option<&Path>,
     format: Format,
+    wait: impl FnMut(Duration),
+    on_retry: impl FnMut(u32),
+    on_event: impl FnMut(Event),
+) -> Result<Saved, String> {
+    run_with_retries_named(
+        sidecar_dir,
+        work_dir,
+        out_dir,
+        url,
+        info,
+        format,
+        None,
+        wait,
+        on_retry,
+        on_event,
+    )
+}
+
+/// [`run_with_retries_saved`], saving as the row's proposed name (N1, #15).
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_retries_named(
+    sidecar_dir: &Path,
+    work_dir: &Path,
+    out_dir: &Path,
+    url: &str,
+    info: Option<&Path>,
+    format: Format,
+    name: Option<&str>,
     mut wait: impl FnMut(Duration),
     mut on_retry: impl FnMut(u32),
     mut on_event: impl FnMut(Event),
@@ -1546,6 +1602,7 @@ pub fn run_with_retries_saved(
             out_dir,
             source,
             format,
+            name,
             &mut on_event,
         );
         match &result {
@@ -2018,6 +2075,23 @@ mod tests {
             name = name.replace(from.strip_prefix('\\').unwrap_or(from), to);
         }
         assert_eq!(name, "AC⧸DC： ＂Back＂ ＜in＞ Black？ ｜ a＊b ⧹ c");
+    }
+
+    /// #15: a proposed name is passed as literal text; the title rules (#77) aren't used.
+    #[test]
+    fn a_proposed_name_is_the_literal_output_template() {
+        let a = args_named(
+            Path::new("bin"),
+            Path::new("w"),
+            Source::Url("https://e.test/v"),
+            Format::Default,
+            Some("100% Legit %(title)s"),
+        );
+        let at = a.iter().position(|x| x == "-o").unwrap();
+        assert_eq!(a[at + 1], "100%% Legit %%(title)s.%(ext)s");
+        assert!(!a.iter().any(|x| x == "--replace-in-metadata"));
+        assert!(a.iter().any(|x| x == "--trim-filenames"), "kept as a belt");
+        assert_eq!(&a[a.len() - 2..], ["--", "https://e.test/v"]);
     }
 
     #[test]

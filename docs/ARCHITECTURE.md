@@ -15,7 +15,7 @@
 │  queue             sequential runner, state machine per item         │
 │  meta · download   yt-dlp -J metadata; download + progress (proc)    │
 │  settings          settings.json (config dir), queue.json (data dir) │
-│  naming::Engine    pure fn: metadata + template → name   (M3)        │
+│  naming            pure fn: metadata + template → name   (#14)       │
 │  naming::Provider  Local (default) | Api | Rules         (M4)        │
 │  models::Manager   GGUF download/verify; llama-server    (M4)        │
 └───────────────┬──────────────────────────────────────────────────────┘
@@ -25,24 +25,24 @@
 
 ## Item lifecycle
 
-Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. Failed rows can be retried, a row interrupted by quitting comes back `Queued` (D-025), and a cancelled download goes back to `Queued`, marked Cancelled (D-027). M3/M4 add a naming step between fetching and `Queued`.
+Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. Failed rows can be retried, a row interrupted by quitting comes back `Queued` (D-025), and a cancelled download goes back to `Queued`, marked Cancelled (D-027). A row gets its proposed name as it becomes `Queued` (#15); the AI provider (M4) may replace it later, while the row is still `Queued` and not edited.
 
-1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, and store the metadata. The name is the title for now; from M3 the active naming provider computes it here, with Tier 1 first so a name is always available instantly.
-2. **Start:** the runner takes the next `Queued` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
+1. **Add:** validate the URL, reject duplicates, run `yt-dlp -J --no-playlist <url>`, and store the metadata. The Tier-1 name (`naming::name`) is set under the same lock that makes the row `Queued`, so a Queued row always has a name. The user can edit it while the row is Queued; an edit is sanitized and never replaced automatically.
+2. **Start:** the runner takes the next `Queued` item and runs `yt-dlp [-x] -P <fresh work dir> -o <name, % doubled>.%(ext)s --newline --progress-template <json> -- <url>` (D-014). The work dir is under the app cache, so partial and merge-temp files never sit in the user's folder. No `-f` by default (D-007).
 3. **Progress:** parse each stdout line and emit `{id, percent, speed, eta}` to the UI.
 4. **Finish:** take the one finished file from the work dir and place it in the output folder with a no-clobber move: a hard link, or across volumes a copy under a temporary name that's then renamed into place without replacing anything (D-014, #72). Plain `rename` is never used, because it replaces files. The filesystem itself refuses an existing name, and a crash mid-copy never leaves a cut-off file under the real name. Record it in history and remove the work dir. If the item failed, keep stderr's last `ERROR:` line as the reason and move on.
 
-## Naming engine (Tier 1) — Planned (M3)
+## Naming engine (Tier 1) — Built (#14, `src-tauri/src/naming.rs`)
 
-- Input: yt-dlp metadata (`title`, `channel`, `upload_date`, `artist`, `track`, `series`, `episode_number`, …) and a template string.
+- Input: yt-dlp metadata (`title`, `channel`, `upload_date`, `artist`, `track`, `series`, `season_number`, `episode_number`) and one of three templates: `{title}`, `{channel} - {title}`, `{upload_date} {title}` (D-029; no template language).
 - Steps: pick the structured fields if present → apply the template → strip noise patterns → strip emoji → replace characters that aren't allowed in filenames → collapse whitespace → cap the length.
 - Pure and deterministic (metadata + template → name, no filesystem access), covered by table-driven unit tests built from real titles.
 - Collisions (N2, #16, already built) aren't part of the engine. The download layer picks a free ` (n)` variant and relies on the no-clobber placement (D-014), because only the filesystem knows which names exist (including case- and Unicode-equivalent ones).
-- The filename rules are the strictest across OSes (Windows reserved names, trailing dots and spaces, `<>:"/\|?*`).
+- The filename rules are the strictest across OSes on every OS: `<>:"/\|?*` get the same fullwidth forms yt-dlp uses, Windows device names get a `_`, there are no leading or trailing dots or spaces, and a name is at most 150 characters and 200 bytes. `naming::sanitize` applies just these rules; it's the safety net for edited and AI names.
 
 ## AI naming (Tier 2) — Planned (M4)
 
-- `trait NamingProvider { async fn name(&self, meta: &Meta) -> Result<String> }` with three implementations: `Local`, `Api`, and `Rules`.
+- A blocking `naming::Provider` with `Local`, `Api` and `Rules`, run on one worker thread like the metadata fetches (D-029; no async runtime in app code). The AI name replaces `{title}` in the active template.
 - `Local`: `models::Manager` makes sure the GGUF model exists and starts `llama-server -m <model> --port <free>` when first needed. It stops the server after ~2 min idle.
 - `Local` and `Api` share one OpenAI-compatible chat client. Anthropic gets a thin adapter.
 - The prompt asks for JSON `{ "filename": "..." }`. The output is validated, run through the Tier 1 sanitizer, and dropped in favor of the Tier 1 name on error, timeout, or invalid output.

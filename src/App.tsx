@@ -15,6 +15,7 @@ import {
   openDownloadFolder,
   revealDownload,
   removeItem,
+  renameItem,
   retryItem,
   onItemChanged,
   onRunnerChanged,
@@ -63,6 +64,9 @@ export default function App() {
   }, [settingsOpen]);
   // Rows removed here (Q6): a late event or snapshot must not bring them back.
   const removed = useRef(new Set<number>());
+  // N1 (#15): renames still on their way to the backend. A download waits for them, so editing a
+  // name and clicking Download straight away saves under the new name.
+  const renaming = useRef(new Set<Promise<void>>());
 
   function flashDuplicate(message: string, id: number) {
     showToast(message);
@@ -214,6 +218,7 @@ export default function App() {
   }
 
   async function download(id: number) {
+    await Promise.all(renaming.current);
     try {
       const item = await downloadItem(id);
       setItems((prev) => mergeItems(prev, [item], removed.current));
@@ -271,6 +276,21 @@ export default function App() {
     }
   }
 
+  async function rename(id: number, name: string) {
+    const pending = (async () => {
+      try {
+        const item = await renameItem(id, name);
+        setItems((prev) => mergeItems(prev, [item], removed.current));
+        setError(null);
+      } catch (e) {
+        setError(String(e));
+      }
+    })();
+    renaming.current.add(pending);
+    await pending;
+    renaming.current.delete(pending);
+  }
+
   async function openFolder() {
     try {
       await openDownloadFolder();
@@ -294,6 +314,7 @@ export default function App() {
     try {
       // "Running" comes only from queue://runner events (emitted before this reply), so a late
       // reply can't revive a run that has already finished.
+      await Promise.all(renaming.current);
       await runAll();
       setError(null);
     } catch (e) {
@@ -360,6 +381,7 @@ export default function App() {
             items={items}
             onDownload={download}
             onRetry={retry}
+            onRename={rename}
             onRemove={remove}
             onCancel={cancel}
             cancelling={cancelling}
