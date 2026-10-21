@@ -121,6 +121,21 @@ function NameField({ item, onRename }: { item: QueueItem; onRename: (id: number,
     );
   }
   const text = "truncate text-xs text-neutral-600 dark:text-neutral-300";
+  // N4 (#25): "AI" when the AI named it; "rules" only when it was asked and didn't answer.
+  const tag =
+    item.name_source === "ai" ? (
+      <span data-role="name-tag" className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+        AI
+      </span>
+    ) : item.name_source === "fallback" ? (
+      <span
+        data-role="name-tag"
+        title="AI naming didn't give a usable name, so the rules named this."
+        className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
+      >
+        rules
+      </span>
+    ) : null;
   return queued ? (
     <button
       type="button"
@@ -133,10 +148,12 @@ function NameField({ item, onRename }: { item: QueueItem; onRename: (id: number,
       className={`block max-w-full text-left hover:underline ${text}`}
     >
       {name}
+      {tag}
     </button>
   ) : (
     <div data-role="name" title={name} className={text}>
       {name}
+      {tag}
     </div>
   );
 }

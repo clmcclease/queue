@@ -1,6 +1,6 @@
 # Architecture
 
-> Stack confirmed (D-002, D-006). Implements [PRD-001](prds/PRD-001-queue-v1.md). M1 and most of M2 are built (see [STATUS](STATUS.md)). Sections marked **Planned** describe later milestones and don't exist yet.
+> Stack confirmed (D-002, D-006). Implements [PRD-001](prds/PRD-001-queue-v1.md). M1–M3 are built: the real queue, Tier-1 names, inline editing and templates. In M4, the AI provider setting exists, but the local runtime and model (#30, #31) and API setup (#32) don't yet, so names are rule-based today (see [STATUS](STATUS.md)). Sections marked **Planned** describe later milestones and don't exist yet.
 
 ## Components
 

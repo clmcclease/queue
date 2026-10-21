@@ -39,6 +39,16 @@ pub enum NameSource {
     Ai,
     /// Typed by the user; never replaced automatically.
     Edited,
+    /// The rules, after an AI provider was asked and didn't give a usable answer (#25). Shown
+    /// as "rules"; a plain `Rules` name, when no provider was usable, has no tag.
+    Fallback,
+}
+
+/// A saved `name_source`; a value from a newer version reads as `Rules` instead of failing
+/// the whole queue (#25).
+fn lenient_source<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<NameSource>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(value.map(|v| NameSource::deserialize(v).unwrap_or(NameSource::Rules)))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -61,6 +71,10 @@ pub struct Item {
     /// [`naming::sanitize`]d, and passed to yt-dlp when the download starts.
     pub name: Option<String>,
     pub name_source: Option<NameSource>,
+    /// The AI's title when `name_source` is `Ai`, so a template change can put it in the new
+    /// template without asking again (#25). Internal.
+    #[serde(skip)]
+    ai_title: Option<String>,
     /// Duplicate identity from [`link::parse`]; internal only.
     #[serde(skip)]
     key: String,
@@ -108,6 +122,9 @@ pub struct Queue {
     changes: u64,
     /// The naming template new names use (N3, #17 sets it).
     template: Template,
+    /// Bumped when the naming provider or template changes, so an AI answer asked for before
+    /// then is dropped (#25).
+    naming_generation: u64,
     /// Bumped by every cancel (#74), and each row's latest value, so "Download all" can tell a
     /// cancel during its run from an earlier one. Not saved.
     cancels: u64,
@@ -150,6 +167,7 @@ impl Queue {
             meta: None,
             name: None,
             name_source: None,
+            ai_title: None,
             progress: None,
             rev: 1,
             attempt: 0,
@@ -178,6 +196,7 @@ impl Queue {
                 // N1 (#15): the row has its Tier-1 name the moment it can be downloaded.
                 item.name = Some(naming::name(&meta, self.template));
                 item.name_source = Some(NameSource::Rules);
+                item.ai_title = None;
                 item.meta = Some(meta);
                 item.status = Status::Queued;
             }
@@ -189,7 +208,8 @@ impl Queue {
     }
 
     /// Sets the template new names use (N3, #17), and renames the Queued rows whose name wasn't
-    /// typed by the user. Returns the rows that changed, to show.
+    /// typed by the user; an AI title is kept and put into the new template (#25). Returns the
+    /// rows that changed, to show.
     pub fn set_template(&mut self, template: Template) -> Vec<Item> {
         self.template = template;
         let mut changed = Vec::new();
@@ -197,11 +217,12 @@ impl Queue {
             if item.status != Status::Queued || item.name_source == Some(NameSource::Edited) {
                 continue;
             }
-            let Some(meta) = &item.meta else { continue };
-            let name = naming::name(meta, template);
-            if item.name.as_deref() != Some(name.as_str()) {
+            let Some((name, source)) = templated(item, template) else {
+                continue;
+            };
+            if item.name.as_deref() != Some(name.as_str()) || item.name_source != Some(source) {
                 item.name = Some(name);
-                item.name_source = Some(NameSource::Rules);
+                item.name_source = Some(source);
                 item.rev += 1;
                 changed.push(item.clone());
             }
@@ -210,6 +231,76 @@ impl Queue {
             self.changes += 1;
         }
         changed
+    }
+
+    /// What the naming worker needs to ask for an AI name (#25): the row's metadata and the
+    /// current generation, if it's Queued and its name wasn't typed by the user.
+    pub fn naming_job(&self, id: u64) -> Option<(Meta, u64)> {
+        let item = self.items.iter().find(|i| i.id == id)?;
+        let eligible =
+            item.status == Status::Queued && item.name_source != Some(NameSource::Edited);
+        eligible
+            .then(|| (item.meta.clone(), self.naming_generation))
+            .and_then(|(m, g)| Some((m?, g)))
+    }
+
+    /// Records an AI answer asked for at `generation` (#25). It's used only if nothing changed
+    /// meanwhile: the row is still Queued, not renamed by hand, and the provider is the same. The
+    /// answer goes into the template current now. A failure puts the row on its Tier-1 name,
+    /// tagged `Fallback`.
+    pub fn ai_named(
+        &mut self,
+        id: u64,
+        generation: u64,
+        answer: Result<String, String>,
+    ) -> Option<Item> {
+        if generation != self.naming_generation {
+            return None;
+        }
+        let template = self.template;
+        let item = self.items.iter_mut().find(|i| i.id == id)?;
+        if item.status != Status::Queued || item.name_source == Some(NameSource::Edited) {
+            return None;
+        }
+        let meta = item.meta.as_ref()?;
+        match answer {
+            Ok(title) => {
+                item.name = Some(naming::with_title(meta, template, &title));
+                item.name_source = Some(NameSource::Ai);
+                item.ai_title = Some(title);
+            }
+            Err(_) => {
+                item.name = Some(naming::name(meta, template));
+                item.name_source = Some(NameSource::Fallback);
+                item.ai_title = None;
+            }
+        }
+        item.rev += 1;
+        self.changes += 1;
+        Some(item.clone())
+    }
+
+    /// Queued rows still on a Tier-1 name no provider was asked about (#25), e.g. restored
+    /// after a restart; a usable provider is asked for them.
+    pub fn awaiting_ai(&self) -> Vec<u64> {
+        self.items
+            .iter()
+            .filter(|i| i.status == Status::Queued && i.meta.is_some())
+            .filter(|i| i.name_source == Some(NameSource::Rules))
+            .map(|i| i.id)
+            .collect()
+    }
+
+    /// The provider changed (#25): drops answers already on their way, and returns the Queued
+    /// rows not renamed by hand, to ask again.
+    pub fn renaming(&mut self) -> Vec<u64> {
+        self.naming_generation += 1;
+        self.items
+            .iter()
+            .filter(|i| i.status == Status::Queued && i.meta.is_some())
+            .filter(|i| i.name_source != Some(NameSource::Edited))
+            .map(|i| i.id)
+            .collect()
     }
 
     /// Renames a Queued row (N1, #15). The name is sanitized like any other (never trusted), and
@@ -225,6 +316,7 @@ impl Queue {
         }
         item.name = Some(naming::sanitize(name));
         item.name_source = Some(NameSource::Edited);
+        item.ai_title = None;
         item.rev += 1;
         self.changes += 1;
         Ok(item.clone())
@@ -473,11 +565,24 @@ pub const CANCELLED: &str = "Cancelled. Download it again when you're ready.";
 fn refresh_name(item: &mut Item, template: Template) {
     if item.status == Status::Queued
         && item.name_source != Some(NameSource::Edited)
-        && let Some(meta) = &item.meta
+        && let Some((name, source)) = templated(item, template)
     {
-        item.name = Some(naming::name(meta, template));
-        item.name_source = Some(NameSource::Rules);
+        item.name = Some(name);
+        item.name_source = Some(source);
     }
+}
+
+/// A row's name under `template`, and its tag: an AI name keeps its AI title (#25), a Fallback
+/// stays tagged Fallback, and anything else is a rules name. `None` without metadata.
+fn templated(item: &Item, template: Template) -> Option<(String, NameSource)> {
+    let meta = item.meta.as_ref()?;
+    Some(match (item.name_source, &item.ai_title) {
+        (Some(NameSource::Ai), Some(title)) => {
+            (naming::with_title(meta, template, title), NameSource::Ai)
+        }
+        (Some(NameSource::Fallback), _) => (naming::name(meta, template), NameSource::Fallback),
+        _ => (naming::name(meta, template), NameSource::Rules),
+    })
 }
 
 /// What `queue.json` keeps of a row (#12): enough to show it again. Live progress, retry attempts
@@ -492,8 +597,15 @@ struct SavedItem {
     /// Added in #15; a row saved before then gets its Tier-1 name when loaded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_source"
+    )]
     name_source: Option<NameSource>,
+    /// Added in #25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ai_title: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -523,6 +635,7 @@ impl Queue {
                     notice: i.notice.clone(),
                     name: i.name.clone(),
                     name_source: i.name_source,
+                    ai_title: i.ai_title.clone(),
                 })
                 .collect(),
         };
@@ -572,6 +685,7 @@ impl Queue {
                 meta: row.meta,
                 name,
                 name_source,
+                ai_title: row.ai_title,
                 progress: None,
                 rev: 1,
                 attempt: 0,
@@ -841,6 +955,131 @@ mod tests {
         q.finish(edited, Err("x".into())).unwrap();
         q.set_template(Template::ChannelTitle);
         assert_eq!(q.retry(edited).unwrap().name.as_deref(), Some("Mine"));
+    }
+
+    /// N4 (#25): an AI answer is used only while nothing changed: the row is Queued, its name
+    /// wasn't typed, and the provider and template are the same. A failure is tagged Fallback.
+    #[test]
+    fn ai_names_apply_only_while_nothing_changed() {
+        let mut q = Queue::default();
+        let meta = |t: &str| Meta {
+            title: Some(t.into()),
+            ..Default::default()
+        };
+        let mut row = |url: &str| {
+            let id = q.add(url).unwrap().id;
+            q.fetched(id, Ok(meta("raw title [4K]"))).unwrap();
+            id
+        };
+        let (a, b, c, d) = (
+            row("https://e.test/a"),
+            row("https://e.test/b"),
+            row("https://e.test/c"),
+            row("https://e.test/d"),
+        );
+        assert_eq!(q.awaiting_ai(), [a, b, c, d]);
+        let (_, generation) = q.naming_job(a).unwrap();
+        let named = q
+            .ai_named(a, generation, Ok("Clean – Title".into()))
+            .unwrap();
+        assert_eq!(
+            (named.name.as_deref(), named.name_source),
+            (Some("Clean – Title"), Some(NameSource::Ai))
+        );
+        let failed = q.ai_named(b, generation, Err("timeout".into())).unwrap();
+        assert_eq!(
+            (failed.name.as_deref(), failed.name_source),
+            (Some("raw title"), Some(NameSource::Fallback))
+        );
+        q.rename(c, "Mine").unwrap();
+        assert!(q.naming_job(c).is_none(), "a hand-edited row isn't asked");
+        assert!(
+            q.ai_named(c, generation, Ok("AI".into())).is_none(),
+            "nor overwritten"
+        );
+        q.start(d).unwrap();
+        assert!(
+            q.ai_named(d, generation, Ok("AI".into())).is_none(),
+            "a started row keeps its name"
+        );
+        assert_eq!(q.awaiting_ai(), Vec::<u64>::new());
+        // A provider change drops answers asked for before it and lists rows to ask again.
+        let again = q.renaming();
+        assert_eq!(again, [a, b], "not the edited or running rows");
+        assert!(q.ai_named(a, generation, Ok("Stale".into())).is_none());
+        let (_, newer) = q.naming_job(a).unwrap();
+        assert!(newer > generation);
+        // Saved and restored: the AI title and the tag survive; an unknown tag reads as rules.
+        let loaded = Queue::from_json(&q.to_json()).unwrap();
+        assert_eq!(loaded.items()[0].name_source, Some(NameSource::Ai));
+        assert_eq!(loaded.items()[0].ai_title.as_deref(), Some("Clean – Title"));
+        let newer_file = br#"{"version":1,"items":[{"id":1,"url":"https://e.test/a","status":{"state":"queued"},
+            "meta":{"title":"T","channel":null,"duration":null,"thumbnail":null,"site":null},"notice":null,
+            "name":"T","name_source":"from_the_future"}]}"#;
+        assert_eq!(
+            Queue::from_json(newer_file).unwrap().items()[0].name_source,
+            Some(NameSource::Rules)
+        );
+        assert!(serde_json::to_string(&NameSource::Fallback).unwrap() == r#""fallback""#);
+    }
+
+    /// #17 meets #25: a template change keeps an AI title and puts it into the new template,
+    /// keeps a Fallback tagged Fallback, and the same holds when a row comes back to the queue.
+    #[test]
+    fn a_template_change_keeps_ai_titles_and_fallback_tags() {
+        let mut q = Queue::default();
+        let meta = Meta {
+            title: Some("raw title [4K]".into()),
+            channel: Some("Chan".into()),
+            ..Default::default()
+        };
+        let mut row = |url: &str| {
+            let id = q.add(url).unwrap().id;
+            q.fetched(id, Ok(meta.clone())).unwrap();
+            id
+        };
+        let (ai, fallback, running) = (
+            row("https://e.test/a"),
+            row("https://e.test/b"),
+            row("https://e.test/c"),
+        );
+        let generation = q.naming_job(ai).unwrap().1;
+        q.ai_named(ai, generation, Ok("Clean Title".into()))
+            .unwrap();
+        q.ai_named(fallback, generation, Err("timeout".into()))
+            .unwrap();
+        q.ai_named(running, generation, Ok("Clean Title".into()))
+            .unwrap();
+        q.start(running).unwrap();
+        let changed = q.set_template(Template::ChannelTitle);
+        let got = |items: &[Item], id| {
+            let i = items.iter().find(|i| i.id == id).unwrap();
+            (i.name.clone().unwrap(), i.name_source.unwrap())
+        };
+        assert_eq!(
+            got(&changed, ai),
+            ("Chan - Clean Title".into(), NameSource::Ai)
+        );
+        assert_eq!(
+            got(&changed, fallback),
+            ("Chan - raw title".into(), NameSource::Fallback)
+        );
+        assert_eq!(changed.len(), 2, "the running row keeps its name");
+        assert!(
+            q.awaiting_ai().is_empty(),
+            "neither is asked again on a template change"
+        );
+        let back = q.cancelled(running).unwrap();
+        assert_eq!(
+            (back.name.as_deref(), back.name_source),
+            (Some("Chan - Clean Title"), Some(NameSource::Ai))
+        );
+        let loaded = Queue::from_json(&q.to_json()).unwrap();
+        assert_eq!(
+            got(loaded.items(), ai),
+            got(q.items(), ai),
+            "survives a restart"
+        );
     }
 
     /// N1 (#15): names survive a restart; a row saved before #15 gets its Tier-1 name, and a

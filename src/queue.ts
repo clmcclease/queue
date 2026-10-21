@@ -48,7 +48,7 @@ export interface QueueItem {
   /** N1 (#15): the file name it will be saved as, without extension; set once the info arrives. */
   name?: string | null;
   /** Where the name came from; an `edited` name is never replaced automatically. */
-  name_source?: "rules" | "ai" | "edited" | null;
+  name_source?: "rules" | "ai" | "edited" | "fallback" | null;
 }
 
 /** Why `addItem` rejected a link (src-tauri/src/queue.rs `AddError`). */

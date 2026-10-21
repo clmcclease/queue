@@ -40,3 +40,23 @@ export const setNamingTemplate = (template: Template) =>
   invoke<Template>("settings_set_naming_template", { template });
 /** Each template's name for a fixed sample item, for the live preview. */
 export const namingPreviews = () => invoke<[Template, string][]>("naming_previews");
+/** Who suggests names (N4, #25); matches src-tauri's `ai::Provider`. */
+export type Provider = "local" | "api" | "off";
+
+export const PROVIDERS: { value: Provider; label: string; detail: string }[] = [
+  { value: "local", label: "Local (default)", detail: "A small model on this computer. Nothing leaves your machine." },
+  { value: "api", label: "API", detail: "A service you set up. The item's title, channel and description are sent to it." },
+  { value: "off", label: "Off", detail: "Names come from the rules only." },
+];
+
+/** The chosen provider and why it can't be asked yet (`null` when it can). */
+export interface NamingStatus {
+  provider: Provider;
+  unavailable: "off" | "model_missing" | "not_set_up" | null;
+}
+
+export const namingStatus = () => invoke<NamingStatus>("naming_status");
+export const namingProvider = () => invoke<Provider>("settings_naming_provider");
+/** Saves the provider; queued rows not renamed by hand are asked again if it can be used. */
+export const setNamingProvider = (provider: Provider) =>
+  invoke<NamingStatus>("settings_set_naming_provider", { provider });

@@ -1,6 +1,6 @@
 # PRD: "Queue" — a desktop GUI for yt-dlp with smart file naming
 
-**Status:** Draft v2 · **Owner:** Chris McClease · **Created:** 2026-10-10 · **Updated:** 2026-10-10 (size budget, D-013) · **Milestones:** see [BACKLOG](../BACKLOG.md)
+**Status:** Draft v2 · **Owner:** Chris McClease · **Created:** 2026-10-10 · **Updated:** 2026-10-20 (Q5 lifecycle, pending owner confirmation) · **Milestones:** see [BACKLOG](../BACKLOG.md)
 
 ## Context
 Today the workflow is: copy a YouTube link → run `yt-dlp` in the terminal → file lands in a folder → rename it by hand. When several videos get downloaded in a row, the renaming gets skipped, files end up with useless names, and they get lost. The goal is a lightweight, polished, **cross-platform** desktop app that queues links, downloads them with yt-dlp into a folder you choose, and gives each file a clean, human-readable name. The name comes from the video's metadata and is tidied up by an AI model that runs **locally by default**.
@@ -50,7 +50,7 @@ A single power user (the owner) on any desktop OS who downloads podcasts, music,
 | Q2 | Validate URL; reject duplicates already in queue | P0 |
 | Q3 | On add, fetch metadata (`yt-dlp -J`) to show title/thumbnail/duration before download | P0 |
 | Q4 | Sequential processing (concurrency = 1 by default; setting for 2–3) | P0 / Later |
-| Q5 | Per-item states: Queued → Fetching info → Naming → Ready → Downloading → Processing → Done / Failed | P0 |
+| Q5 | Per-item states: Fetching info → Queued → Downloading → Processing → Done / Failed. The Tier-1 name is set as the row becomes Queued; the AI name may replace it while the row is still Queued and not edited by the user. *Amended 2026-10-20 under D-028/D-029, pending owner confirmation; original: Queued → Fetching info → Naming → Ready → Downloading → Processing → Done / Failed.* | P0 |
 | Q6 | Remove, reorder (drag), retry, cancel individual items | P0 (remove/retry), P1 (reorder/cancel) |
 | Q7 | Queue persists across app restarts | P1 |
 | Q8 | Paste multiple URLs at once (newline-separated) → multiple items | P1 |

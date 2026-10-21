@@ -3,10 +3,15 @@ import type { DownloadFolderState } from "../useDownloadFolder";
 import FolderPicker from "./FolderPicker";
 import FormatPicker from "./FormatPicker";
 import TemplatePicker from "./TemplatePicker";
+import ProviderPicker from "./ProviderPicker";
+import type { NamingStatus } from "../settings";
 
 interface Props {
   folder: DownloadFolderState;
   onClose: () => void;
+  /** The AI naming provider changed (#25). */
+  namingStatus?: NamingStatus | null;
+  onNamingStatus?: (status: NamingStatus) => void;
 }
 
 /**
@@ -14,7 +19,7 @@ interface Props {
  * closes it. Later items add their sections here (AI #25/#31/#32,
  * yt-dlp updates #21, notifications #20). Every change is saved by the backend as it's made.
  */
-export default function SettingsPanel({ folder, onClose }: Props) {
+export default function SettingsPanel({ folder, onClose, namingStatus, onNamingStatus }: Props) {
   const close = useRef<HTMLButtonElement>(null);
 
   // Focus moves into the panel; App puts it back on the opener once the queue isn't inert.
@@ -76,6 +81,12 @@ export default function SettingsPanel({ folder, onClose }: Props) {
           File names
         </h3>
         <TemplatePicker />
+      </section>
+      <section aria-labelledby="settings-ai" className="mt-6">
+        <h3 id="settings-ai" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+          AI naming
+        </h3>
+        <ProviderPicker status={namingStatus} onStatus={onNamingStatus} />
       </section>
     </div>
   );

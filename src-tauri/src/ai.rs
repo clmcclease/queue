@@ -236,6 +236,52 @@ fn latin(c: char) -> bool {
     )
 }
 
+/// The AI naming provider (N4, #25): the bundled local model (the default), an API the user sets
+/// up, or none. Item metadata leaves the machine only with `Api`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
+    #[default]
+    Local,
+    Api,
+    Off,
+}
+
+/// Why no AI name is asked for. The row keeps its Tier-1 name with no "rules" tag; for
+/// `ModelMissing` the UI shows a banner (PRD §6.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unavailable {
+    Off,
+    /// The local model isn't downloaded or running yet (#30, #31).
+    ModelMissing,
+    /// No API service is set up yet (#32).
+    NotSetUp,
+}
+
+/// Where `provider` names things, or why nowhere yet. Nothing is sent for an unavailable one;
+/// `Local` never resolves to anything but this computer.
+pub fn endpoint(provider: Provider) -> Result<Endpoint, Unavailable> {
+    match provider {
+        Provider::Off => Err(Unavailable::Off),
+        // #30/#31 return the running local server here (http://127.0.0.1:<port>/v1).
+        Provider::Local => Err(Unavailable::ModelMissing),
+        // #32 returns the user's service here, with its key from the OS credential store.
+        Provider::Api => Err(Unavailable::NotSetUp),
+    }
+}
+
+/// Something that names an item; [`Endpoint`] asks the AI, and tests use fakes.
+pub trait Namer {
+    fn name(&self, meta: &Meta) -> Result<String, String>;
+}
+
+impl Namer for Endpoint {
+    fn name(&self, meta: &Meta) -> Result<String, String> {
+        ask(self, meta)
+    }
+}
+
 /// Where to ask: an OpenAI-compatible base URL (e.g. `https://api.openai.com/v1`, or
 /// `http://127.0.0.1:<port>/v1` for a local server), a model, and an optional key.
 #[derive(Clone)]
@@ -540,6 +586,27 @@ mod tests {
         assert_eq!(
             chat_url("https://x.test").unwrap().as_str(),
             "https://x.test/chat/completions"
+        );
+    }
+
+    /// #25: until #30/#32, no provider resolves to anywhere, so nothing is sent; `Local` can
+    /// only ever mean this computer.
+    #[test]
+    fn providers_resolve_to_nothing_until_they_are_set_up() {
+        assert_eq!(endpoint(Provider::Off).err(), Some(Unavailable::Off));
+        assert_eq!(
+            endpoint(Provider::Local).err(),
+            Some(Unavailable::ModelMissing)
+        );
+        assert_eq!(endpoint(Provider::Api).err(), Some(Unavailable::NotSetUp));
+        assert_eq!(
+            Provider::default(),
+            Provider::Local,
+            "local by default (PRD §6.3)"
+        );
+        assert_eq!(
+            serde_json::to_string(&Unavailable::ModelMissing).unwrap(),
+            r#""model_missing""#
         );
     }
 

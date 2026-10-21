@@ -22,6 +22,9 @@ pub struct Settings {
     /// How proposed names are built (N3, #17); `{title}` by default.
     #[serde(deserialize_with = "or_default")]
     pub naming_template: crate::naming::Template,
+    /// Who suggests names (N4, #25): the local model by default.
+    #[serde(deserialize_with = "or_default")]
+    pub naming_provider: crate::ai::Provider,
 }
 
 /// Reads one setting, or its default if it can't be understood (e.g. a format from a newer
@@ -174,6 +177,36 @@ mod tests {
             loaded.format,
             crate::download::Format::Audio,
             "the rest is kept"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// N4 (#25): the provider is remembered; missing or unknown values mean the local model.
+    #[test]
+    fn the_naming_provider_is_remembered_and_unknown_values_mean_local() {
+        use crate::ai::Provider;
+        let dir = temp("provider");
+        let path = dir.join(FILE);
+        let off = Settings {
+            naming_provider: Provider::Off,
+            ..Default::default()
+        };
+        off.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), off);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains(r#""namingProvider": "off""#)
+        );
+        fs::write(
+            &path,
+            br#"{"format": "audio", "namingProvider": "quantum"}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(
+            (loaded.naming_provider, loaded.format),
+            (Provider::Local, crate::download::Format::Audio)
         );
         fs::remove_dir_all(dir).unwrap();
     }

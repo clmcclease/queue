@@ -45,7 +45,18 @@ pub fn previews() -> Vec<(Template, String)> {
 /// The proposed name for an item: its subject (artist – track, series SxxEyy, else the title)
 /// cleaned of noise and emoji, put in `template`, then [`sanitize`]d.
 pub fn name(meta: &Meta, template: Template) -> String {
-    let subject = clean(&subject(meta));
+    apply(meta, template, clean(&subject(meta)))
+}
+
+/// [`name`] with an AI-chosen title in place of the engine's subject (#25, D-029): the AI name
+/// replaces `{title}`, and the channel or date still come from the metadata, so the template
+/// means the same under every provider.
+pub fn with_title(meta: &Meta, template: Template, title: &str) -> String {
+    apply(meta, template, collapse(title))
+}
+
+/// Puts `subject` into `template`, then sanitizes.
+fn apply(meta: &Meta, template: Template, subject: String) -> String {
     let named = match template {
         Template::Title => subject,
         Template::ChannelTitle => match meta.channel.as_deref().map(clean) {
@@ -604,6 +615,30 @@ mod tests {
             "A title",
             "needs both fields"
         );
+    }
+
+    /// #25: an AI title takes `{title}`'s place; the engine still adds the channel or date and
+    /// makes it safe, but doesn't "clean" the AI's wording.
+    #[test]
+    fn an_ai_title_fills_the_template() {
+        let meta = Meta {
+            title: Some("daft punk get lucky OFFICIAL".into()),
+            channel: Some("Daft Punk".into()),
+            upload_date: Some("20130419".into()),
+            ..Default::default()
+        };
+        let ai = "Daft Punk – Get Lucky (feat. Pharrell Williams)";
+        assert_eq!(with_title(&meta, Template::Title, ai), ai);
+        assert_eq!(
+            with_title(&meta, Template::ChannelTitle, ai),
+            ai,
+            "the channel isn't repeated"
+        );
+        assert_eq!(
+            with_title(&meta, Template::DateTitle, ai),
+            format!("2013-04-19 {ai}")
+        );
+        assert_eq!(with_title(&meta, Template::Title, "a/b  c"), "a⧸b c");
     }
 
     #[test]
