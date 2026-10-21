@@ -136,7 +136,7 @@ test("N7: checking, a failure, a downloaded model and a stray file each say what
   assert.match(text(), /Queue didn't download it/);
   assert.equal(el("model-download"), null, "never offered over someone's file");
   await act(async () => emit("queue://model", status({ state: "ready" })));
-  assert.equal(text(), "The local model is downloaded. This version of Queue can't run it yet, so names come from the rules.");
+  assert.equal(text(), "The local model is downloaded, but this copy of Queue is missing the part that runs it, so names come from the rules. Reinstalling Queue fixes this.");
 });
 
 test("N7: a model event refreshes the naming status, and a finished download keeps the honest banner", async () => {
@@ -146,7 +146,7 @@ test("N7: a model event refreshes the naming status, and a finished download kee
   });
   ready = true;
   await act(async () => emit("queue://model", status({ state: "ready" })));
-  assert.match(text(), /downloaded\. This version of Queue can't run it yet/);
+  assert.match(text(), /downloaded, but this copy of Queue is missing the part that runs it/);
 });
 
 test("N7: Settings shows the models, the suggestion, the path and the source, and switches on a click", async () => {

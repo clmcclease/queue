@@ -277,10 +277,10 @@ pub enum ApiKind {
 #[serde(rename_all = "snake_case")]
 pub enum Unavailable {
     Off,
-    /// The local model isn't downloaded or running yet (#30, #31).
+    /// The local model isn't downloaded yet (#31).
     ModelMissing,
-    /// The local model is downloaded, but this version of Queue can't run it yet (#31; #30
-    /// replaces this with the running server).
+    /// The local model is downloaded, but this build has no `llama-server` to run it (a dev
+    /// build that didn't fetch its sidecars, #30).
     RuntimeMissing,
     /// No API service is set up: no valid base URL or no model (#32). A missing key is fine.
     NotSetUp,
@@ -288,16 +288,22 @@ pub enum Unavailable {
     StoreUnreachable,
 }
 
-/// Whether the chosen local model is downloaded and checked (#31). The caller looks at the disk;
+/// The chosen local model's state (#31, #30). The caller looks at the disk and runs the server;
 /// this module never does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum LocalModel {
     Missing,
+    /// Downloaded, but this build has no server to run it.
+    NoRuntime,
+    /// Downloaded and checked; the server starts when a row is named.
     Downloaded,
+    /// The server is running it, at this endpoint (http://127.0.0.1:<port>/v1).
+    Running(Endpoint),
 }
 
 /// Where the chosen provider names things, or why nowhere. Nothing is sent for an unavailable
-/// one. `Local` never reads the API settings or the key: it only ever means this computer.
+/// one. `Local` never reads the API settings or the key: it only ever means this computer, and
+/// only a running server is an endpoint (the caller starts it for `Downloaded`).
 pub fn endpoint(
     settings: &Settings,
     secrets: &dyn Secrets,
@@ -305,12 +311,25 @@ pub fn endpoint(
 ) -> Result<Endpoint, Unavailable> {
     match settings.naming_provider {
         Provider::Off => Err(Unavailable::Off),
-        // #30 returns the running local server here (http://127.0.0.1:<port>/v1).
-        Provider::Local => Err(match local {
-            LocalModel::Missing => Unavailable::ModelMissing,
-            LocalModel::Downloaded => Unavailable::RuntimeMissing,
-        }),
+        Provider::Local => match local {
+            LocalModel::Running(endpoint) => Ok(endpoint),
+            LocalModel::Missing => Err(Unavailable::ModelMissing),
+            LocalModel::NoRuntime | LocalModel::Downloaded => Err(Unavailable::RuntimeMissing),
+        },
         Provider::Api => api_endpoint(settings, secrets),
+    }
+}
+
+/// Why the chosen provider can't be asked, as the banner shows it, without starting anything:
+/// a downloaded local model can be asked, since its server starts on demand.
+pub fn unavailable(
+    settings: &Settings,
+    secrets: &dyn Secrets,
+    local: LocalModel,
+) -> Option<Unavailable> {
+    match (settings.naming_provider, local) {
+        (Provider::Local, LocalModel::Downloaded) => None,
+        (_, local) => endpoint(settings, secrets, local).err(),
     }
 }
 
@@ -379,8 +398,43 @@ impl<F: Fn() -> Result<Endpoint, Unavailable>> Namer for Resolving<F> {
     }
 
     fn name_if(&self, meta: &Meta, current: &dyn Fn() -> bool) -> Option<Result<String, String>> {
-        let endpoint = (self.0)().ok()?;
-        current().then(|| ask(&endpoint, meta))
+        Starting(|| match (self.0)() {
+            Ok(endpoint) => Ready::Ask(endpoint),
+            Err(_) => Ready::Nothing,
+        })
+        .name_if(meta, current)
+    }
+}
+
+/// What a [`Starting`] namer found when it got ready.
+pub enum Ready {
+    Ask(Endpoint),
+    /// The provider can't be asked: nothing is asked, and the row keeps its name and tag.
+    Nothing,
+    /// Getting ready failed (the local server didn't start, #30): a failed ask, so the row
+    /// shows the rules tag.
+    Failed(String),
+}
+
+/// A [`Resolving`] namer whose endpoint may need starting first (the local server, #30). A
+/// start can take a while, so the job is checked before it and again before sending.
+pub struct Starting<F>(pub F);
+
+impl<F: Fn() -> Ready> Namer for Starting<F> {
+    fn name(&self, meta: &Meta) -> Result<String, String> {
+        self.name_if(meta, &|| true)
+            .unwrap_or_else(|| Err("The naming provider can't be asked now.".to_owned()))
+    }
+
+    fn name_if(&self, meta: &Meta, current: &dyn Fn() -> bool) -> Option<Result<String, String>> {
+        if !current() {
+            return None;
+        }
+        match (self.0)() {
+            Ready::Ask(endpoint) => current().then(|| ask(&endpoint, meta)),
+            Ready::Nothing => None,
+            Ready::Failed(error) => current().then_some(Err(error)),
+        }
     }
 }
 
@@ -788,16 +842,24 @@ mod tests {
             Some(Unavailable::ModelMissing),
             "Local never uses the API settings"
         );
+        let local = with(Provider::Local, "https://x.test", "m");
         assert_eq!(
-            endpoint(
-                &with(Provider::Local, "https://x.test", "m"),
-                &none,
-                LocalModel::Downloaded
-            )
-            .err(),
+            endpoint(&local, &none, LocalModel::NoRuntime).err(),
             Some(Unavailable::RuntimeMissing),
-            "a downloaded model still can't be asked until #30"
+            "a downloaded model needs the server in this build"
         );
+        assert_eq!(
+            unavailable(&local, &none, LocalModel::Downloaded),
+            None,
+            "#30: a downloaded model can be asked; its server starts on demand"
+        );
+        let running = Endpoint {
+            base_url: "http://127.0.0.1:4321/v1".into(),
+            model: "m".into(),
+            key: Some("k".into()),
+        };
+        let asked = endpoint(&local, &none, LocalModel::Running(running)).unwrap();
+        assert_eq!(asked.base_url, "http://127.0.0.1:4321/v1");
         for not_set_up in [
             api("", ""),
             api("https://x.test", " "),

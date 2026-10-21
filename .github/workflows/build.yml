@@ -134,6 +134,15 @@ jobs:
         env:
           QUEUE_QA_REAL_SIDECARS: ${{ github.workspace }}/src-tauri/binaries
         run: cargo test --locked --test download_real_d2 -- --ignored --test-threads=1
+      # The real llama-server loads a pinned 1.2 MB GGUF, answers with the per-launch key and
+      # stops, on each OS (#30(b), D-029): the CPU backend proof on Windows and Linux.
+      - name: Real llama-server lifecycle test
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          node ../scripts/fetch-sidecars.mjs --test-model "$RUNNER_TEMP/test-model"
+          QUEUE_QA_TEST_GGUF="$RUNNER_TEMP/test-model/stories260K.gguf" QUEUE_QA_LLAMA_DIR=target/debug/llama \
+            cargo test --locked --test local_real_30b -- --ignored --test-threads=1 the_real_server
 
   bundle:
     needs: test

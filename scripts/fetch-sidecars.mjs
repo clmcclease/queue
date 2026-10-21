@@ -5,10 +5,12 @@
 //
 //   node scripts/fetch-sidecars.mjs [--target <triple>] [--check]
 //   node scripts/fetch-sidecars.mjs [--target <triple>] --check-llama <dir>
+//   node scripts/fetch-sidecars.mjs --test-model <dir>
 //
 // --target defaults to the host. --check runs yt-dlp's verbose header to confirm it sees our
 // ffmpeg, ffprobe and deno, and runs llama-server --version and --list-devices to confirm it
-// and its libraries load (skipped when the target can't run on this host).
+// and its libraries load (skipped when the target can't run on this host). --test-model only
+// fetches the pinned test GGUF (CI's real llama-server test, #30(b)) into <dir>.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -138,6 +140,31 @@ function install(name, buf) {
   chmodSync(`${dest}.part`, 0o755);
   renameSync(`${dest}.part`, dest);
   console.log(`installed ${dest} (${buf.length} bytes)`);
+}
+
+// --test-model <dir>: only fetch the test GGUF, checked by size, sha256 and its GGUF magic.
+const testModelAt = args.indexOf("--test-model");
+if (testModelAt >= 0) {
+  const { url, file, size, sha256: want } = manifest.testModel;
+  const dest = resolve(args[testModelAt + 1], file);
+  const cached = join(cacheDir, `test-model-${want}`);
+  let buf = existsSync(cached) ? readFileSync(cached) : null;
+  if (!buf || sha256(buf) !== want) {
+    console.log(`downloading ${url}`);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+    buf = Buffer.from(await res.arrayBuffer());
+  }
+  if (buf.length !== size) throw new Error(`${file}: ${buf.length} bytes, want ${size}`);
+  const got = sha256(buf);
+  if (got !== want) throw new Error(`${file}: sha256 mismatch, got ${got}, want ${want}`);
+  if (buf.subarray(0, 4).toString("latin1") !== "GGUF") throw new Error(`${file}: not a GGUF file`);
+  mkdirSync(cacheDir, { recursive: true });
+  writeFileSync(cached, buf);
+  mkdirSync(resolve(args[testModelAt + 1]), { recursive: true });
+  writeFileSync(dest, buf);
+  console.log(`installed ${dest} (${buf.length} bytes)`);
+  process.exit(0);
 }
 
 // --check-llama <dir>: only check an installed llama/ folder (CI runs it on the copy
