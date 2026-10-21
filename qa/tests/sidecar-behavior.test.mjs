@@ -115,9 +115,14 @@ if (process.env.QA_PROCESS || process.env.QA_LLAMA_PROCESS) {
         if (mode === 'exit') return { stdout: 'version: 11669', stderr: 'loaded CPU backend', status: 1 };
         if (mode === 'missing') return { stdout: '', stderr: '', status: null, error: Object.assign(new Error('spawnSync ENOENT'), { code: 'ENOENT' }) };
         if (mode === 'wrong-version') return { stdout: 'version: 11668', stderr: '', status: 0 };
-        if (mode === 'no-cpu') return { stdout: 'Available devices:', stderr: '', status: 0 };
+        // What CI's CPU-only Windows and Linux runners print (PR #95).
+        if (mode === 'cpu-only') return { stdout: 'Available devices:\\n  (none)\\n', stderr: '', status: 0 };
+        if (mode === 'no-list') return { stdout: 'usage: llama-server [options]', stderr: '', status: 0 };
+        if (mode === 'metal') return { stdout: 'Available devices:\\n  MTL0: Apple M1 (10922 MiB, 10922 MiB free)\\n', stderr: '', status: 0 };
+        if (mode === 'stderr-list') return { stdout: '', stderr: 'Available devices:\\n  (none)\\n', status: 0 };
       }
-      return { stdout: 'version: 11669 (fixture)\\n', stderr: 'load_backend: loaded CPU backend from fixture\\n', status: 0 };
+      if (args[0] === '--list-devices') return { stdout: 'Available devices:\\n  (none)\\n', stderr: '', status: 0 };
+      return { stdout: 'version: 11669 (fixture)\\n', stderr: '', status: 0 };
     }
     if (!Array.isArray(args) || options.timeout !== 120000) throw new Error('invalid process contract');
     const header = '[debug] yt-dlp version stable@2026.08.19 fixture\\n[debug] exe versions: ffmpeg 9.0.2, ffprobe 9.0.2\\n[debug] JS runtimes: deno-2.9.7\\n';
@@ -397,11 +402,29 @@ test("#30(a): check-only rejects a different build", (t) => {
 });
 
 for (const target of ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]) {
-  test(`#30(a): ${target} check requires the CPU backend even with exit zero`, (t) => {
+  test(`#30(a): ${target} passes with a CPU-only device list, and fails without one`, (t) => {
     const f = fixture(t, { target });
     assert.equal(f.run().status, 0);
-    const result = f.run(["--check-llama", join(f.bin, "llama")], { QA_LLAMA_FLAG: "--list-devices", QA_LLAMA_PROCESS: "no-cpu" });
+    const dir = join(f.bin, "llama");
+    const cpu = f.run(["--check-llama", dir], { QA_LLAMA_FLAG: "--list-devices", QA_LLAMA_PROCESS: "cpu-only" });
+    assert.equal(cpu.status, 0, cpu.stderr);
+    const result = f.run(["--check-llama", dir], { QA_LLAMA_FLAG: "--list-devices", QA_LLAMA_PROCESS: "no-list" });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /found no CPU backend/);
+    assert.match(result.stderr, /didn't list devices/);
+  });
+}
+
+for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+  test(`#30(a) review: ${target} accepts an accelerator list or a stderr-only list, and needs a list`, (t) => {
+    const f = fixture(t, { target });
+    assert.equal(f.run().status, 0);
+    const dir = join(f.bin, "llama");
+    for (const mode of ["metal", "stderr-list"]) {
+      const ok = f.run(["--check-llama", dir], { QA_LLAMA_FLAG: "--list-devices", QA_LLAMA_PROCESS: mode });
+      assert.equal(ok.status, 0, `${mode}: ${ok.stderr}`);
+    }
+    const none = f.run(["--check-llama", dir], { QA_LLAMA_FLAG: "--list-devices", QA_LLAMA_PROCESS: "no-list" });
+    assert.notEqual(none.status, 0);
+    assert.match(none.stderr, /didn't list devices/);
   });
 }

@@ -187,8 +187,11 @@ if (args.includes("--check")) {
 }
 
 // Runs llama-server --version and --list-devices from its own folder, as Queue will: proves
-// the binary and every library it links load on this OS, and (Windows, Linux) that ggml found
-// a CPU backend beside it. Exported to CI as `--check-llama <dir>` for target/<profile>/llama.
+// the binary and every library it links load on this OS, and that the device listing runs.
+// --list-devices shows accelerators only (Metal on macOS arm64; "(none)" on a CPU-only
+// machine), and the CPU backend, a separate library on Windows and Linux, is only loaded with
+// a model, so that is #30(b)'s test (first CI run, PR #95). Also run as
+// `--check-llama <dir>` on the copy beside the dev executable.
 function checkLlama(folder) {
   const dir = resolve(folder);
   const server = join(dir, `llama-server${exe}`);
@@ -205,8 +208,8 @@ function checkLlama(folder) {
   const build = manifest.llama.version.replace(/^b/, "");
   if (!version.includes(build)) throw new Error(`llama-server --version doesn't say ${build}:\n${version}`);
   const devices = run("--list-devices");
-  if (!target.includes("apple") && !/loaded CPU backend/.test(devices)) {
-    throw new Error(`llama-server found no CPU backend:\n${devices}`);
+  if (!devices.includes("Available devices")) {
+    throw new Error(`llama-server --list-devices didn't list devices:\n${devices}`);
   }
   console.log(`check ok: llama-server ${build} in ${dir}`);
 }

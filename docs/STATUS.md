@@ -110,7 +110,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #30(a) (N6) bundled llama-server (branch `naming/30-llama-runtime`, on c66c6c0, uncommitted)
+## In progress: #30(a) (N6) bundled llama-server (PR #95, branch `naming/30-llama-runtime`)
 - **Design ruled by the architect under D-028** (D-029's #30 bullets). Full #30 tonight was refused, so it's split:
   - **(a), tonight:** fetch, verify and bundle the server. Nothing runs it yet: `endpoint(Local)` still gives `RuntimeMissing`.
   - **(b), the morning:** the lifecycle, to the spec in D-029.
@@ -122,7 +122,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **`scripts/fetch-sidecars.mjs`:**
   - a minimal tar.gz reader (ustar, symlinks skipped) beside the zip reader;
   - `installLlama` builds `binaries/llama.part/`, writes `target.txt`, and swaps the folder in whole;
-  - `--check` also runs `llama-server --version` (it must say 11669) and `--list-devices` from that folder, and on Windows and Linux requires ggml's "loaded CPU backend";
+  - `--check` also runs `llama-server --version` (it must say 11669) and `--list-devices` (it must list devices) from that folder;
   - `--check-llama <dir>` checks an existing folder.
 - **Bundle (`tauri.conf.json`):**
   - `bundle.resources` maps `binaries/llama/` → `llama/` (`Contents/Resources/llama/`, `<install>\llama\`, `/usr/lib/queue/llama/`; tauri-build copies it to `target/<profile>/llama/` in dev);
@@ -146,6 +146,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - The Windows archive has no llama.cpp `LICENSE`, only LLVM's. A copy is now in the repo (`scripts/licenses/llama.cpp-b11669-LICENSE`, byte-identical to the macOS and Linux archives' copy) and installed on Windows through the manifest's `repoFiles`. Codex's bundle test now requires `LICENSE` on every target and checks its MIT text. Fetching the real Windows archive matched its pin (a third independent download) and gave `LICENSE` plus `LICENSE-LLVM-OpenMP`.
   - BACKLOG's #30 row now records the (a)/(b) split and the Vulkan follow-up.
   - Its suggested tests: installer sizes are measured from this PR's `ci:bundle` run and recorded in the handoff. Running the server from inside each final installer is #71's class (native checks per OS).
+- **Commit, `ci:bundle` draft PR #95 and squash approved by the architect under D-028:** 2127d12, by explicit paths (18 files, neither symlink). The squash needs green CI and every installer under 256 MB, and a code fix after CI goes back to the architect with a fresh review. The split is posted on #30, and the in-installer check on #71.
+- **CI run 39565458361 failed on the `test` jobs for Windows and Linux** (macOS passed; the bundles were skipped):
+  - `llama-server --version` passed on both, so the binary and every library it links load natively.
+  - The CPU-backend assertion was wrong. `--list-devices` lists accelerators only and printed `Available devices: (none)` with no "loaded CPU backend" line: the CPU backend, a separate library there, is only loaded with a model.
+  - **Fix:** `--list-devices` must just print its device list; proving the CPU backend loads moves to #30(b), which loads a model. The fake now prints what the runners printed, and Codex's "requires the CPU backend" test is now "passes with a CPU-only device list, fails without one". Review round 2 and the architect's sign-off come next.
+- `codex-qa review`, round 2, run twice because neither scope covers the other:
+  - the committed branch against `main` (`qa/reports/20261021-031114-review-JLoq.md`): **FAIL**. Its one P1 is the CPU-backend assertion, which this fix removes; Codex reproduced the old code rejecting the CPU-only output and the fix accepting it.
+  - the uncommitted fix (`…-wUTz.md`): **PASS WITH NOTES**, no defects.
+  - Its suggested tests are added: on both macOS targets, an accelerator list (Metal) and a stderr-only list pass, and output without a list fails.
+  - Its other suggestions are for #30(b) or #71: running from each final installer, installer sizes (from this PR's bundle run), the installed Windows license matching the repo copy, and the CPU backend loading with a model.
+- **Checks after the fix (macOS arm64):** `--check` and `--check-llama` on the dev copy, the sidecar tests 36/36, `npm test` 296/296. Rust is unchanged since `cargo test` passed 476.
 
 ## Done: #31 (N7) local model manager: first-run download (squash-merged from PR #94 as c66c6c0; 3-OS tests and 4-target bundles green)
 - **Design ruled by the architect under D-028** (D-029's #31 bullets). `Local` stays unavailable until #30: `ModelMissing` without the file, `RuntimeMissing` with it. The PR gets `ci:bundle` (per-OS memory detection).
