@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** second run under D-028 (until 17:00): #96, then #30(b), then #91
+**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** second run under D-028 (until 17:00): #96 merged; #30(b) in PR #98 (CI); #91 next
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -21,7 +21,39 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Still unconfirmed: D-029's provisional bullets, PRD Q5's lifecycle amendment, D-016's runtime amendments for #30(b).
   - #31's hand checks above; #91's Test connection against api.anthropic.com with your key; the dev-app Local checks once #30(b) merges.
   - Carried forward: `scripts/codex-qa` exits 0 on an empty report.
-- **Next bounded action:** squash-merge #96 on green `test` (pre-approved), then start #30(b) on a branch from `main`.
+- **#96 merged** as b63e867 (`test` green on all three OSes).
+- **Next bounded action:** #30(b): PR #98 has this handoff; squash-merge it once `test` ×3 and `bundle` ×4 are green on its head (pre-approved), then bring #91's branch up to `main`. #91 is being built on `naming/91-anthropic` meanwhile.
+
+## In progress: #30(b) (N6) the llama-server lifecycle (PR #98, branch `naming/30b-llama-lifecycle`, `ci:bundle`; closes #30)
+- **What changed:**
+  - **`local.rs`:** `local::Runtime` starts `llama-server` inside the naming job on a free 127.0.0.1 port with D-029's arguments and a fresh 32-byte key in `LLAMA_API_KEY`. It waits up to 120 s for `/health`, reuses a running server, restarts a dead one, and retries once on another port. It stops after 2 minutes idle (Queue's own 5 s check), at quit, and before a model delete or switch or leaving Local. Those run inside `stop_while`, with a pending-change counter; a start re-checks `wanted` under the lock.
+  - **`ai.rs`:** `ai::Starting`: a failed start is a failed ask (rules tag). `LocalModel::NoRuntime` / `RuntimeMissing` now only means a build without the server.
+  - **`lib.rs`:** rows are asked again when the model Local uses finishes downloading or is switched to.
+  - **CI:** the pinned test GGUF (`testModel`, `--test-model`) runs the real server on all three OSes.
+  - **Banner:** the runtime-missing text changed.
+- **Checks (macOS arm64):**
+  - fmt; clippy `-D warnings`; `cargo test` 507 passed, 0 failed, 30 ignored; `npm test` 306/306; tsc.
+  - `the_real_server` (test GGUF): 200 with the key, 401 without, nothing left after stop.
+  - **4B hand check** (`QUEUE_QA_REAL_LLAMA=1`): load 0.97 s, first ask 0.73 s ("Me at the zoo"), second 0.20 s, RSS ~2.8 GB, gone after the idle stop.
+  - **Seed eval** against the 4B with #30(b)'s argv: **24/54 (44%)**, valid JSON 100%, p50 474 ms, p95 645 ms; failures mostly style drift (19). Posted on #33 (comment 6321086787); reported, not fixed; the pin doesn't change today.
+- **QA (reports in the #30(b) worktree's `qa/reports/`):**
+  - `test "#30"` **PASS WITH NOTES** (`20261021-113209-test-pO6X`). Added tests: `src-tauri/tests/local_n6_30b_qa.rs` (13), `src-tauri/tests/support/local_fixture_n6_30_qa.rs`, `qa/tests/llama-test-model-30-qa.test.mjs` (7). Its sandbox couldn't init Metal, so the real-binary evidence is the agent's on the owner's Mac.
+  - Review round 1 **FAIL** (`…114338-review-QhNm`): a stale start could restart a stopped model, and a finished download re-asked API rows. Fixed.
+  - Round 2 **FAIL** (`…120206-review-RUcL`): a new load could overtake a pending stop. Fixed with the pending counter.
+  - Round 3 **PASS WITH NOTES** (`…120906-review-hwiZ`), no findings. (`…120133-review-nUGr` was an empty-scope mis-invocation, not a verdict.)
+- **Architect rulings (12:15):** commit, push and draft PR approved; the PR closes #30; Vulkan filed as **#97** (M5); Codex's command-level tests added to **#84**'s scope; the handoff and the squash on green (test ×3, bundle ×4) are pre-approved. A failure in the new CI step needs a fresh review if the fix is code.
+- **P3s noted, not fixed:**
+  - Deleting the model that *isn't* chosen still stops the chosen model's server, and an in-flight job for it gets the rules tag with no re-ask. Rare; the next ask restarts it.
+  - A waiter can take the lock in the microsecond between `stop_while` releasing it and its pending count dropping. It gets `NOT_IN_USE`, and the switch's re-ask covers it.
+  - `settings_set_local_model` / `model_delete` can block ~5 s during a load (off main).
+- **For the owner:**
+  - Confirm D-016's runtime amendments (now built) and D-029's provisional bullets.
+  - After the merge, dev-app checks on macOS with the 4B:
+    - the banner is gone and a Queued row gets an AI name with no rules tag;
+    - Delete and switch while the server is loaded;
+    - quit while loaded (Activity Monitor shows no `llama-server`);
+    - ~2.8 GB while loaded, gone after 2 minutes idle.
+  - Review #97. Windows and Linux `llama-server` from the installers stays a hand check (#71).
 
 ## Overnight run (2026-10-20 → 21, under D-028)
 - **Goal (owner):** complete M4. Stop at a good point after 06:00, by 06:30 on 2026-10-21, and wait for the owner.
