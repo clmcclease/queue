@@ -33,7 +33,37 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - Proving both pinned models with the full prompt per backend is #33(b)'s; Local naming from the installers is #71's. Comments were posted on #33, #71 and #100.
   - **Follow-ups filed:** #97 (Vulkan, M5) and #100 (#91 follow-ups, M5).
   - **M4 stays open on #33 only.**
-- **Next bounded action:** squash-merge this docs PR once `test` ×3 is green and its review passes (pre-approved). Then, only if `main` is synced by 14:30, the #33(b) metadata collector (the architect's spec: an ignored test gated by `QUEUE_EVAL_COLLECT`, writing to a separate file; a draft PR if not green and reviewed by 16:30). Otherwise the run ends here.
+- **#101 (the M4 audit docs) merged** as f911b76; `main` was synced at 13:54, so the architect's one extra item, the #33(b) collector, was started.
+- **Next bounded action:** squash-merge PR #102 (the #33(b) collector) once `test` ×3 is green on its head, by 16:45 (pre-approved). If it isn't green by 16:30, it stays a draft and this line stays "squash on green". After that the run is over: M4 waits only on the owner's #33(b).
+
+## Done in the second run: #33(b) metadata collector (PR #102, branch `naming/33b-collector`; #33 stays open)
+- **What it is:** a test-only tool in `src-tauri/tests/naming_eval_33.rs`. No app code and no new dependencies.
+  - An ignored test that skips unless `QUEUE_EVAL_COLLECT` is set, then needs `QUEUE_EVAL_OUT` and `QUEUE_QA_REAL_SIDECARS`.
+  - It fetches each link through the app's own `meta::fetch`, one at a time. The pinned sidecars are copied under the app's names into a temp folder, removed after.
+  - It writes set-shaped entries (`url`, `meta`, with `lang`, `expected` and `accept` empty) to a **new** file. It uses `create_new`, never writes `titles.json`, and checks the destination before any fetch.
+- **How to run it (owner):**
+  - The command, from `src-tauri`, with `links.txt` holding one link per line (blank lines and `#` comments are skipped):
+    `QUEUE_QA_REAL_SIDECARS=$PWD/binaries QUEUE_EVAL_COLLECT=links.txt QUEUE_EVAL_OUT=to-label.json cargo test --test naming_eval_33 n9_collect -- --ignored --nocapture`
+  - Then fill in `lang`, `expected` and `accept`.
+  - **Limitations (accepted P3s):** the output folder must exist and be writable, and the file is written at the end, so run a long list in batches. `--include-ignored` with `QUEUE_EVAL_COLLECT` set could race Codex's `app_layout` test, because both use a per-process temp folder name; this doesn't happen in CI or under `--ignored`.
+- **Checks (macOS arm64):**
+  - fmt; clippy `-D warnings`; `cargo test --locked` 548 passed / 0 failed / 32 ignored.
+  - `--ignored` with no variables set: both ignored tests skip.
+  - Real run on one public link ("Me at the zoo"): 1/1 collected.
+  - Rerun with that output present: stopped at the destination check, before fetching.
+- **Tests added:**
+  - `n9_the_collector_writes_entries_to_label` (fake yt-dlp, Unix) and `n9_the_collector_checks_its_destination_first`.
+  - Codex's 9 in `src-tauri/tests/support/naming_collector_33b_qa.rs`, whose Unix-only `serde_json::Value` import was gated so Windows clippy passes.
+- **QA (reports in the collector worktree's `qa/reports/`):**
+  - `test "#33"` (`20261021-135815-test-PX2F`): no collector defect. Its FAIL is #33 as a whole (the corpus), pre-accepted as (b)'s.
+  - Review round 1 **FAIL** (`…140648-review-GCtf`): the collector wasn't gated by `QUEUE_EVAL_COLLECT`, and the destination was checked only after fetching. Both fixed.
+  - Round 2 **PASS WITH NOTES** (`…141035-review-m1hZ`).
+  - The architect accepted its P3s (the unwritable folder, the STATUS line fixed here). Codex's four test suggestions are P3 notes on #33, not required.
+- **For the owner, the one remaining M4 step:**
+  1. Collect your 200–300 links in batches.
+  2. Label them.
+  3. Run both pinned models with the full prompt on Metal and on CPU-only Windows/Linux. The 2B needs your download click. That closes #33 and M4.
+  The rest of the second run's owner list above still stands.
 - **For the owner (end of the second run):**
   1. **#33(b) is the only thing between M4 and done:** the 200–300 labelled items. Run both pinned models with the full prompt, on Metal and on a CPU-only Windows/Linux machine; the 2B needs your download click. The 44% seed result is mostly style drift against the agent's own accept lists, so decide the prompt, examples and labels after your corpus, not before.
   2. **#100:** one key slot across services. Clear the key on a kind change, label the field, or keep one slot and say so.
@@ -504,7 +534,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Eval:**
   - `naming-eval/titles.json`: 54 author-written seed cases, Meta-shaped, 37% non-English, with `lang`, `expected` and `accept`, plus a README;
   - `tests/naming_eval_33.rs`: a shape test, and an ignored runner (`QUEUE_EVAL_ENDPOINT`, `_MODEL`, `_KEY`) that asserts ≥90% accepted and prints D-016's measures: JSON validity, fallback rate, warm p50/p95 and cold latency, and counters for romanized, added extension, dropped episode or feat., prompt injection and style drift. Made-up details are listed for manual review.
-- **#33(b), the owner's:** the 200–300 real, owner-labelled items, and the real model runs on the pinned files (D-016, D-029). A collector that turns a URL list into unlabelled entries is listed for (b), not built.
+- **#33(b), the owner's:** the 200–300 real, owner-labelled items, and the real model runs on the pinned files (D-016, D-029). The collector that turns a URL list into unlabelled entries is built (PR #102; see the second run's #33(b) section).
 - **Tests:** 7 unit tests; `tests/ai_n9_33.rs` (8: a fake loopback server, leak checks, the raw path's rules, and a child-process proxy test that fails without the fix); Codex's `ai_n9_33_qa.rs` (12) and `naming_eval_33_qa.rs` (runner tests; its ≥200 size test was dropped by the architect's ruling).
 - **QA:**
   - `codex-qa test`: FAIL (`wt33 qa/reports/20261020-204646-test-973R`): fallback case, per-script check, missing scripts, the reporting. All fixed; the corpus-size finding was ruled as (b).
