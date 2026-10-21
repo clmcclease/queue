@@ -18,12 +18,28 @@ struct Fake {
     request: thread::JoinHandle<String>,
 }
 
-/// One request, answered with `status` and `body`.
+/// One request, answered with `status` and `body`. A client that never connects fails the
+/// test after a few seconds instead of hanging it (#91 review).
 fn serve(status: u16, body: String) -> Fake {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let request = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "the client never connected"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();

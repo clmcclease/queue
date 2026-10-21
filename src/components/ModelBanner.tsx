@@ -69,7 +69,7 @@ export default function ModelBanner({
     text = "A file with the model's name is in the models folder, but Queue didn't download it, so it isn't used.";
     actions = settings;
   } else if (m.state === "ready") {
-    text = "The local model is downloaded. This version of Queue can't run it yet, so names come from the rules.";
+    text = "The local model is downloaded, but this copy of Queue is missing the part that runs it, so names come from the rules. Reinstalling Queue fixes this.";
   } else {
     text = `AI naming uses a local model that isn't downloaded yet (${m.name}, ${gb(m.size)} from huggingface.co). Names come from the rules for now.`;
     actions = (

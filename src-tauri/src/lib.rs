@@ -79,7 +79,7 @@ struct Vault(Box<dyn secrets::Secrets>);
 /// read the key; the job resolves the endpoint itself. The job carries the current generation,
 /// so one queued before a later provider or API change is dropped, not asked twice (#32 review).
 fn ask_for_name(app: &AppHandle, id: u64) {
-    if !current_settings(app).is_ok_and(|s| ai::askable(&s)) {
+    if !current_settings(app).is_ok_and(|s| askable(app, &s)) {
         return;
     }
     let generation = lock(&app.state::<Mutex<Queue>>())
@@ -91,6 +91,14 @@ fn ask_for_name(app: &AppHandle, id: u64) {
     {
         let _ = jobs.send((id, generation));
     }
+}
+
+/// Whether the chosen provider could be asked: [`ai::askable`], or a downloaded local model,
+/// whose server starts when the job runs (#30).
+fn askable(app: &AppHandle, settings: &settings::Settings) -> bool {
+    ai::askable(settings)
+        || settings.naming_provider == ai::Provider::Local
+            && matches!(local_model(app, settings), ai::LocalModel::Downloaded)
 }
 
 /// Asks for AI names one row at a time. It doesn't hold a quit up (#67): an answer lost at quit
@@ -105,10 +113,25 @@ fn naming_worker(app: AppHandle, jobs: Receiver<(u64, u64)>) {
         if !claims.claim(id, generation) {
             continue;
         }
-        let resolve = ai::Resolving(|| {
-            let settings = current_settings(&app).map_err(|_| ai::Unavailable::Off)?;
-            let local = local_model(&app, &settings);
-            ai::endpoint(&settings, app.state::<Vault>().0.as_ref(), local)
+        // The local server starts here, inside the job (#30): a start that fails is a failed
+        // ask, so the row shows the rules tag.
+        let resolve = ai::Starting(|| {
+            let Ok(settings) = current_settings(&app) else {
+                return ai::Ready::Nothing;
+            };
+            let local = match local_model(&app, &settings) {
+                ai::LocalModel::Downloaded if settings.naming_provider == ai::Provider::Local => {
+                    match start_local(&app, &settings) {
+                        Ok(endpoint) => ai::LocalModel::Running(endpoint),
+                        Err(error) => return ai::Ready::Failed(error),
+                    }
+                }
+                local => local,
+            };
+            match ai::endpoint(&settings, app.state::<Vault>().0.as_ref(), local) {
+                Ok(endpoint) => ai::Ready::Ask(endpoint),
+                Err(_) => ai::Ready::Nothing,
+            }
         });
         let state = app.state::<Mutex<Queue>>();
         if let Some(item) = run_naming_job_at(&state, id, Some(generation), &resolve) {
@@ -347,7 +370,7 @@ async fn settings_set_naming_provider(
 }
 
 fn set_naming_provider(app: &AppHandle, provider: ai::Provider) -> Result<NamingStatus, String> {
-    {
+    let save = || -> Result<(), String> {
         let state = app.state::<Settings>();
         let mut current = state
             .current
@@ -360,6 +383,13 @@ fn set_naming_provider(app: &AppHandle, provider: ai::Provider) -> Result<Naming
                 .map_err(|e| format!("Couldn't save your settings: {e}"))?;
         }
         *current = next;
+        Ok(())
+    };
+    // Leaving Local gives its memory back now rather than after the idle time (#30).
+    if provider == ai::Provider::Local {
+        save()?;
+    } else {
+        app.state::<local::Runtime>().stop_while(save)?;
     }
     let again = lock(&app.state::<Mutex<Queue>>())?.renaming();
     for id in again {
@@ -384,12 +414,11 @@ fn status_of_naming(app: &AppHandle) -> Result<NamingStatus, String> {
     let settings = current_settings(app)?;
     Ok(NamingStatus {
         provider: settings.naming_provider,
-        unavailable: ai::endpoint(
+        unavailable: ai::unavailable(
             &settings,
             app.state::<Vault>().0.as_ref(),
             local_model(app, &settings),
-        )
-        .err(),
+        ),
     })
 }
 
@@ -546,12 +575,48 @@ fn chosen_model(settings: &settings::Settings) -> models::ModelId {
         .unwrap_or_default()
 }
 
-/// Whether the chosen local model is downloaded and checked.
+/// Whether the chosen local model is downloaded and checked, and this build can run it. Reads
+/// the disk only; nothing is started.
 fn local_model(app: &AppHandle, settings: &settings::Settings) -> ai::LocalModel {
     let pin = models::pinned(chosen_model(settings)).pin();
     match models_dir(app).map(|dir| models::state(&dir, &pin)) {
-        Ok(models::State::Ready) => ai::LocalModel::Downloaded,
+        Ok(models::State::Ready) if app.state::<local::Runtime>().exists() => {
+            ai::LocalModel::Downloaded
+        }
+        Ok(models::State::Ready) => ai::LocalModel::NoRuntime,
         _ => ai::LocalModel::Missing,
+    }
+}
+
+/// The local server running the chosen model, started if needed (#30). Blocks while it loads.
+/// It starts only if, once no switch or delete is running, Local and this model are still
+/// chosen and the model is still there (#30(b) review).
+fn start_local(app: &AppHandle, settings: &settings::Settings) -> Result<ai::Endpoint, String> {
+    let id = chosen_model(settings);
+    let pinned = models::pinned(id);
+    let dir = models_dir(app)?;
+    let wanted = || {
+        current_settings(app).is_ok_and(|now| uses_local_model(&now, id))
+            && models::state(&dir, &pinned.pin()) == models::State::Ready
+    };
+    app.state::<local::Runtime>()
+        .endpoint_if(&dir.join(pinned.file), pinned.file, &wanted)
+}
+
+/// Whether Local is the provider and `model` is the chosen local model: only then does a
+/// change to that model (downloaded, switched to) ask Queued rows again (#30(b) review).
+fn uses_local_model(settings: &settings::Settings, model: models::ModelId) -> bool {
+    settings.naming_provider == ai::Provider::Local && chosen_model(settings) == model
+}
+
+/// Asks again for every Queued row not renamed by hand (#30): the local model became usable
+/// (downloaded, or switched to one that is), so rows named by the rules alone get their AI name.
+fn ask_again(app: &AppHandle) {
+    let Ok(again) = lock(&app.state::<Mutex<Queue>>()).map(|mut q| q.renaming()) else {
+        return;
+    };
+    for id in again {
+        ask_for_name(app, id);
     }
 }
 
@@ -671,26 +736,32 @@ async fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
 }
 
 /// Saves the user's choice of local model (#31). A download already running carries on: it's
-/// a file, not a session.
+/// a file, not a session. The server running the old model is stopped first (#30), and rows
+/// are asked again if Local uses the new choice.
 #[tauri::command]
 async fn settings_set_local_model(
     app: AppHandle,
     model: models::ModelId,
 ) -> Result<ModelStatus, String> {
     off_main(app, move |app| {
-        {
-            let state = app.state::<Settings>();
-            let mut current = state
-                .current
-                .lock()
-                .map_err(|_| "settings lock poisoned".to_string())?;
-            let mut next = current.clone();
-            next.local_model = Some(model);
-            if let Some(file) = &state.file {
-                next.save(file)
-                    .map_err(|e| format!("Couldn't save your settings: {e}"))?;
-            }
-            *current = next;
+        app.state::<local::Runtime>()
+            .stop_while(|| -> Result<(), String> {
+                let state = app.state::<Settings>();
+                let mut current = state
+                    .current
+                    .lock()
+                    .map_err(|_| "settings lock poisoned".to_string())?;
+                let mut next = current.clone();
+                next.local_model = Some(model);
+                if let Some(file) = &state.file {
+                    next.save(file)
+                        .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+                }
+                *current = next;
+                Ok(())
+            })?;
+        if current_settings(app).is_ok_and(|s| uses_local_model(&s, model)) {
+            ask_again(app);
         }
         // An event, not only the reply: a reply can lose to an older progress event (#31
         // review), so the newest state always arrives as one.
@@ -754,10 +825,16 @@ async fn model_download(app: AppHandle, model: models::ModelId) -> Result<ModelS
                         emit_model_status(&app);
                     })
                 });
+                let done = result.is_ok();
                 if let Ok(mut d) = app.state::<Mutex<Downloads>>().lock() {
                     d.active = None;
                     d.verifying = false;
                     d.error = result.err().map(|e| (model, e));
+                }
+                // The model can be asked now (#30): rows named by the rules alone get asked, if
+                // it's the one Local uses. Rows an API named aren't asked again (#30(b) review).
+                if done && current_settings(&app).is_ok_and(|s| uses_local_model(&s, model)) {
+                    ask_again(&app);
                 }
                 emit_model_status(&app);
             });
@@ -782,7 +859,7 @@ async fn model_cancel(app: AppHandle) -> Result<ModelStatus, String> {
 }
 
 /// Deletes a model, its checksum file and any partial download (#31). Refused while that model
-/// downloads. #30 must stop llama-server before deleting the model it runs.
+/// downloads. The local server is stopped first, so it never runs a deleted file (#30).
 #[tauri::command]
 async fn model_delete(app: AppHandle, model: models::ModelId) -> Result<ModelStatus, String> {
     off_main(app, move |app| {
@@ -796,7 +873,9 @@ async fn model_delete(app: AppHandle, model: models::ModelId) -> Result<ModelSta
         if busy {
             return Err("Cancel the download first.".into());
         }
-        models::delete(&models_dir(app)?, &models::pinned(model).pin())
+        let dir = models_dir(app)?;
+        app.state::<local::Runtime>()
+            .stop_while(|| models::delete(&dir, &models::pinned(model).pin()))
             .map_err(|e| format!("Couldn't delete the model: {e}"))?;
         if let Ok(mut d) = app.state::<Mutex<Downloads>>().lock()
             && d.error.as_ref().is_some_and(|(id, _)| *id == model)
@@ -989,6 +1068,9 @@ const QUEUE_FILE: &str = "queue.json";
 
 /// How often the queue is saved if it changed.
 const SAVE_EVERY: Duration = Duration::from_millis(500);
+
+/// How often the local server's idle time is checked (#30).
+const IDLE_CHECK: Duration = Duration::from_secs(5);
 
 /// How long quitting waits for downloads and fetches to stop and record their results (#67): a
 /// tree gets up to 3 s after SIGTERM before SIGKILL, and 1 s to be gone (proc).
@@ -1455,6 +1537,20 @@ pub fn run() {
             app.manage(Naming(Mutex::new(names)));
             app.manage(Vault(Box::new(secrets::Keyring::new())));
             app.manage(Mutex::new(Downloads::default()));
+            // The local model's server (#30): started by the naming worker, stopped by its own
+            // idle timer, at quit, and before a model is deleted or switched.
+            let resources = app.path().resource_dir().unwrap_or_default();
+            app.manage(local::Runtime::new(
+                local::server_in(&resources),
+                models::GPU,
+            ));
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(IDLE_CHECK);
+                    handle.state::<local::Runtime>().stop_if_idle();
+                }
+            });
             let (jobs, queued) = mpsc::channel();
             for job in refetch {
                 let _ = jobs.send(job);
@@ -1517,9 +1613,13 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                // Stop running downloads and fetches first, so none outlives Queue (#67), then
-                // one last save: rows cut off now come back as interrupted after a restart.
+                // Stop running downloads and fetches first, so none outlives Queue (#67), and the
+                // local model's server (#30), then one last save: rows cut off now come back as
+                // interrupted after a restart.
                 proc::shut_down();
+                if let Some(runtime) = app.try_state::<local::Runtime>() {
+                    runtime.stop();
+                }
                 proc::wait_idle(QUIT_WAIT);
                 save_queue(app);
             }
@@ -1531,6 +1631,28 @@ mod tests {
     use super::*;
     use meta::Meta;
     use queue::Status;
+
+    /// #30(b) review: a model download finishing, or a model switch, asks rows again only when
+    /// Local is the provider and that model is the chosen one, so API-named rows aren't resent.
+    #[test]
+    fn only_the_model_local_uses_asks_rows_again() {
+        use models::ModelId::{Qwen3_4bInstruct2507 as Big, Qwen3_5_2b as Small};
+        let with = |provider, model| settings::Settings {
+            naming_provider: provider,
+            local_model: Some(model),
+            ..Default::default()
+        };
+        assert!(uses_local_model(&with(ai::Provider::Local, Small), Small));
+        assert!(
+            !uses_local_model(&with(ai::Provider::Local, Big), Small),
+            "not the chosen one"
+        );
+        assert!(
+            !uses_local_model(&with(ai::Provider::Api, Small), Small),
+            "an API is in use"
+        );
+        assert!(!uses_local_model(&with(ai::Provider::Off, Small), Small));
+    }
 
     #[test]
     fn a_fetch_finishing_after_its_row_was_removed_deletes_the_saved_info() {

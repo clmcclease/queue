@@ -130,5 +130,12 @@
     "version": "9.0.2",
     "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
     "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+  },
+  "testModel": {
+    "$comment": "CI only, never bundled (#30(b), D-029): a 1.2 MB GGUF the real llama-server loads on every OS to prove its CPU backend, the lifecycle and the key. Pinned by Hugging Face commit; the sha256 is as measured by two independent downloads.",
+    "url": "https://huggingface.co/ggml-org/models/resolve/ae8874f38083c93b5449892ad5dc37b7b97e7b65/tinyllamas/stories260K.gguf",
+    "file": "stories260K.gguf",
+    "size": 1185376,
+    "sha256": "047bf46455a544931cff6fef14d7910154c56afbc23ab1c5e56a72e69912c04b"
   }
 }
