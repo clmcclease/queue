@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 done · M2 (real queue) in progress · **Active:** M2 audit; #14 (review passed, commit request), then #15
+**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #14 (PR #82), then #15
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -107,7 +107,17 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
 ## M2 audit: YELLOW (`qa/reports/20261017-141115-audit-yQjF.md`)
 - Owner chose to fix all four findings in M2 before closing it, one at a time: **#67** stop downloads on quit, **#68** save-warning listener, **#69** codex-qa watchdog + stale docs, **#70** real video+audio merging in CI. #71 (native UI smoke checks on Windows/Linux) is filed for M5. #72 came out of #67's review (below).
 
-## In progress: #14 (N-T1) Tier-1 naming engine (branch `naming/14-tier1-engine`)
+## M2 audit 2 (end of milestone): YELLOW (`qa/reports/20261020-200119-audit-CgC4.md`)
+- No RED or P1. Under D-029 nothing needed fixing before closing M2.
+- **Filed in M5:** #83 (P2) queue.json version check; #84 (P2) command-level cancel and quit tests; #85 (P3) ids beyond JavaScript's safe integers; #86 (P3) reproducible ffmpeg rebuilds.
+- **Handled:**
+  - the stale "Next bounded action" is rewritten;
+  - BACKLOG's settings location, the four format presets, and the Processing lifecycle are updated;
+  - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
+- The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
+
+## In progress: #14 (N-T1) Tier-1 naming engine (PR #82, branch `naming/14-tier1-engine`)
+- **PR #82 (draft, no label):** 878f3ad; CI run 39525201831 passed `test` on Linux, Windows and macOS. Commit, PR and squash approved by the architect under D-028.
 - **What:**
   - new `src-tauri/src/naming.rs`: `name(meta, Template) -> stem` and `sanitize(text) -> stem`. Pure, with no I/O;
   - `Template` has exactly the three N3 presets (D-029).
@@ -666,8 +676,8 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **M2 audit** (`codex-qa audit` on `main` 217e18c) is running. Fix RED/P1, file P2/P3 as issues (D-029), then close M2.
-2. **#14** (worktree branch `naming/14-tier1-engine`, uncommitted, on 217e18c): the review gate has passed. Next: the commit request to the architect, the draft PR, CI, handoff and squash.
+1. **M2 is closed.** Its audit was YELLOW (`qa/reports/20261020-200119-audit-CgC4.md`) with no RED or P1. Its P2/P3s are filed as #83–#86 (M5); the stale STATUS, the BACKLOG wording and the `CON` gap (#15) are handled.
+2. **#14:** PR #82 is green; squash-merge it (pre-approved), then sync `main`.
 3. **#15** (worktree branch `naming/15-name-in-row`, built on #14's files): row names, inline edit and persistence are done and tested. Next: pass the stem to `-o`, now that #77 has merged.
 4. Then #17 and the M3 audit.
 - **#15's checklist (from #77):** drop `--replace-in-metadata` and `.200B`; remove the `QUEUE_QA_KNOWN_GAPS` gate on `d77_saved_info_bare_windows_device_title…`; escape `%` in the stem.

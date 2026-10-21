@@ -231,7 +231,8 @@ fn strip_emoji(text: &str) -> String {
 
 /// Emoji, pictographs and the joiners/selectors that build them. CJK, accents and symbols like
 /// `&`, `#`, `♯`, `★` or `✓` are kept: in the older symbol blocks, only the characters Unicode
-/// lists as emoji (the `Emoji` property, emoji-data.txt) go. Enclosed letters (`🄰`), game and
+/// lists as emoji (the `Emoji` property, emoji-data.txt) go, and of those only the ones shown as
+/// emoji by default: text-style ones like © ® ™ ‼ ↔ ▶ Ⓜ stay. Enclosed letters (`🄰`), game and
 /// chess symbols, geometric shapes and arrows in the U+1F000 planes are kept too.
 fn is_emoji(c: char) -> bool {
     let c = c as u32;
