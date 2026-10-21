@@ -1,8 +1,27 @@
 # Status
 
-**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #30(a) (PR #95, merging); next is #30(b), the owner's morning
+**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** second run under D-028 (until 17:00): #96, then #30(b), then #91
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## Second run (2026-10-21, until M4 is complete or 17:00, under D-028)
+- **Owner's instruction (11:15):** "have the architect agent take over for me again and push to the completion of this milestone or till 1700, whichever comes first." The owner approved #96's commit, push and draft PR.
+- **This morning, with the owner (macOS dev app):**
+  - **#31, first real download:** the owner downloaded the 4B (2.5 GB). It completed; the on-disk sha256 matches the pin (`2fde00ce…`) and the `.sha256` marker is present. The banner correctly says the model can't run yet. Not hand-tested: the 2B download, Cancel, Resume, quit mid-download and relaunch, two-step Delete.
+  - **Settings scroll bug (dark mode):** the panel didn't scroll, so a white page showed below the fold. Fixed in PR #96.
+  - **D-030 (confirmed by the owner):** a running download keeps the folder it started with. Settings says "Downloads in progress keep the folder they started in." while one runs. In PR #96.
+  - **Process slip:** the agent started the dev app with `pnpm tauri dev`, which re-laid `node_modules` and wrote `pnpm-lock.yaml`. The owner ran `rm pnpm-lock.yaml && npm ci`. This project uses npm: start the app with `npm run tauri dev`.
+- **#96 checks:** `npm test` 299/299 on the npm layout, `tsc` clean, Codex review **PASS WITH NOTES** (`qa/reports/20261021-105149-review-0NR7.md`; its P3 wording note taken, the owner chose the shorter text; its suggested extra tests accepted as not added, P3s). Added test: `qa/tests/settings-folder-note-d030.test.mjs`.
+- **Architect rulings (11:20):**
+  1. The second run is approved. **Time rules:** no new item after 15:00 (afterwards only QA fixes on the open item, docs, follow-ups and the conditional audit); stop coding at 16:15; handoff pushed by 16:45; everything at rest by 17:00. Nothing merges after 16:45 unless its CI was already green and its squash pre-approved. The QA gates, the Codex usage-limit rule, the two-failure rule, `ci:bundle` for native code, and a fresh review for any code fix after a PASS all stand.
+  2. **Order:** merge #96 → #30(b) (`ci:bundle`) → #91 (no label) → the M4 audit, only if #30(b) and #91 are both merged by 15:30. M4 can't close today: #33(b) is the owner's. Start #30(b) from `main` now and bring it up to `main` before its PR. #91's real-service check needs the owner's Anthropic key; the loopback fake is its merge evidence.
+  3. **#96:** this docs-only handoff commit is approved; the squash is pre-approved once `test` (linux, windows, macos) is green on the final head.
+  4. **#30(b):** D-029's spec, plus the CI test-GGUF proof on all three OSes, the `QUEUE_QA_REAL_LLAMA` check against the real 4B, and the seed eval posted on #33 (D-029's 2026-10-21 bullets). Dev-app clicks stay the owner's: Local naming end to end, Delete or switch while the server is loaded, quit while loaded, memory in Activity Monitor.
+- **For the owner:**
+  - Still unconfirmed: D-029's provisional bullets, PRD Q5's lifecycle amendment, D-016's runtime amendments for #30(b).
+  - #31's hand checks above; #91's Test connection against api.anthropic.com with your key; the dev-app Local checks once #30(b) merges.
+  - Carried forward: `scripts/codex-qa` exits 0 on an empty report.
+- **Next bounded action:** squash-merge #96 on green `test` (pre-approved), then start #30(b) on a branch from `main`.
 
 ## Overnight run (2026-10-20 → 21, under D-028)
 - **Goal (owner):** complete M4. Stop at a good point after 06:00, by 06:30 on 2026-10-21, and wait for the owner.
