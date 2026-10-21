@@ -80,6 +80,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #84 | Q6,Q7 | P2 | queue | **Command-level tests for cancel and quit** — Drive `queue_cancel`, `complete_download` and quit through the commands, especially a finish racing a cancel. M2 audit. |
 | #85 | Q7 | P2 | queue | **Keep row ids within JavaScript's safe integer range** — Cap restored and allocated ids at 2^53 − 1 (or send them as strings). M2 audit (P3). |
 | #86 | NFR | P2 | infra | **Make ffmpeg rebuilds reproducible** — Record the build environment, include it in the CI cache key, and pin it if needed. M2 audit (P3). |
+| #93 | N8 | P2 | naming | **Keyless API on Linux without a Secret Service** — Treat an unreadable credential store as "no key" for a keyless service (Ollama, LM Studio), keeping the status note. #32 follow-up (P3). |
 
 ## Later
 

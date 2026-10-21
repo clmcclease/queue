@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #32(a) (built, QA next), then #31
+**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #32(a) (PR #92), then #31
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -110,7 +110,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #32(a) (N8) OpenAI-compatible API provider (branch `naming/32-api-provider`, on 1d88303, uncommitted)
+## In progress: #32(a) (N8) OpenAI-compatible API provider (PR #92, branch `naming/32-api-provider`)
 - **Design ruled by the architect under D-028** (D-029's #32 bullets): OpenAI-compatible only; the native Anthropic API is #32(b), filed as **#91** (P1, gates M4). The PR gets the `ci:bundle` label.
 - **Keys (`secrets.rs`):**
   - the `Secrets` trait: `Keyring` (the real store, `keyring =4.2.0` with only `v1`: Keychain, Credential Manager, and Secret Service over zbus, pure Rust with no libdbus or OpenSSL in the lock) and `Memory` (tests);
@@ -158,6 +158,18 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review`, round 3: **FAIL**, 1 P2, fixed (`qa/reports/20261020-234128-review-1Vlk.md`): the API setup's status refresh after a key or service change could land after a switch to Local, once the setup was gone, and hide Local's model-missing banner. Now a refresh's reply is used only while the setup is still shown and no newer refresh has started. Test: "a late status reply from the API setup can't undo a switch to Local" (it fails without the fix). Closing Settings mid-operation is covered by the same guard.
 - **Checks (macOS arm64, after round 3's fix, UI only):** `tsc`, `npm test` 255/255, `git diff --check`. Rust is unchanged since `cargo test` passed 445.
 - `codex-qa review`, round 4: **PASS WITH NOTES**, no findings (`qa/reports/20261020-234544-review-pqSV.md`). Its four suggested tests are all command-level (the real worker loop, a blocked credential read during Download/Cancel/Off, a failed `settings_set_api` save, and duplicate dispatch through the channel). They're on #84.
+- **Commit, `ci:bundle` draft PR #92 and squash approved by the architect under D-028.**
+  - The squash is pre-approved on green `test` (3 OSes) and green `bundle` (4 targets), for both the code commit and this handoff. This is the first CI build of the per-OS credential stores; a code change after review round 4 goes back to the architect.
+  - Design changes (a) `name_if`, (b) `off_main`, and (c) the base-URL refusal (Azure `?api-version=` is out of scope) are confirmed and recorded in D-029.
+  - `Closes #32`; (b) is #91. A follow-up, #93 (keyless API on Linux without a Secret Service), is filed in M5.
+- **PR #92:** 7ef2910; CI run 39546563808 passed `test` on Linux, Windows and macOS and `bundle` on all 4 targets (windows-x64, macos-arm64, macos-x64, linux-x64).
+- **Owner checks (dev app, macOS):**
+  - Settings → API: save a base URL and model, then Save key (an unsigned dev build may show a Keychain prompt once);
+  - Test connection against a real service (Ollama locally, or OpenAI);
+  - add a link: the row gets the "AI" tag;
+  - switch to Off during an ask: no Fallback tag appears;
+  - Remove key, then check Keychain Access: only `dev.mcclease.queue` / `api-key` existed, and it's gone after Remove.
+  - The Windows and Linux real stores belong with #71's native checks.
 
 ## M3 audit (end of milestone): YELLOW (`qa/reports/20261020-221105-audit-DqXf.md`, on 9e29480)
 - 0 P1, 4 P2, 4 P3. Under D-029 nothing needed fixing tonight. The architect's disposition (D-028):
@@ -847,5 +859,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#32(a)** (worktree branch `naming/32-api-provider`, on 1d88303, uncommitted): test FAIL (3 fixed); review rounds 1–3 FAIL (5 fixed), round 4 PASS WITH NOTES. Next: the commit request to the architect; a draft PR labelled `ci:bundle`, merged only on green `test` (3 OSes) and `bundle` (4 targets).
-2. Then **#31**, #30, #91 and the M4 audit (D-029 order).
+1. **#32(a):** PR #92 (`ci:bundle`); when `test` (3 OSes) and `bundle` (4 targets) are green on this handoff, squash-merge it (pre-approved), post "(a) shipped in PR #92; (b) is #91" on #32, then sync `main`.
+2. Then **#31** (model manager: first-run model download), then #30, #91 and the M4 audit (D-029 order).
