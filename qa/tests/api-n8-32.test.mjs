@@ -117,7 +117,7 @@ test("N8: saving the base URL and model sends them, refreshes the status, and en
   await type("api-model", "small-model");
   await click("api-save");
   const saved = calls.find(([c]) => c === "settings_set_api");
-  assert.deepEqual(saved[1], { baseUrl: "https://api.example.test/v1", model: "small-model" });
+  assert.deepEqual(saved[1], { kind: "openai_compatible", baseUrl: "https://api.example.test/v1", model: "small-model" });
   assert.equal(el("api-test").disabled, false);
   assert.equal(el("provider-note"), null, "the not-set-up note goes once the status says it's ready");
 });

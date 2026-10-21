@@ -18,6 +18,11 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BODY: u64 = 64 * 1024;
 /// Enough for `{"filename": "…"}` with a 150-character name.
 const MAX_TOKENS: u32 = 128;
+/// The Anthropic API's budget (#91): its current models think before answering by default, and
+/// thinking shares `max_tokens`, so 128 could leave no room for the name (D-029).
+const ANTHROPIC_MAX_TOKENS: u32 = 1024;
+/// The Messages API version Queue speaks (#91).
+const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 /// The style rules, given as the system message. The metadata never goes here.
 pub const SYSTEM: &str = "You name downloaded media files. Reply with JSON only: \
@@ -262,13 +267,15 @@ pub enum Provider {
     Off,
 }
 
-/// The API service's wire format (N8, #32). The native Anthropic Messages API is #32(b).
+/// The API service's wire format (N8, #32, #91).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiKind {
     /// `<base>/chat/completions`: OpenAI, OpenRouter, Ollama, LM Studio.
     #[default]
     OpenaiCompatible,
+    /// `<base>/v1/messages`: Anthropic's Messages API, with structured outputs (#91, D-029).
+    Anthropic,
 }
 
 /// Why no AI name is asked for. The row keeps its Tier-1 name with no "rules" tag; for
@@ -335,12 +342,18 @@ pub fn unavailable(
 
 /// The user's API service (#32), whichever provider is chosen (Test connection uses it): its
 /// base URL and model from the settings, and its key, if any, from the credential store.
+/// Anthropic needs a key (#91): without one nothing is sent, since the request could only be
+/// refused after the item's metadata had left the machine.
 pub fn api_endpoint(settings: &Settings, secrets: &dyn Secrets) -> Result<Endpoint, Unavailable> {
     if !api_set_up(settings) {
         return Err(Unavailable::NotSetUp);
     }
     let key = secrets.get().map_err(|_| Unavailable::StoreUnreachable)?;
+    if settings.api_kind == ApiKind::Anthropic && key.is_none() {
+        return Err(Unavailable::NotSetUp);
+    }
     Ok(Endpoint {
+        kind: settings.api_kind,
         base_url: settings.api_base_url.clone(),
         model: settings.api_model.clone(),
         key,
@@ -450,6 +463,10 @@ pub struct Tested {
 /// same [`ask`] as every row, within [`TIMEOUT`].
 pub fn test_connection(settings: &Settings, secrets: &dyn Secrets) -> Tested {
     let failed = |message: String| Tested { ok: false, message };
+    let anthropic = settings.api_kind == ApiKind::Anthropic;
+    if anthropic && api_set_up(settings) && matches!(secrets.get(), Ok(None)) {
+        return failed("Anthropic needs an API key.".to_owned());
+    }
     let endpoint = match api_endpoint(settings, secrets) {
         Ok(endpoint) => endpoint,
         Err(Unavailable::StoreUnreachable) => {
@@ -462,10 +479,18 @@ pub fn test_connection(settings: &Settings, secrets: &dyn Secrets) -> Tested {
             ok: true,
             message: format!("Connected. It would name the sample \u{201c}{name}\u{201d}."),
         },
-        Err(error) => failed(match hint(&error) {
-            Some(hint) => format!("{error} {hint}"),
-            None => error,
-        }),
+        Err(error) => {
+            // Anthropic answers an unknown model with 400; its body is never read.
+            let hint = if anthropic && error.contains("HTTP 400") {
+                Some("Check the model name.")
+            } else {
+                hint(&error)
+            };
+            failed(match hint {
+                Some(hint) => format!("{error} {hint}"),
+                None => error,
+            })
+        }
     }
 }
 
@@ -499,10 +524,12 @@ impl Namer for Endpoint {
     }
 }
 
-/// Where to ask: an OpenAI-compatible base URL (e.g. `https://api.openai.com/v1`, or
-/// `http://127.0.0.1:<port>/v1` for a local server), a model, and an optional key.
+/// Where to ask: the wire format, a base URL (e.g. `https://api.openai.com/v1`,
+/// `https://api.anthropic.com`, or `http://127.0.0.1:<port>/v1` for a local server), a model,
+/// and an optional key.
 #[derive(Clone)]
 pub struct Endpoint {
+    pub kind: ApiKind,
     pub base_url: String,
     pub model: String,
     pub key: Option<String>,
@@ -525,7 +552,10 @@ pub fn ask_within(endpoint: &Endpoint, meta: &Meta, timeout: Duration) -> Result
 
 /// The model's raw answer text, before [`parse`] (the eval runner counts how answers fail).
 pub fn ask_content(endpoint: &Endpoint, meta: &Meta, timeout: Duration) -> Result<String, String> {
-    let url = chat_url(&endpoint.base_url)?;
+    let url = match endpoint.kind {
+        ApiKind::OpenaiCompatible => chat_url(&endpoint.base_url)?,
+        ApiKind::Anthropic => messages_url(&endpoint.base_url)?,
+    };
     let local = is_local(&url);
     let mut config = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
@@ -538,17 +568,30 @@ pub fn ask_content(endpoint: &Endpoint, meta: &Meta, timeout: Duration) -> Resul
         config = config.proxy(None);
     }
     let agent: ureq::Agent = config.build().into();
-    let body = serde_json::json!({
-        "model": endpoint.model,
-        "messages": prompt(meta),
-        "response_format": response_format(),
-        "temperature": 0,
-        "max_tokens": MAX_TOKENS,
-    });
     let mut request = agent.post(url.as_str());
-    if let Some(key) = &endpoint.key {
-        request = request.header("Authorization", &format!("Bearer {key}"));
-    }
+    let body = match endpoint.kind {
+        ApiKind::OpenaiCompatible => {
+            if let Some(key) = &endpoint.key {
+                request = request.header("Authorization", &format!("Bearer {key}"));
+            }
+            serde_json::json!({
+                "model": endpoint.model,
+                "messages": prompt(meta),
+                "response_format": response_format(),
+                "temperature": 0,
+                "max_tokens": MAX_TOKENS,
+            })
+        }
+        ApiKind::Anthropic => {
+            let Some(key) = &endpoint.key else {
+                return Err("Anthropic needs an API key.".to_owned());
+            };
+            request = request
+                .header("x-api-key", key)
+                .header("anthropic-version", ANTHROPIC_VERSION);
+            anthropic_body(&endpoint.model, meta)
+        }
+    };
     let mut response = request.send_json(&body).map_err(transport)?;
     let status = response.status().as_u16();
     // The body isn't read on an error: a service can echo the key or the request back.
@@ -561,23 +604,72 @@ pub fn ask_content(endpoint: &Endpoint, meta: &Meta, timeout: Duration) -> Resul
         .limit(MAX_BODY)
         .read_to_string()
         .map_err(transport)?;
-    chat_content(&text).ok_or_else(|| "The naming service sent an unreadable answer.".to_owned())
+    let content = match endpoint.kind {
+        ApiKind::OpenaiCompatible => chat_content(&text),
+        ApiKind::Anthropic => messages_content(&text),
+    };
+    content.ok_or_else(|| "The naming service sent an unreadable answer.".to_owned())
 }
 
-/// `<base>/chat/completions`, if `base` is `https://`, or `http://` to this machine.
-fn chat_url(base: &str) -> Result<url::Url, String> {
+/// The Messages API request (#91, D-029): the same system rules and the same JSON data as
+/// [`prompt`], and the answer's schema as a structured output. Nothing else: a forced tool, a
+/// `temperature`, `thinking` or `effort` is refused (HTTP 400) by some current Claude models,
+/// and the model is whatever the user typed.
+pub fn anthropic_body(model: &str, meta: &Meta) -> serde_json::Value {
+    let mut messages = prompt(meta).into_iter();
+    let system = messages.next().map(|m| m.content).unwrap_or_default();
+    let data = messages.next().map(|m| m.content).unwrap_or_default();
+    serde_json::json!({
+        "model": model,
+        "max_tokens": ANTHROPIC_MAX_TOKENS,
+        "system": system,
+        "messages": [{"role": "user", "content": data}],
+        "output_config": {"format": {"type": "json_schema", "schema": anthropic_schema()}},
+    })
+}
+
+/// [`response_format`]'s schema without `minLength`/`maxLength`, which structured outputs
+/// refuse; [`parse`] still rejects empty and over-long names.
+pub fn anthropic_schema() -> serde_json::Value {
+    let mut schema = response_format()["json_schema"]["schema"].clone();
+    if let Some(filename) = schema["properties"]["filename"].as_object_mut() {
+        filename.remove("minLength");
+        filename.remove("maxLength");
+    }
+    schema
+}
+
+/// `base`, if it's `https://`, or `http://` to this machine: the rule every request follows.
+fn checked(base: &str) -> Result<url::Url, String> {
     let refused =
         || "The naming service must use https:// (or http:// on this computer).".to_owned();
     let url = url::Url::parse(base.trim()).map_err(|_| refused())?;
     match url.scheme() {
-        "https" => {}
-        "http" if is_local(&url) => {}
-        _ => return Err(refused()),
+        "https" => Ok(url),
+        "http" if is_local(&url) => Ok(url),
+        _ => Err(refused()),
     }
+}
+
+/// `<base>/chat/completions`, if `base` passes [`checked`].
+fn chat_url(base: &str) -> Result<url::Url, String> {
+    let url = checked(base)?;
     let path = url.path().trim_end_matches('/');
     let mut chat = url.clone();
     chat.set_path(&format!("{path}/chat/completions"));
     Ok(chat)
+}
+
+/// `<base>/v1/messages`, if `base` passes [`checked`]. A base pasted with `/v1` or
+/// `/v1/messages` on the end gets it only once.
+fn messages_url(base: &str) -> Result<url::Url, String> {
+    let url = checked(base)?;
+    let path = url.path().trim_end_matches('/');
+    let path = path.strip_suffix("/v1/messages").unwrap_or(path);
+    let path = path.strip_suffix("/v1").unwrap_or(path);
+    let mut messages = url.clone();
+    messages.set_path(&format!("{path}/v1/messages"));
+    Ok(messages)
 }
 
 /// Whether `url` is this computer (a loopback address, or `localhost`).
@@ -597,6 +689,22 @@ fn transport(error: ureq::Error) -> String {
         ureq::Error::BodyExceedsLimit(_) => "The naming service's answer was too long.".into(),
         _ => "Couldn't reach the naming service.".into(),
     }
+}
+
+/// The answer text from a Messages API response (#91): only a finished turn (`end_turn`) counts,
+/// not one cut off (`max_tokens`), refused (`refusal`) or anything else. Thinking blocks come
+/// first and are skipped; the first `text` block is the structured output.
+fn messages_content(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    if value["stop_reason"] != "end_turn" {
+        return None;
+    }
+    value["content"]
+        .as_array()?
+        .iter()
+        .find(|block| block["type"] == "text")?["text"]
+        .as_str()
+        .map(str::to_owned)
 }
 
 /// The first choice's message text from an OpenAI-style chat completion.
@@ -854,6 +962,7 @@ mod tests {
             "#30: a downloaded model can be asked; its server starts on demand"
         );
         let running = Endpoint {
+            kind: ApiKind::OpenaiCompatible,
             base_url: "http://127.0.0.1:4321/v1".into(),
             model: "m".into(),
             key: Some("k".into()),

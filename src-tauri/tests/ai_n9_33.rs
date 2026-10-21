@@ -67,6 +67,7 @@ fn chat(content: &str) -> String {
 
 fn endpoint(url: &str, key: Option<&str>) -> Endpoint {
     Endpoint {
+        kind: queue_lib::ai::ApiKind::OpenaiCompatible,
         base_url: url.into(),
         model: "test-model".into(),
         key: key.map(Into::into),

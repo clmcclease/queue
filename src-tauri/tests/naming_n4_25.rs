@@ -181,6 +181,7 @@ fn n4_the_real_ask_path_names_the_row() {
     });
     let (q, id) = queued("messy title");
     let endpoint = Endpoint {
+        kind: queue_lib::ai::ApiKind::OpenaiCompatible,
         base_url: url,
         model: "local".into(),
         key: None,

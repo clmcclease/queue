@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** second run under D-028 (until 17:00): #96 merged; #30(b) in PR #98 (CI); #91 next
+**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** second run under D-028 (until 17:00): #96 and #30(b) merged; #91 in PR #99; then the M4 audit
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -21,10 +21,32 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Still unconfirmed: D-029's provisional bullets, PRD Q5's lifecycle amendment, D-016's runtime amendments for #30(b).
   - #31's hand checks above; #91's Test connection against api.anthropic.com with your key; the dev-app Local checks once #30(b) merges.
   - Carried forward: `scripts/codex-qa` exits 0 on an empty report.
-- **#96 merged** as b63e867 (`test` green on all three OSes).
-- **Next bounded action:** #30(b): PR #98 has this handoff; squash-merge it once `test` ×3 and `bundle` ×4 are green on its head (pre-approved), then bring #91's branch up to `main`. #91 is being built on `naming/91-anthropic` meanwhile.
+- **#96 merged** as b63e867. **#98 (#30(b)) merged** as 980a377; #30 is closed.
+- **Next bounded action:** #99 (#91): this branch has merged `main` (#30(b)). Once `test` ×3 is green on its new head and a fresh Codex review of the resolution passes, ask the architect for the squash with the run ID. Then the M4 audit, if both merged by 15:30 (they will be). M4 still can't close: #33(b) is the owner's.
 
-## In progress: #30(b) (N6) the llama-server lifecycle (PR #98, branch `naming/30b-llama-lifecycle`, `ci:bundle`; closes #30)
+## In progress: #91 (N8) Anthropic Messages API provider (PR #99, branch `naming/91-anthropic`, no `ci:bundle`; closes #91)
+- **What changed:**
+  - `ai.rs`: `ApiKind::Anthropic` and `Endpoint.kind`. `ask_content` branches on the kind: `<base>/v1/messages`, with a pasted `/v1` or `/v1/messages` used once; `x-api-key` and `anthropic-version: 2023-06-01`. The body (`anthropic_body`) is the same system rules and data as the OpenAI request, `max_tokens` 1024, and structured outputs with `anthropic_schema()` (`response_format`'s schema minus length limits). There's no forced tool, sampling, thinking or effort. Only an `end_turn` with a `text` block is an answer.
+  - No key means `NotSetUp`, so nothing is sent. Test connection says "Anthropic needs an API key."; for Anthropic, a 400 adds "Check the model name."
+  - `settings_set_api(kind, base_url, model)`.
+  - The UI's Service picker (switching fills the default URL and clears the model).
+- **Checks (macOS arm64):** fmt; clippy `-D warnings`; `cargo test --locked` 495 passed / 0 failed / 28 ignored; `npm run build` + `npm test` 305/305; tsc. No live Anthropic request has been made by anyone.
+- **QA (reports in the #91 worktree's `qa/reports/`):**
+  - `test "#91"` **PASS WITH NOTES** (`20261021-122413-test-70LR`). Added tests: `src-tauri/tests/api_anthropic_91_qa.rs` (10) and 3 UI tests in `qa/tests/api-anthropic-91.test.mjs`. The agent's own: `api_anthropic_91.rs` (9) and 3 UI tests.
+  - Review **PASS WITH NOTES** (`…123200-review-bOjP`), no blocking defects.
+- **Architect rulings (12:50):**
+  - The commit, push and draft PR are approved; this handoff is pre-approved.
+  - P3, the unbounded `accept()` in `api_anthropic_91.rs`: accepted for now. It's folded into the merge-from-main round if that happens; otherwise it goes in a P3 follow-up "Loopback test fixtures: bounded accept with a deadline", covering all three such fixtures.
+  - Codex's three missing tests aren't required. They go on that same follow-up: a kind switch while resolving, error-then-success through the worker, and a `set_api` save failure with a kind change.
+  - The squash needs its own request with green CI on the final head.
+- **A correction to the process:** the architect's earlier clarification, "post-PASS fixes confined to test files need no new review", was withdrawn as outside D-028. QA gates are the owner's to change. It stays here only as a **proposal for the owner**: *Post-PASS fixes confined to test files that change no assertion, test logic or production code (unused imports, cfg gates, formatting) don't need a new review round; they're named in STATUS and the squash request.* Every commit still gets its Codex review.
+- **For the owner:**
+  - **Test connection against api.anthropic.com with your key:** Service: Anthropic, model `claude-haiku-5-5`. Then name a real row, and check Keychain Access still shows only `dev.mcclease.queue` / `api-key`.
+  - **One key slot across services:** after switching the Service, the previously saved key stays and is sent to the new service's URL on the next ask or Test connection (over https, to a URL you chose). Decide whether a kind change should clear the key, or the field should say which service it was saved for. The architect would file it as P3 unless you want it fixed before release.
+  - Is the "not set up" banner clear enough when Anthropic has a URL and model but no key?
+  - Confirm or reject the proposal above, and D-029's provisional bullets, including the #91 request shape.
+
+## Done: #30(b) (N6) the llama-server lifecycle (squash-merged from PR #98 as 980a377; test ×3 and bundle ×4 green; #30 closed)
 - **What changed:**
   - **`local.rs`:** `local::Runtime` starts `llama-server` inside the naming job on a free 127.0.0.1 port with D-029's arguments and a fresh 32-byte key in `LLAMA_API_KEY`. It waits up to 120 s for `/health`, reuses a running server, restarts a dead one, and retries once on another port. It stops after 2 minutes idle (Queue's own 5 s check), at quit, and before a model delete or switch or leaving Local. Those run inside `stop_while`, with a pending-change counter; a start re-checks `wanted` under the lock.
   - **`ai.rs`:** `ai::Starting`: a failed start is a failed ask (rules tag). `LocalModel::NoRuntime` / `RuntimeMissing` now only means a build without the server.
@@ -42,6 +64,8 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Round 2 **FAIL** (`…120206-review-RUcL`): a new load could overtake a pending stop. Fixed with the pending counter.
   - Round 3 **PASS WITH NOTES** (`…120906-review-hwiZ`), no findings. (`…120133-review-nUGr` was an empty-scope mis-invocation, not a verdict.)
 - **Architect rulings (12:15):** commit, push and draft PR approved; the PR closes #30; Vulkan filed as **#97** (M5); Codex's command-level tests added to **#84**'s scope; the handoff and the squash on green (test ×3, bundle ×4) are pre-approved. A failure in the new CI step needs a fresh review if the fix is code.
+- **After the approval:** Windows CI failed clippy on two Unix-only imports in test files (`local_real_30b.rs`, then `local_n6_30b_qa.rs`). Each was fixed in its own commit (40202fa, 5adfc89), each with its own Codex review: **PASS** (`…123431-review-CXli`) and **PASS** (`…123606-review-owko`). A whole-PR run (`…123647-review-qvVl`) was FAIL only on that second import, plus the accepted P3 below.
+- **Merged (13:01):** CI run **39645736963** on 5adfc89 is all green, including **"Real llama-server lifecycle test" on Windows**: the CPU backend proof D-029 required. Linux and macOS passed too, and all four bundles. The architect approved the squash with the run ID and that step quoted.
 - **P3s noted, not fixed:**
   - Deleting the model that *isn't* chosen still stops the chosen model's server, and an in-flight job for it gets the rules tag with no re-ask. Rare; the next ask restarts it.
   - A waiter can take the lock in the microsecond between `stop_while` releasing it and its pending count dropping. It gets `NOT_IN_USE`, and the switch's re-ask covers it.

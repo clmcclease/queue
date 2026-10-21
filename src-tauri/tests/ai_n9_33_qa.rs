@@ -15,6 +15,7 @@ fn answer(name: &str) -> String {
 
 fn endpoint(url: String) -> Endpoint {
     Endpoint {
+        kind: queue_lib::ai::ApiKind::OpenaiCompatible,
         base_url: url,
         model: "qa-fixture".into(),
         key: None,

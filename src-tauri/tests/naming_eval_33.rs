@@ -65,6 +65,7 @@ fn n9_eval_scores_a_model() {
         return;
     };
     let endpoint = Endpoint {
+        kind: queue_lib::ai::ApiKind::OpenaiCompatible,
         base_url,
         model: std::env::var("QUEUE_EVAL_MODEL").unwrap_or_default(),
         key: std::env::var("QUEUE_EVAL_KEY").ok(),

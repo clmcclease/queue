@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use crate::ai::Endpoint;
+use crate::ai::{ApiKind, Endpoint};
 use crate::proc;
 
 /// The resource folder's name.
@@ -81,7 +81,9 @@ struct Server {
 
 impl Server {
     fn endpoint(&self, name: &str) -> Endpoint {
+        // llama-server speaks the OpenAI-compatible API.
         Endpoint {
+            kind: ApiKind::OpenaiCompatible,
             base_url: format!("http://127.0.0.1:{}/v1", self.port),
             model: name.to_owned(),
             key: Some(self.key.clone()),
