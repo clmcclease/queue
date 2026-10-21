@@ -1,6 +1,6 @@
 # Architecture
 
-> Stack confirmed (D-002, D-006). Implements [PRD-001](prds/PRD-001-queue-v1.md). M1–M3 are built: the real queue, Tier-1 names, inline editing and templates. In M4, the AI provider setting, an OpenAI-compatible API service (#32), the model manager (#31) and the local runtime (#30) exist: once the model is downloaded, names come from it (see [STATUS](STATUS.md)). Sections marked **Planned** describe later milestones and don't exist yet.
+> Stack confirmed (D-002, D-006). Implements [PRD-001](prds/PRD-001-queue-v1.md). M1–M3 are built: the real queue, Tier-1 names, inline editing and templates. In M4, the AI provider setting, the API services (OpenAI-compatible, #32; Anthropic's Messages API, #91), the model manager (#31) and the local runtime (#30) exist: once the model is downloaded, names come from it (see [STATUS](STATUS.md)). Sections marked **Planned** describe later milestones and don't exist yet.
 
 ## Components
 

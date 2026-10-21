@@ -47,7 +47,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
      - `scripts/codex-qa` exits 0 on an empty report.
      - The worktrees under the sessions' scratchpads (`wt30b`, `wt91`, `wtdocs` and earlier ones) and `/private/var/folders/…/queue-qa-*` hold the git-ignored QA reports. Remove them once you don't need those.
 
-## Done: #91 (N8) Anthropic Messages API provider (squash-merged from PR #99 as ca66db8; test ×3 green, run 39649755606; final review `20261021-130402-review-ySy2` PASS WITH NOTES; post-merge on macOS arm64: cargo 526 passed / 0 failed / 30 ignored, npm 312/312; #91 closed)
+## Done: #91 (N8) Anthropic Messages API provider (squash-merged from PR #99 as ca66db8; test ×3 green, run 39649755606; final review `20261021-130402-review-ySy2` PASS WITH NOTES, in the #91 worktree's `qa/reports/`; post-merge on macOS arm64: cargo 526 passed / 0 failed / 30 ignored, npm 312/312; #91 closed)
 - **What changed:**
   - `ai.rs`: `ApiKind::Anthropic` and `Endpoint.kind`. `ask_content` branches on the kind: `<base>/v1/messages`, with a pasted `/v1` or `/v1/messages` used once; `x-api-key` and `anthropic-version: 2023-06-01`. The body (`anthropic_body`) is the same system rules and data as the OpenAI request, `max_tokens` 1024, and structured outputs with `anthropic_schema()` (`response_format`'s schema minus length limits). There's no forced tool, sampling, thinking or effort. Only an `end_turn` with a `text` block is an answer.
   - No key means `NotSetUp`, so nothing is sent. Test connection says "Anthropic needs an API key."; for Anthropic, a 400 adds "Check the model name."
@@ -102,7 +102,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - ~2.8 GB while loaded, gone after 2 minutes idle.
   - Review #97. Windows and Linux `llama-server` from the installers stays a hand check (#71).
 
-## Overnight run (2026-10-20 → 21, under D-028)
+## Overnight run (2026-10-20 → 21, under D-028) (historical: its actions were done or carried into the second run above)
 - **Goal (owner):** complete M4. Stop at a good point after 06:00, by 06:30 on 2026-10-21, and wait for the owner.
 - **Approvals:** the `architect` agent (Fable 5.1) gives them under D-028. Its rulings are recorded per item below.
 - **Order (architect):** #74 → #77 → M2 audit → #14 → #15 → #17 → M3 audit → #33(a) → #25 → #32 → #31 → #30 → M4 audit. Scope is in D-029. The architect expects full M4 isn't reachable tonight; every merge must still be complete and safe.
@@ -1109,4 +1109,3 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-15: #11's Format setting worked: Best quality gave `.webm`, Most compatible video gave `.mp4`, and Audio only gave `.opus`. Re-adding that link for Most compatible audio was refused, which is bug #59.
 - 2026-10-15: with #59's fix, re-adding that link with Most compatible audio worked and gave an `.m4a`.
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
-
