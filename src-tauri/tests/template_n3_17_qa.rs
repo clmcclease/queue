@@ -48,6 +48,7 @@ fn every_template_round_trips_without_changing_other_settings() {
             download_dir: Some(temp.0.join("Téléchargements 日本語")),
             format: Format::CompatibleAudio,
             naming_template: template,
+            naming_provider: queue_lib::ai::Provider::Off, // #25
         };
         settings.save(&file).unwrap();
         assert_eq!(Settings::load(&file), settings);

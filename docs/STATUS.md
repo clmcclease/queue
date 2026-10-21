@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1 and M2 done · M3 (smart naming) in progress · **Active:** #17 (PR #89), #25 (building), then the M3 audit
+**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #25 (PR #90), then #32
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -14,14 +14,8 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **For the owner:** on #14's retry, `scripts/codex-qa` exited 0 although Codex hit the limit and wrote an empty report. Worth a fix: treat an empty report as a failure.
 - **Time rules (architect):** no new item after 04:30 unless it's small; stop coding at 05:30; the STATUS handoff with a "For the owner" list is done by 06:00–06:30.
 
-## Handoff to another computer (2026-10-20)
-The owner is moving to another computer. #74 is pushed as a **work-in-progress commit on `queue/74-cancel-download`**, with no PR yet, at the owner's request.
-- **Resume:**
-  ```sh
-  git fetch && git checkout queue/74-cancel-download
-  ```
-  Then do the "Next bounded action" at the end of this file.
-- **Done on the new Mac (2026-10-20):** the branch is checked out, `npm ci` has run, the sidecars are built and pass `--check`, and Codex is signed in. Rust 1.99.0 is at `~/.cargo/bin` (now on the owner's PATH via `~/.zshrc`; the agent shell needs `export PATH="$HOME/.cargo/bin:$PATH"`). Node 24.21.0 comes from fnm, which matches `mise.toml`, so mise isn't installed.
+## Machine setup and working practice (moved to the new Mac on 2026-10-20)
+- **Done on the new Mac (2026-10-20):** `npm ci` has run, the sidecars are built and pass `--check`, and Codex is signed in. Rust 1.99.0 is at `~/.cargo/bin` (now on the owner's PATH via `~/.zshrc`; the agent shell needs `export PATH="$HOME/.cargo/bin:$PATH"`). Node 24.21.0 comes from fnm, which matches `mise.toml`, so mise isn't installed.
 - **Set up the machine** first, as in README "Development":
   - `mise install`, then `npm ci`;
   - `scripts/build-ffmpeg.sh <triple>`, then `node scripts/fetch-sidecars.mjs --check`. `src-tauri/binaries/` is git-ignored.
@@ -116,8 +110,62 @@ The owner is moving to another computer. #74 is pushed as a **work-in-progress c
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #17 (N3) naming template picker with live preview (PR #89, branch `naming/17-template-picker`)
-- **PR #89 (draft, no label):** 534d1ac; CI run 39532876018 passed `test` on Linux, Windows and macOS. `main` (b26a1a0, #33(a)) was merged into the branch afterwards; the only conflict was this file.
+## M3 audit (end of milestone): YELLOW (`qa/reports/20261020-221105-audit-DqXf.md`, on 9e29480)
+- 0 P1, 4 P2, 4 P3. Under D-029 nothing needed fixing tonight. The architect's disposition (D-028):
+  - **Already filed:** #83 (P2, queue.json version), #84 (P2, command-level tests; #17's and #25's settings commands added as a comment), #71 (P2, native Windows/Linux UI checks), #86 (P3, reproducible ffmpeg), #85 (P3, ids beyond 2^53).
+  - **Fixed in #25's change:** STATUS (#17 shown as merged, the next action rewritten, the old #74 resume block removed); BACKLOG's #12 row (queue.json, rows come back Queued) and #33 row (the (a)/(b) split, the owner-labelled corpus and model-eval gate kept); README's and ARCHITECTURE's summaries of what's built.
+  - **PRD Q5** is amended to the built lifecycle, with the original wording kept beside it, **pending owner confirmation**.
+  - **The M3 milestone is closed** on GitHub.
+- If #25 hasn't merged by 05:30, these doc fixes go in a docs-only PR instead (the architect's condition).
+
+## In progress: #25 (N4) AI naming provider: Local (default) / API / Off (PR #90, branch `naming/25-provider-toggle`)
+- **PR #90 (draft, no label):** 0a554c3; CI run 39539558222 passed `test` on Linux, Windows and macOS.
+- **Setting:** `namingProvider` (`local` | `api` | `off`, default `local`, `or_default`).
+- **`ai::endpoint(provider)`** returns where to ask, or why nowhere: `Off`, `ModelMissing` (until #30/#31), `NotSetUp` (until #32). Nothing is sent for an unavailable provider, and `Local` only ever means this computer. `ai::Namer` is a trait (`Endpoint` asks with `ai::ask`; tests use fakes).
+- **Queue:**
+  - `NameSource::Fallback` means an ask ran and failed; an unknown saved tag reads as `rules`;
+  - `ai_title` is kept (persisted, additive);
+  - a naming generation drops answers that arrive after a provider change;
+  - `naming_job` snapshots Queued, non-edited rows;
+  - `ai_named` applies the answer only if the row is still Queued, not edited, and the generation is unchanged. The AI title fills `{title}` through `naming::with_title`; a failure puts the row on its Tier-1 name, tagged `Fallback`;
+  - `renaming()` bumps the generation and lists the rows to ask again; `awaiting_ai()` lists restored rows not asked yet.
+- **Worker (`lib.rs`):** `naming_worker` is one thread fed by ids after a fetch and for restored rows. `run_naming_job` takes its snapshot under the lock, asks with the lock released (inside `catch_unwind`), then records the answer. It holds no `proc::job()`, so a slow model never delays a quit; an answer lost at quit leaves the Tier-1 name. Each row is sent only if the provider can be asked.
+- **Commands:**
+  - `settings_naming_provider`;
+  - `settings_set_naming_provider`: saves, drops answers in flight, and re-asks every Queued row not edited by hand if the new provider can be asked (D-029);
+  - `naming_status`: the provider and why it's unavailable.
+- **UI:**
+  - a Settings "AI naming" section: Local (default), API and Off, each with a one-line note. API's note says what's sent; choosing API before #32 shows "Not set up yet" rather than being disabled;
+  - the non-blocking banner (`role="status"`) when Local's model isn't downloaded;
+  - row tags: "AI" for `ai`, and "rules" with a tooltip for `fallback`; a plain rules name has no tag.
+- **Not built yet:** the local runtime (#30) and model (#31), API setup and keys (#32), and re-asking on a template change (not needed: the stored AI title is reused). In-flight answers are dropped by the generation.
+- **Tests:**
+  - unit: the guards, Fallback, re-asking, the lenient tag, persistence, `with_title`, provider resolution, the settings fallback;
+  - `tests/naming_n4_25.rs` (5): fake namers for success, failure, a panic, an edit, start or provider change while answering, and a hand-edited row never asked; plus the real `ai::ask` path against a loopback fake;
+  - 5 UI tests in `qa/tests/provider-n4-25.test.mjs`;
+  - older UI mocks answer `naming_status` and `settings_naming_provider`.
+- **The cross-wiring test** (Local never contacts an API URL stored in settings) can't be written until #32 adds that setting: today `endpoint(Local)` is always `ModelMissing`. It's on #32's checklist.
+- **Checks (macOS arm64, before the move onto `main`):** `npm test` 228/228, fmt, clippy `-D warnings`, `cargo test` 407.
+- **Moved onto `main` (9e29480, with #17) on 2026-10-20, 22:15.** The work was uncommitted on f874061 (#33's pre-squash commit), so the branch was reset to `main` and the work re-applied from a stash. Conflicts: STATUS, `lib.rs` (command lists), `settings.rs`/`settings.ts`/`SettingsPanel.tsx` (both settings), `queue.rs`, and the UI-test IPC mocks (both sets of commands). All were resolved by keeping both sides.
+- **#17 meets #25 (`queue.rs`, `templated`):** `set_template`, Retry and a cancel no longer turn every name into a rules name. An AI name keeps its AI title, which is put into the new template (D-029), and a Fallback stays tagged Fallback. A template change doesn't re-ask the model. Test: `a_template_change_keeps_ai_titles_and_fallback_tags`. `ai_named`'s doc comment no longer says a template change drops an answer: the answer goes into the template current when it arrives.
+- `tests/template_n3_17_qa.rs` (#17's Codex tests) builds a full `Settings`, so it now sets `naming_provider` too (`Off`, so the round trip also checks that the template leaves the provider alone).
+- **Checks (macOS arm64, on 9e29480 + #25):** fmt, clippy `-D warnings`, `cargo test` 419 passed, `tsc`, `npm test` 238/238.
+- `codex-qa test "#25"`: **FAIL**, 2 UI bugs, both fixed (`qa/reports/20261020-221537-test-phB8.md`, in the #25 worktree). All the backend criteria were met.
+  - P2: after saving API, reopening Settings (or restarting) lost the "Not set up yet" note, because the picker learned availability only from a save. Now the picker takes the main window's status as a prop (one source), so the note shows from the start.
+  - P2: a late startup `naming_status` reply could overwrite a provider saved after it and bring back the Local-model banner. Now the startup reply only fills an empty status, so a save always wins.
+
+  Its tests are added (D-021): `tests/provider_n4_25_qa.rs` (7: real-reply fallback, timeout, unsafe names, collisions, queue transitions) and `qa/tests/provider-n4-25-qa.test.mjs` (4 UI tests, including both regressions). The cut-off 21:23 run doesn't count (the architect's ruling).
+- **Checks (macOS arm64, after the fixes):** fmt, clippy `-D warnings`, `cargo test` 426 passed, `tsc`, `npm test` 242/242. Real-sidecar suite not run: #25 doesn't touch downloading.
+- `codex-qa review`, round 1: **PASS WITH NOTES** (`qa/reports/20261020-222733-review-z9Lq.md`, in the #25 worktree).
+  - P3: BACKLOG put `settings.json` in app-data. Fixed: it's in app-config (D-020).
+  - Its suggested tests:
+    - **Added:** a panicking namer and then a working one on the **same** queue (`n4_a_panicking_namer_fails_only_its_row` now checks that the lock isn't poisoned).
+    - **Filed:** command-level `settings_set_naming_provider` tests (a failed save, a change during Download all) on #84; a provider-change race between choosing the endpoint and capturing the generation on #32's checklist, since every provider resolves as unavailable until #30–#32.
+- **Commit, draft PR (no label) and squash approved by the architect under D-028.** The squash is pre-approved on green `test` on all three OSes. The post-review P3 fix and test were accepted without a second round. **Its condition:** the `Naming` channel is now managed before the fetch worker starts (`lib.rs` setup), because a finished fetch asks for a name and `app.state::<Naming>()` panics if it isn't managed yet. That's unreachable today, but it wouldn't be once a provider is usable. D-029 gains the provider-switch bullet.
+
+## Done: #17 (N3) naming template picker with live preview (squash-merged from PR #89 as 9e29480; Linux/macOS/Windows tests green)
+- **PR #89 (draft, no label):** 534d1ac; CI run 39532876018 passed `test` on Linux, Windows and macOS. `main` (b26a1a0, #33(a)) was merged into the branch afterwards; the only conflict was this file. CI run 39535964442 on that merge (7befe1f) passed `test` on all three OSes.
+- **Squash approved by the architect under D-028**, conditional on run 39535964442 being green (it was). Order after it: the M3 audit on `main`, then #25 brought up to `main` (with #17) and `codex-qa test "#25"` re-run. The cut-off 21:23 run doesn't count toward the two-failure rule.
 - **Setting:** `namingTemplate` in settings.json (`title` | `channel_title` | `date_title`). Missing or unknown values mean `{title}`, and only that setting falls back.
 - **Queue:** `Queue::set_template` renames Queued rows whose name wasn't edited by hand and returns them. Rows fetched later use the template. Running and finished rows keep their names.
 - **Startup** applies the saved template to the loaded queue.
@@ -750,6 +798,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#17:** PR #89; push this handoff, wait for green, then ask the architect for the squash.
-2. **#25** (worktree branch `naming/25-provider-toggle`, built on #33's commit, uncommitted): its `codex-qa test "#25"` run at 21:23 left an empty report; re-run it once, after bringing `main` in.
-3. Then the M3 audit (after #17 merges).
+1. **#25:** PR #90 is green; squash-merge it (pre-approved by the architect, on green `test` on all three OSes), then sync `main`.
+2. Then **#32** (API setup and keys), then #31, #30 and the M4 audit (D-029 order).

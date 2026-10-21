@@ -52,9 +52,55 @@ fn fetch_worker(app: AppHandle, jobs: Receiver<(u64, String)>) {
             Ok((meta, saved))
         });
         if let Some(item) = updated {
+            // N4 (#25): a row with its info has its Tier-1 name already; an AI name may follow.
+            if item.status == queue::Status::Queued {
+                ask_for_name(&app, item.id);
+            }
             let _ = app.emit(ITEM_EVENT, item);
         }
     }
+}
+
+/// Rows waiting for an AI name (#25). One worker asks for them in order.
+struct Naming(Mutex<Sender<u64>>);
+
+/// Hands a row to the naming worker, if the chosen provider can be asked. Nothing is sent for
+/// an unavailable one (D-029): the row keeps its Tier-1 name with no tag.
+fn ask_for_name(app: &AppHandle, id: u64) {
+    let usable = current_settings(app).is_ok_and(|s| ai::endpoint(s.naming_provider).is_ok());
+    if usable && let Ok(jobs) = app.state::<Naming>().0.lock() {
+        let _ = jobs.send(id);
+    }
+}
+
+/// Asks for AI names one row at a time. It doesn't hold a quit up (#67): an answer lost at quit
+/// just leaves the Tier-1 name. The provider is read for each row, so a change applies at once.
+fn naming_worker(app: AppHandle, jobs: Receiver<u64>) {
+    for id in jobs {
+        if proc::stopping() {
+            return;
+        }
+        let Ok(settings) = current_settings(&app) else {
+            continue;
+        };
+        let Ok(endpoint) = ai::endpoint(settings.naming_provider) else {
+            continue;
+        };
+        let state = app.state::<Mutex<Queue>>();
+        if let Some(item) = run_naming_job(&state, id, &endpoint) {
+            let _ = app.emit(ITEM_EVENT, item);
+        }
+    }
+}
+
+/// One naming job (#25): takes what it needs under the queue lock, asks `namer` with the lock
+/// released (it can take seconds), then records the answer, which [`Queue::ai_named`] drops if
+/// the row or the provider changed meanwhile. A panicking namer fails just this row.
+pub fn run_naming_job(queue: &Mutex<Queue>, id: u64, namer: &dyn ai::Namer) -> Option<Item> {
+    let (meta, generation) = lock(queue).ok()?.naming_job(id)?;
+    let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| namer.name(&meta)))
+        .unwrap_or_else(|_| Err("Naming failed unexpectedly.".into()));
+    lock(queue).ok()?.ai_named(id, generation, answer)
 }
 
 /// One metadata job: runs `fetch` and records the outcome. A panic inside `fetch` fails just
@@ -203,6 +249,56 @@ fn current_settings(app: &AppHandle) -> Result<settings::Settings, String> {
         .lock()
         .map(|s| s.clone())
         .map_err(|_| "settings lock poisoned".to_string())
+}
+
+/// The AI naming provider (N4, #25).
+#[tauri::command]
+fn settings_naming_provider(app: AppHandle) -> Result<ai::Provider, String> {
+    Ok(current_settings(&app)?.naming_provider)
+}
+
+/// Saves the AI naming provider (#25). Answers already on their way are dropped, and if the new
+/// provider can be asked, every Queued row not renamed by hand is asked again.
+#[tauri::command]
+fn settings_set_naming_provider(
+    app: AppHandle,
+    provider: ai::Provider,
+) -> Result<NamingStatus, String> {
+    {
+        let state = app.state::<Settings>();
+        let mut current = state
+            .current
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        let mut next = current.clone();
+        next.naming_provider = provider;
+        if let Some(file) = &state.file {
+            next.save(file)
+                .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+        }
+        *current = next;
+    }
+    let again = lock(&app.state::<Mutex<Queue>>())?.renaming();
+    for id in again {
+        ask_for_name(&app, id);
+    }
+    naming_status(app)
+}
+
+/// The chosen provider and why it can't be asked yet, if it can't (the banner, PRD §6.3).
+#[derive(Clone, Debug, serde::Serialize)]
+struct NamingStatus {
+    provider: ai::Provider,
+    unavailable: Option<ai::Unavailable>,
+}
+
+#[tauri::command]
+fn naming_status(app: AppHandle) -> Result<NamingStatus, String> {
+    let provider = current_settings(&app)?.naming_provider;
+    Ok(NamingStatus {
+        provider,
+        unavailable: ai::endpoint(provider).err(),
+    })
 }
 
 /// The download format (D2, #11).
@@ -835,6 +931,7 @@ pub fn run() {
             };
             let writable = writable && lock.is_some();
             let refetch = queue.fetching();
+            let unnamed = queue.awaiting_ai();
             let saved = queue.changes();
             app.manage(Mutex::new(queue));
             app.manage(QueueFile {
@@ -845,6 +942,10 @@ pub fn run() {
                 problem: Mutex::new(problem),
                 saved: Mutex::new(saved),
             });
+            // N4 (#25): one worker asks for AI names; a row restored as Queued is asked again.
+            // Managed before the fetch worker starts, since a finished fetch asks for a name.
+            let (names, named) = mpsc::channel();
+            app.manage(Naming(Mutex::new(names)));
             let (jobs, queued) = mpsc::channel();
             for job in refetch {
                 let _ = jobs.send(job);
@@ -852,6 +953,14 @@ pub fn run() {
             app.manage(Fetcher(Mutex::new(jobs)));
             let handle = app.handle().clone();
             std::thread::spawn(move || fetch_worker(handle, queued));
+            for id in unnamed {
+                ask_for_name(app.handle(), id);
+            }
+            let handle = app.handle().clone();
+            std::thread::Builder::new()
+                .name("naming".into())
+                .spawn(move || naming_worker(handle, named))
+                .map_err(|e| format!("Couldn't start the naming worker: {e}"))?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 loop {
@@ -879,6 +988,9 @@ pub fn run() {
             settings_naming_template,
             settings_set_naming_template,
             naming_previews,
+            settings_naming_provider,
+            settings_set_naming_provider,
+            naming_status,
             open_download_folder,
             reveal_download
         ])

@@ -25,6 +25,7 @@ import {
   storageProblem,
   type QueueItem,
 } from "./queue";
+import { namingStatus, type NamingStatus } from "./settings";
 import { useDownloadFolder } from "./useDownloadFolder";
 
 import { FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
@@ -50,6 +51,19 @@ export default function App() {
   // The download folder (D1), shared by the "Saving to" line and Settings so both agree.
   const folder = useDownloadFolder();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // N4 (#25): which AI provider names rows, and why it can't yet (the banner, PRD §6.3).
+  const [naming, setNaming] = useState<NamingStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    namingStatus().then(
+      // A provider saved before this arrives is newer: keep it.
+      (s) => !cancelled && s && setNaming((current) => current ?? s),
+      () => {}, // no banner if it can't be read
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // What had focus when Settings opened (the gear, or the field for ⌘,). Recorded here, before
   // the queue goes inert, and restored after it isn't, so StrictMode's effect replay can't lose it.
   const settingsOpener = useRef<HTMLElement | null>(null);
@@ -371,6 +385,11 @@ export default function App() {
             Can't receive download updates ({disconnected}). Restart Queue to download.
           </p>
         )}
+        {naming?.provider === "local" && naming.unavailable === "model_missing" && (
+          <p role="status" data-role="naming-banner" className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
+            AI naming uses a local model that isn't downloaded yet, so names come from the rules for now.
+          </p>
+        )}
         {error && (
           <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
             {error}
@@ -401,7 +420,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {settingsOpen && <SettingsPanel folder={folder} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel folder={folder} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={setNaming} />}
     </main>
   );
 }
