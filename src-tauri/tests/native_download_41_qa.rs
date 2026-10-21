@@ -95,7 +95,7 @@ fn native_unicode_argv_and_collision_gaps_preserve_every_existing_file() {
     );
     assert_eq!(
         args[args.iter().position(|a| a == "-o").unwrap() + 1],
-        "%(title)s.%(ext)s"
+        "%(title).200B.%(ext)s"
     );
     assert!(
         !args

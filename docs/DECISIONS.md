@@ -163,8 +163,9 @@ The owner asked for a software architect agent on Fable 5.1 (`.claude/agents/arc
 ## D-029 M3/M4 scope and order for the overnight run — Provisional (2026-10-20, decided by the architect under D-028)
 - Naming never blocks a download: the Tier-1 name is set as the row becomes Queued; the AI name replaces it later only if the row is still Queued and not user-edited. Edited names are re-sanitized and `%` is escaped in `-o`.
 - Templates in v1 are exactly the three N3 presets; no template language.
-- Names are capped at 150 characters and fit a 200-byte stem budget on every OS (#77), counting yt-dlp's fullwidth replacements.
+- Names are capped at 150 characters and fit a 200-byte stem on every OS. Until #15, that's yt-dlp's `%(title).200B` with the illegal characters pre-replaced by their fullwidth forms through `--replace-in-metadata` (#77); from #15 the naming engine enforces it on the literal stem it passes to `-o`, with the same replacements. Windows reserved names stay with the naming engine (#14/#15); a QA test for a bare `CON` title is parked behind `QUEUE_QA_KNOWN_GAPS` until #15.
 - API base URLs must be `https://` except loopback hosts. Keys only via `keyring`; tests use a fake store.
 - #33 is split: prompt, schema, validation and the eval set + runner first; the real model runs on the pinned files remain the owner's and gate M4 completion.
 - llama-server ships CPU/Metal builds (Vulkan only within D-013); no CUDA. Shared libs go in `bundle.resources`.
 - M2/M3 audits: fix RED/P1 tonight; file the rest.
+- A Codex usage-limit error with a stated reset time is a pause, not a failure: the gate re-runs unchanged after the reset; work continues on branches meanwhile; limit errors don't count toward the two-failure rule. A limit with no reset time, or one more than about 3 h away, is the owner's case for that gate. Decided by the architect under D-028, 2026-10-20.
