@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #31 (built, QA next), then #30
+**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #31 (PR #94), then #30
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -110,7 +110,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - the bare `CON` gap is fixed in #15, which names downloads with the engine and removes the test's gate.
 - The audit also noted that `scripts/codex-qa` already treats an empty report as a failure (line 99). The exit 0 seen on #14's retry at 19:24 needs a second look; it's on the owner's list.
 
-## In progress: #31 (N7) local model manager: first-run download (branch `naming/31-model-manager`, on 90a5106, uncommitted)
+## In progress: #31 (N7) local model manager: first-run download (PR #94, branch `naming/31-model-manager`)
 - **Design ruled by the architect under D-028** (D-029's #31 bullets). `Local` stays unavailable until #30: `ModelMissing` without the file, `RuntimeMissing` with it. The PR gets `ci:bundle` (per-OS memory detection).
 - **`models.rs`:**
   - **Pins:** both from bartowski, verified. Qwen3 4B Instruct 2507 Q4_K_M is 2,497,280,736 bytes (the default). Qwen3.5 2B Q4_K_M is 1,396,198,496 bytes: **1.4 GB, not D-016's 1.28 GB** (that was unsloth's file).
@@ -161,6 +161,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - `codex-qa review`, round 3: **FAIL**, 1 P2, fixed (`qa/reports/20261021-013227-review-jkLG.md`): the copy fallback (no hard links) copied the whole model in one `io::copy`, ignoring a cancel or a quit; a quit could pass the 5 s shutdown wait and leave a cut-off file. Now `copy_new` copies 1 MiB at a time, checking `should_stop()`; on a stop it removes the unfinished copy, keeps the `.part`, and returns `Stopped` (`place` now reports an `Outcome`). Test: `the_copy_fallback_stops_on_cancel_and_keeps_the_partial_file` (a quit takes the same check).
 - **Checks (macOS arm64, after round 3's fix, Rust only):** fmt, clippy `-D warnings`, `cargo test` 473 passed, `git diff --check`. The UI is unchanged since `npm test` passed 270/270.
 - `codex-qa review`, round 4: **PASS WITH NOTES**, no findings (`qa/reports/20261021-013755-review-1t92.md`). Its suggested tests aren't added (P3s, for the architect): a cancel after the copy has written several blocks (the stop check is the same per block; a real mid-copy test would race a fast local copy), injected write/sync/marker failures (each already maps to a message, and the `.part` survives), and a rejected first `model_status` (a later event or poll brings it). The model-download-during-Download-all test is on #84.
+- **Commit, `ci:bundle` draft PR #94 and squash approved by the architect under D-028.**
+  - The squash is pre-approved on green `test` (3 OSes) and `bundle` (4 targets). This is the first native Windows/Linux run of the model tests; a code fix after CI comes back to the architect with a fresh review.
+  - Design changes 1–6 are confirmed (D-029's last #31 bullet). Round 4's three suggested tests are accepted as P3s and posted on #84.
+  - #30 has a note: `models::GPU` is true only on macOS arm64, so Windows and Linux always get the small model suggested until #30 detects the backend.
+- **PR #94:** aba0190; CI run 39557629428 passed `test` on Linux, Windows and macOS (the first native run of the model tests there) and `bundle` on all 4 targets.
+- **Nobody has run a full real model download yet** (only the headers and 16 bytes per pin).
+- **Owner checks (dev app, macOS; the 1.4 GB small model is the cheaper one to try):**
+  - Local with no model: the banner's Download, then progress, Cancel ("paused at N%"), Resume, finish, and the "downloaded, can't run yet" banner;
+  - Settings → AI naming → Local: switch model, then the two-step Delete;
+  - quit mid-download and relaunch: Resume is offered;
+  - `~/Library/Application Support/dev.mcclease.queue/models/` ends with `<file>` and `<file>.sha256`, and no `.part`.
 
 ## Done: #32(a) (N8) OpenAI-compatible API provider (squash-merged from PR #92 as 90a5106; 3-OS tests and 4-target bundles green; #32 closed, (b) is #91)
 - **Design ruled by the architect under D-028** (D-029's #32 bullets): OpenAI-compatible only; the native Anthropic API is #32(b), filed as **#91** (P1, gates M4). The PR gets the `ci:bundle` label.
@@ -911,5 +922,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#31** (worktree branch `naming/31-model-manager`, on 90a5106, uncommitted): `codex-qa test` FAIL (2 fixed), review rounds 1–3 FAIL (3 + 3 + 1 fixed), round 4 PASS WITH NOTES. Next: the commit request to the architect; a `ci:bundle` draft PR.
-2. Then **#30** (llama-server runtime), #91 and the M4 audit (D-029 order).
+1. **#31:** PR #94 (`ci:bundle`); when `test` (3 OSes) and `bundle` (4 targets) are green on this handoff, squash-merge it (pre-approved), then sync `main`.
+2. Then **#30** (llama-server runtime: bundled llama.cpp, start on demand, stop when idle), then #91 and the M4 audit (D-029 order). #30 starts with a design ruling from the architect.
