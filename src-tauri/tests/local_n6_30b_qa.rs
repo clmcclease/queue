@@ -9,7 +9,7 @@ use queue_lib::{
     run_naming_job,
 };
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -295,7 +295,7 @@ fn a_download_can_start_while_the_model_loads_and_no_late_name_is_sent() {
 fn non_utf8_model_paths_remain_native_arguments() {
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
     let path = PathBuf::from(std::ffi::OsString::from_vec(b"/models/\xff.gguf".to_vec()));
-    let args = local::args(Path::new(&path), 4321, false);
+    let args = local::args(&path, 4321, false);
     assert_eq!(args[1].as_bytes(), b"/models/\xff.gguf");
 }
 
