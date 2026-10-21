@@ -34,6 +34,12 @@ pub struct Settings {
     pub api_base_url: String,
     #[serde(deserialize_with = "or_default")]
     pub api_model: String,
+    /// The local model the user chose (N7, #31); `None` follows this computer's suggestion.
+    #[serde(
+        deserialize_with = "or_default",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub local_model: Option<crate::models::ModelId>,
 }
 
 /// Reads one setting, or its default if it can't be understood (e.g. a format from a newer

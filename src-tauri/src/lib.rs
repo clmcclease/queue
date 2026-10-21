@@ -2,6 +2,7 @@ pub mod ai;
 pub mod download;
 pub mod link;
 pub mod meta;
+pub mod models;
 pub mod naming;
 pub mod proc;
 pub mod queue;
@@ -21,6 +22,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Emitted with the updated [`Item`] whenever background work (metadata, download) changes it.
 const ITEM_EVENT: &str = "queue://item";
+
+/// Emitted with the [`ModelStatus`] whenever the local model's download changes (#31).
+const MODEL_EVENT: &str = "queue://model";
 
 /// How long one `yt-dlp -J` may take before it's killed and the row fails.
 const FETCH_LIMIT: Duration = Duration::from_secs(90);
@@ -102,7 +106,8 @@ fn naming_worker(app: AppHandle, jobs: Receiver<(u64, u64)>) {
         }
         let resolve = ai::Resolving(|| {
             let settings = current_settings(&app).map_err(|_| ai::Unavailable::Off)?;
-            ai::endpoint(&settings, app.state::<Vault>().0.as_ref())
+            let local = local_model(&app, &settings);
+            ai::endpoint(&settings, app.state::<Vault>().0.as_ref(), local)
         });
         let state = app.state::<Mutex<Queue>>();
         if let Some(item) = run_naming_job_at(&state, id, Some(generation), &resolve) {
@@ -378,7 +383,12 @@ fn status_of_naming(app: &AppHandle) -> Result<NamingStatus, String> {
     let settings = current_settings(app)?;
     Ok(NamingStatus {
         provider: settings.naming_provider,
-        unavailable: ai::endpoint(&settings, app.state::<Vault>().0.as_ref()).err(),
+        unavailable: ai::endpoint(
+            &settings,
+            app.state::<Vault>().0.as_ref(),
+            local_model(app, &settings),
+        )
+        .err(),
     })
 }
 
@@ -500,6 +510,293 @@ async fn api_test_connection(app: AppHandle) -> Result<ai::Tested, String> {
     })
     .await
     .map_err(|_| "The test stopped unexpectedly.".to_string())?
+}
+
+/// The local model's download (#31): one at a time, with its cancel flag, and how the last one
+/// ended if it failed.
+#[derive(Default)]
+struct Downloads {
+    active: Option<(models::ModelId, Arc<AtomicBool>)>,
+    verifying: bool,
+    error: Option<(models::ModelId, String)>,
+}
+
+/// Where models live: the local (not roaming) app-data folder (D-029).
+fn models_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map(|d| d.join("models"))
+        .map_err(|_| "Queue couldn't find its data folder.".to_string())
+}
+
+/// The model in use: the user's choice, else this computer's suggestion, else the default.
+fn chosen_model(settings: &settings::Settings) -> models::ModelId {
+    settings
+        .local_model
+        .or_else(|| models::suggested(models::total_memory(), models::GPU))
+        .unwrap_or_default()
+}
+
+/// Whether the chosen local model is downloaded and checked.
+fn local_model(app: &AppHandle, settings: &settings::Settings) -> ai::LocalModel {
+    let pin = models::pinned(chosen_model(settings)).pin();
+    match models_dir(app).map(|dir| models::state(&dir, &pin)) {
+        Ok(models::State::Ready) => ai::LocalModel::Downloaded,
+        _ => ai::LocalModel::Missing,
+    }
+}
+
+/// One model, as Settings and the banner show it.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInfo {
+    id: models::ModelId,
+    name: &'static str,
+    file: &'static str,
+    source: String,
+    size: u64,
+    #[serde(flatten)]
+    state: models::State,
+    downloading: bool,
+    verifying: bool,
+    error: Option<String>,
+}
+
+/// The local model manager's state (#31).
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelStatus {
+    /// Rises with every snapshot, in the order they were taken; the window keeps only the
+    /// newest, whether it came as an event or a reply (#31 review).
+    rev: u64,
+    chosen: models::ModelId,
+    /// Whether the user picked it (else it's the suggestion or the default).
+    picked: bool,
+    suggested: Option<models::ModelId>,
+    dir: String,
+    models: Vec<ModelInfo>,
+}
+
+/// The last [`ModelStatus::rev`] handed out. Held while a snapshot is taken and, for an event,
+/// sent, so revisions follow the state and events go out in revision order.
+static MODEL_REV: Mutex<u64> = Mutex::new(0);
+
+fn model_status_now(app: &AppHandle) -> Result<ModelStatus, String> {
+    publish_model_status(app, false)
+}
+
+fn emit_model_status(app: &AppHandle) {
+    let _ = publish_model_status(app, true);
+}
+
+fn publish_model_status(app: &AppHandle, emit: bool) -> Result<ModelStatus, String> {
+    let mut rev = MODEL_REV
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *rev += 1;
+    let status = model_snapshot(app, *rev)?;
+    if emit {
+        let _ = app.emit(MODEL_EVENT, status.clone());
+    }
+    Ok(status)
+}
+
+fn model_snapshot(app: &AppHandle, rev: u64) -> Result<ModelStatus, String> {
+    let settings = current_settings(app)?;
+    let dir = models_dir(app)?;
+    let downloads = app
+        .state::<Mutex<Downloads>>()
+        .lock()
+        .map_err(|_| "download state lock poisoned".to_string())?
+        .clone_view();
+    Ok(ModelStatus {
+        rev,
+        chosen: chosen_model(&settings),
+        picked: settings.local_model.is_some(),
+        suggested: models::suggested(models::total_memory(), models::GPU),
+        dir: dir.display().to_string(),
+        models: models::PINS
+            .iter()
+            .map(|p| {
+                let active = downloads.0 == Some(p.id);
+                ModelInfo {
+                    id: p.id,
+                    name: p.name,
+                    file: p.file,
+                    source: format!("huggingface.co/{}", p.repo),
+                    size: p.size,
+                    state: models::state(&dir, &p.pin()),
+                    downloading: active,
+                    verifying: active && downloads.1,
+                    error: downloads
+                        .2
+                        .as_ref()
+                        .filter(|(id, _)| *id == p.id)
+                        .map(|(_, e)| e.clone()),
+                }
+            })
+            .collect(),
+    })
+}
+
+impl Downloads {
+    /// What the status needs, so the lock isn't held while the disk is read.
+    fn clone_view(
+        &self,
+    ) -> (
+        Option<models::ModelId>,
+        bool,
+        Option<(models::ModelId, String)>,
+    ) {
+        (
+            self.active.as_ref().map(|(id, _)| *id),
+            self.verifying,
+            self.error.clone(),
+        )
+    }
+}
+
+#[tauri::command]
+async fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
+    off_main(app, model_status_now).await
+}
+
+/// Saves the user's choice of local model (#31). A download already running carries on: it's
+/// a file, not a session.
+#[tauri::command]
+async fn settings_set_local_model(
+    app: AppHandle,
+    model: models::ModelId,
+) -> Result<ModelStatus, String> {
+    off_main(app, move |app| {
+        {
+            let state = app.state::<Settings>();
+            let mut current = state
+                .current
+                .lock()
+                .map_err(|_| "settings lock poisoned".to_string())?;
+            let mut next = current.clone();
+            next.local_model = Some(model);
+            if let Some(file) = &state.file {
+                next.save(file)
+                    .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+            }
+            *current = next;
+        }
+        // An event, not only the reply: a reply can lose to an older progress event (#31
+        // review), so the newest state always arrives as one.
+        emit_model_status(app);
+        model_status_now(app)
+    })
+    .await
+}
+
+/// Starts downloading a model (#31). This click is the user's consent: the banner and Settings
+/// say the size and the source next to the button. One download at a time; it runs on its own
+/// thread, counted as a quit-time job, and stops (keeping the partial file) on Cancel or quit.
+#[tauri::command]
+async fn model_download(app: AppHandle, model: models::ModelId) -> Result<ModelStatus, String> {
+    off_main(app, move |app| {
+        let dir = models_dir(app)?;
+        let flag = {
+            let state = app.state::<Mutex<Downloads>>();
+            let mut downloads = state
+                .lock()
+                .map_err(|_| "download state lock poisoned".to_string())?;
+            match &downloads.active {
+                Some((id, _)) if *id == model => None,
+                Some(_) => {
+                    return Err(
+                        "One model downloads at a time. Cancel the other download first.".into(),
+                    );
+                }
+                None => {
+                    let flag = Arc::new(AtomicBool::new(false));
+                    downloads.active = Some((model, flag.clone()));
+                    downloads.verifying = false;
+                    downloads.error = None;
+                    Some(flag)
+                }
+            }
+        };
+        if let Some(flag) = flag {
+            let Some(job) = proc::job() else {
+                if let Ok(mut d) = app.state::<Mutex<Downloads>>().lock() {
+                    d.active = None;
+                }
+                return Err("Queue is quitting.".into());
+            };
+            emit_model_status(app);
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let _job = job;
+                let pin = models::pinned(model).pin();
+                let mut last = std::time::Instant::now();
+                let result = proc::with_cancel(flag, || {
+                    models::download(&pin, &dir, &models::Options::default(), &mut |p| {
+                        if p == models::Progress::Verifying {
+                            if let Ok(mut d) = app.state::<Mutex<Downloads>>().lock() {
+                                d.verifying = true;
+                            }
+                        } else if last.elapsed() < Duration::from_millis(250) {
+                            return;
+                        }
+                        last = std::time::Instant::now();
+                        emit_model_status(&app);
+                    })
+                });
+                if let Ok(mut d) = app.state::<Mutex<Downloads>>().lock() {
+                    d.active = None;
+                    d.verifying = false;
+                    d.error = result.err().map(|e| (model, e));
+                }
+                emit_model_status(&app);
+            });
+        }
+        model_status_now(app)
+    })
+    .await
+}
+
+/// Cancels the running download; its partial file is kept, to resume.
+#[tauri::command]
+async fn model_cancel(app: AppHandle) -> Result<ModelStatus, String> {
+    off_main(app, |app| {
+        if let Ok(d) = app.state::<Mutex<Downloads>>().lock()
+            && let Some((_, flag)) = &d.active
+        {
+            flag.store(true, Ordering::SeqCst);
+        }
+        model_status_now(app)
+    })
+    .await
+}
+
+/// Deletes a model, its checksum file and any partial download (#31). Refused while that model
+/// downloads. #30 must stop llama-server before deleting the model it runs.
+#[tauri::command]
+async fn model_delete(app: AppHandle, model: models::ModelId) -> Result<ModelStatus, String> {
+    off_main(app, move |app| {
+        let busy = app
+            .state::<Mutex<Downloads>>()
+            .lock()
+            .map_err(|_| "download state lock poisoned".to_string())?
+            .active
+            .as_ref()
+            .is_some_and(|(id, _)| *id == model);
+        if busy {
+            return Err("Cancel the download first.".into());
+        }
+        models::delete(&models_dir(app)?, &models::pinned(model).pin())
+            .map_err(|e| format!("Couldn't delete the model: {e}"))?;
+        if let Ok(mut d) = app.state::<Mutex<Downloads>>().lock()
+            && d.error.as_ref().is_some_and(|(id, _)| *id == model)
+        {
+            d.error = None;
+        }
+        publish_model_status(app, true)
+    })
+    .await
 }
 
 /// The download format (D2, #11).
@@ -1148,6 +1445,7 @@ pub fn run() {
             let (names, named) = mpsc::channel();
             app.manage(Naming(Mutex::new(names)));
             app.manage(Vault(Box::new(secrets::Keyring::new())));
+            app.manage(Mutex::new(Downloads::default()));
             let (jobs, queued) = mpsc::channel();
             for job in refetch {
                 let _ = jobs.send(job);
@@ -1198,6 +1496,11 @@ pub fn run() {
             api_key_set,
             api_key_remove,
             api_test_connection,
+            model_status,
+            settings_set_local_model,
+            model_download,
+            model_cancel,
+            model_delete,
             open_download_folder,
             reveal_download
         ])

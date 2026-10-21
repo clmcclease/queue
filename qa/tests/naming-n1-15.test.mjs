@@ -47,6 +47,7 @@ async function mount(handler) {
     if (command === "settings_naming_template") return "title"; // #17
     if (command === "naming_previews") return [];
     if (command === "naming_status") return { provider: "off", unavailable: "off" }; // #25
+    if (command === "model_status") return null; // #31
     if (command === "settings_naming_provider") return "off";
     if (command === "settings_format") return "default";
     if (command === "queue_storage_problem") return null;

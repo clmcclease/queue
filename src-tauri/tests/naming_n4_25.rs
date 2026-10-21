@@ -194,7 +194,8 @@ fn n4_the_real_ask_path_names_the_row() {
     assert!(
         ai::endpoint(
             &queue_lib::settings::Settings::default(),
-            &queue_lib::secrets::Memory::default()
+            &queue_lib::secrets::Memory::default(),
+            ai::LocalModel::Missing
         )
         .is_err(),
         "and the local model isn't set up yet"

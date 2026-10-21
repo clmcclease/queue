@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import FolderPicker from "./components/FolderPicker";
+import ModelBanner from "./components/ModelBanner";
 import QueueList from "./components/QueueList";
 import SettingsPanel from "./components/SettingsPanel";
 import UrlBar from "./components/UrlBar";
@@ -26,6 +27,7 @@ import {
   type QueueItem,
 } from "./queue";
 import { namingStatus, type NamingStatus } from "./settings";
+import { useModelStatus } from "./models";
 import { useDownloadFolder } from "./useDownloadFolder";
 
 import { FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
@@ -64,6 +66,21 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+  // Every status the user's own save returned bumps this, so a refresh asked for earlier can't
+  // land on top of it.
+  const namingSaves = useRef(0);
+  function savedNaming(status: NamingStatus) {
+    namingSaves.current++;
+    setNaming(status);
+  }
+  // N7 (#31): the local model's download; a finished download or a delete changes the banner.
+  const [models, trackModels] = useModelStatus(() => {
+    const asked = namingSaves.current;
+    namingStatus().then(
+      (s) => s && asked === namingSaves.current && setNaming(s),
+      () => {},
+    );
+  });
   // What had focus when Settings opened (the gear, or the field for ⌘,). Recorded here, before
   // the queue goes inert, and restored after it isn't, so StrictMode's effect replay can't lose it.
   const settingsOpener = useRef<HTMLElement | null>(null);
@@ -385,11 +402,10 @@ export default function App() {
             Can't receive download updates ({disconnected}). Restart Queue to download.
           </p>
         )}
-        {naming?.provider === "local" && naming.unavailable === "model_missing" && (
-          <p role="status" data-role="naming-banner" className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
-            AI naming uses a local model that isn't downloaded yet, so names come from the rules for now.
-          </p>
-        )}
+        {naming?.provider === "local" &&
+          (naming.unavailable === "model_missing" || naming.unavailable === "runtime_missing") && (
+            <ModelBanner status={models} track={trackModels} onSettings={openSettings} />
+          )}
         {error && (
           <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
             {error}
@@ -420,7 +436,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {settingsOpen && <SettingsPanel folder={folder} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={setNaming} />}
+      {settingsOpen && <SettingsPanel folder={folder} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={savedNaming} models={models} onModels={trackModels} />}
     </main>
   );
 }

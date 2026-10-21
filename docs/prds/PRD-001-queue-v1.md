@@ -113,7 +113,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 
 ## 7. Non-functional requirements
 - **Cross-platform:** macOS (Apple Silicon and Intel), Windows 10/11 (x64), and Linux (x64; AppImage and .deb) from M1 on. CI builds all three for every push to `main` (and for PRs labelled `ci:bundle`), and runs the checks on every PR (D-011).
-- **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~2.5 GB default, ~1.3 GB small option; D-016) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
+- **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~2.5 GB default, ~1.4 GB small option; D-016) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
 - **Polished UI:** a single window with a dark/light theme that follows the system, smooth animations, thumbnails, and keyboard-first use (⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item). It follows each OS's conventions for window controls and menus.
 - **Resilient:** one item failing never stops the queue. yt-dlp self-updates (`yt-dlp -U`) at launch, at most once a day.
 - **Private:** no telemetry. With the default settings, the only network calls are yt-dlp itself, update checks, and the one-time model download. Item metadata is only sent to a third party if the user picks the API provider.
@@ -166,7 +166,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 4. **Subfolders:** not in v1. Moved to the Later backlog (N5).
 
 ## 13. Open questions
-1. Default local model: **provisionally Qwen3-4B-Instruct-2507** (Q4_K_M, 2.5 GB), with Qwen3.5-2B (1.3 GB) as the small option (D-016). To be confirmed by the N9 eval.
+1. Default local model: **provisionally Qwen3-4B-Instruct-2507** (Q4_K_M, 2.5 GB), with Qwen3.5-2B (1.4 GB) as the small option (D-016). To be confirmed by the N9 eval.
 2. Windows code signing: buy a certificate, or accept SmartScreen warnings for personal use?
 
 ## 14. Future
