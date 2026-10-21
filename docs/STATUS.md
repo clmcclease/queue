@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #30(a) (built, QA next); #30(b) is the morning's
+**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #30(a) (PR #95, merging); next is #30(b), the owner's morning
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -13,6 +13,35 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - ~19:35: the owner upgraded the Codex plan. Gates resumed with unchanged settings (GPT-6.1-Sol, high effort, from `scripts/codex-qa`).
   - **For the owner:** on #14's retry, `scripts/codex-qa` exited 0 although Codex hit the limit and wrote an empty report. Worth a fix: treat an empty report as a failure.
 - **Time rules (architect):** no new item after 04:30 unless it's small; stop coding at 05:30; the STATUS handoff with a "For the owner" list is done by 06:00–06:30.
+- **Outcome (the run stopped after #30(a), the architect's last item for the night):**
+  - **Merged to `main`:** #74 cancel, #77 long names, #14 Tier-1 engine, #15 names in rows, #33(a) AI prompt and eval, #17 templates, #25 provider setting, #32(a) OpenAI-compatible API, #31 model manager, and #30(a) the bundled llama-server (PR #95).
+  - **M2 and M3 are closed** (both audits YELLOW, no P1).
+  - **M4 still needs:**
+    - #30(b), the llama-server lifecycle (spec in D-029);
+    - #91, the Anthropic API;
+    - #33(b), the owner's labelled eval;
+    - the M4 audit.
+- **For the owner (morning):**
+  1. **Confirm or revise the provisional decisions:**
+     - D-029 (all bullets);
+     - PRD Q5's lifecycle amendment;
+     - D-016's runtime amendments for #30(b): Queue's own idle stop, the key in `LLAMA_API_KEY`, `--cache-ram 0`, `-ngl all` on Metal only;
+     - the pins: bartowski for both models, the small one 1.4 GB.
+  2. **Hand checks in the dev app (macOS):**
+     - #15: inline rename, Japanese IME, Download straight after a rename;
+     - #17: templates (an edited name is kept, Retry takes the new template);
+     - #25: Settings → AI naming, the banner, "Not set up yet" after reopening;
+     - #32: your own API key, Test connection (Ollama locally or OpenAI), then check Keychain Access shows only `dev.mcclease.queue` / `api-key`, and nothing after Remove;
+     - #31: **nobody has run a full model download** (try the 1.4 GB small model): Download, Cancel, Resume, quit mid-way and relaunch, two-step Delete, and `<file>.sha256` beside the model.
+  3. **#30(b):** build it to D-029's spec, including proving the CPU backend loads on Windows and Linux (a small pinned test GGUF in CI, or a hand check). Then hand-test the real 4B and 2B models: load time, first-ask latency against the 10 s budget, memory while loaded and after the idle stop.
+  4. **Native Windows and Linux:**
+     - #71's UI checks, now including running `llama/llama-server` from each installer;
+     - Local on Linux needs `libssl3`, `libgomp1` and glibc ≥ 2.35;
+     - check that Windows needs no VC++ redistributable for llama-server (#24).
+  5. **Files to write:** a Vulkan issue for M5 (assets and sizes in D-029's #30 ruling); macOS signing and `minimumSystemVersion` 13.3 (dylibs under `Contents/Resources` will matter for notarization, #24).
+  6. **`scripts/codex-qa`:** it exited 0 on an empty report (#14's retry, and #25's cut-off run). Worth a look.
+  7. **This Mac:** the Colima VM (no containers) held ~12 GB and caused the low-memory warnings; `colima stop` frees it.
+  8. **QA reports** are git-ignored and live in the worktrees under the sessions' scratchpads, named in each item's section: `wt17`, `wt25`, `wt33` (earlier session) and `wt30`, `wt31`, `wt32` (this one). Remove the worktrees once you no longer need the reports.
 
 ## Machine setup and working practice (moved to the new Mac on 2026-10-20)
 - **Done on the new Mac (2026-10-20):** `npm ci` has run, the sidecars are built and pass `--check`, and Codex is signed in. Rust 1.99.0 is at `~/.cargo/bin` (now on the owner's PATH via `~/.zshrc`; the agent shell needs `export PATH="$HOME/.cargo/bin:$PATH"`). Node 24.21.0 comes from fnm, which matches `mise.toml`, so mise isn't installed.
@@ -157,6 +186,20 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Its suggested tests are added: on both macOS targets, an accelerator list (Metal) and a stderr-only list pass, and output without a list fails.
   - Its other suggestions are for #30(b) or #71: running from each final installer, installer sizes (from this PR's bundle run), the installed Windows license matching the repo copy, and the CPU backend loading with a model.
 - **Checks after the fix (macOS arm64):** `--check` and `--check-llama` on the dev copy, the sidecar tests 36/36, `npm test` 296/296. Rust is unchanged since `cargo test` passed 476.
+- **The fix, 8d236b5**, approved by the architect under D-028 after review round 2 (the committed branch's FAIL was exactly this assertion; the fix itself PASS WITH NOTES). The reports are in the #30 worktree's `qa/reports/`, not the main checkout's. **CI run 39568218940 passed `test` on Linux, Windows and macOS and `bundle` on all 4 targets**, so `llama-server` loads natively everywhere. The squash is pre-approved.
+- **Installer sizes with llama.cpp (D-013, under 256 MB), from that run's artifacts, in MB of 10⁶ bytes (before → now):**
+
+  | Installer | Before | Now |
+  |---|---|---|
+  | dmg (macOS arm64) | 77–81 | 94.5 |
+  | dmg (macOS x64) | 77–81 | 98.1 |
+  | NSIS (Windows) | 49 | 62.8 |
+  | MSI (Windows) | — | 85.6 |
+  | deb (Linux) | 84 | 108.3 |
+  | rpm (Linux) | — | 108.3 |
+  | AppImage (Linux) | 155 | **180.9** |
+
+  All are under 256 MB. The AppImage is the one to watch: a Vulkan build would add about 40 MB.
 
 ## Done: #31 (N7) local model manager: first-run download (squash-merged from PR #94 as c66c6c0; 3-OS tests and 4-target bundles green)
 - **Design ruled by the architect under D-028** (D-029's #31 bullets). `Local` stays unavailable until #30: `ModelMissing` without the file, `RuntimeMissing` with it. The PR gets `ci:bundle` (per-OS memory detection).
@@ -970,5 +1013,5 @@ The owner asked for tests that actually run and pass on all three OSes, using ho
 - 2026-10-20 (new Mac): #74's Cancel passed all three checks: cancelling a real download, cancelling a manual download while Download all waited (the run moved on), and cancelling as one finished (it stayed Done).
 
 ## Next bounded action
-1. **#30(a)** (worktree branch `naming/30-llama-runtime`, on c66c6c0, uncommitted): `codex-qa test` and `review` PASS WITH NOTES (review P3s fixed). Next: the commit request to the architect; a `ci:bundle` draft PR. If the gates aren't done by about 05:30, push it as a draft and hand off.
-2. **Morning (owner):** #30(b), the llama-server lifecycle (spec in D-029), then the real-model hand tests; then #91 and the M4 audit.
+1. **#30(a):** PR #95 is green with this handoff; squash-merge it (pre-approved), then sync `main`. **That ends the overnight run.**
+2. **Owner, in the morning:** the "For the owner" list in "Overnight run" at the top. Then #30(b) (llama-server lifecycle, spec in D-029; start with a design ask about the CPU-backend proof), #91 (the Anthropic API, spec on the issue), #33(b), and the M4 audit.
