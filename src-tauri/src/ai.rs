@@ -124,6 +124,253 @@ struct Answer {
     filename: String,
 }
 
+/// Words that only advertise the upload (any case, any of these languages): a bracket or a
+/// trailing part made of nothing else is removed from an answer. Years count too, but never on
+/// their own ("Dune (2021)" stays).
+const AD_WORDS: [&str; 40] = [
+    "official",
+    "officiel",
+    "officielle",
+    "oficial",
+    "offiziell",
+    "offizielles",
+    "offizieller",
+    "resmi",
+    "официальный",
+    "официальное",
+    "официальная",
+    "клип",
+    "music",
+    "musik",
+    "musikvideo",
+    "video",
+    "vídeo",
+    "vidéo",
+    "videoclip",
+    "clip",
+    "clipe",
+    "klip",
+    "lyric",
+    "lyrics",
+    "visualizer",
+    "visualiser",
+    "audio",
+    "illustrated",
+    "mv",
+    "4k",
+    "hd",
+    "hq",
+    "uhd",
+    "1080p",
+    "60fps",
+    "remastered4k",
+    "musicvideo",
+    "officialvideo",
+    "hdr",
+    "8k",
+];
+
+/// Whether `text` is only advertising: every word an [`AD_WORDS`] word or a year, and at least
+/// one of them not a year.
+fn only_advertising(text: &str) -> bool {
+    // "M/V", also after sanitizing turned the slash into ⧸.
+    let lower = text.to_lowercase().replace(['/', '⧸'], "");
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let year = |w: &&str| w.len() == 4 && w.chars().all(|c| c.is_ascii_digit());
+    !words.is_empty()
+        && words.iter().all(|w| year(w) || AD_WORDS.contains(w))
+        && words.iter().any(|w| !year(w))
+}
+
+/// Emoji: the pictograph, emoticon, transport and supplemental blocks and flags, plus the
+/// text-range symbols shown as emoji by default (⚽, ✨, ✅, ⭐). Enclosed letters (🄰), chess
+/// pieces (🨀) and text symbols like ♡ stay.
+fn is_emoji(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x1F1E6..=0x1F1FF
+            | 0x1F300..=0x1F5FF
+            | 0x1F600..=0x1F64F
+            | 0x1F680..=0x1F6FF
+            | 0x1F900..=0x1F9FF
+            | 0x1FA70..=0x1FAFF
+            | 0x231A | 0x231B | 0x23E9..=0x23EC | 0x23F0 | 0x23F3 | 0x25FD | 0x25FE
+            | 0x2614 | 0x2615 | 0x2648..=0x2653 | 0x267F | 0x2693 | 0x26A1 | 0x26AA | 0x26AB
+            | 0x26BD | 0x26BE | 0x26C4 | 0x26C5 | 0x26CE | 0x26D4 | 0x26EA | 0x26F2 | 0x26F3
+            | 0x26F5 | 0x26FA | 0x26FD | 0x2705 | 0x270A | 0x270B | 0x2728 | 0x274C | 0x274E
+            | 0x2753..=0x2755 | 0x2757 | 0x2795..=0x2797 | 0x27B0 | 0x27BF | 0x2B1B | 0x2B1C
+            | 0x2B50 | 0x2B55
+    )
+}
+
+/// `text` without emoji. A symbol followed by the emoji presentation selector (❤️, ☀️) is
+/// one too, and a keycap (1️⃣) goes with the digit it caps; joiners go with them.
+fn without_emoji(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        let after = chars.get(i + 2).copied();
+        let keycap =
+            next == Some('\u{20E3}') || (next == Some('\u{FE0F}') && after == Some('\u{20E3}'));
+        if keycap {
+            i += if next == Some('\u{20E3}') { 2 } else { 3 };
+            continue;
+        }
+        if is_emoji(c) || (next == Some('\u{FE0F}') && !c.is_alphanumeric()) {
+            i += 1;
+            while matches!(
+                chars.get(i),
+                Some('\u{FE0F}' | '\u{200D}' | '\u{1F3FB}'..='\u{1F3FF}')
+            ) {
+                i += 1;
+            }
+            continue;
+        }
+        if !matches!(c, '\u{FE0F}' | '\u{200D}' | '\u{20E3}') {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The closing bracket for an opening one this cleanup looks at.
+fn closer(open: char) -> Option<char> {
+    match open {
+        '(' => Some(')'),
+        '[' => Some(']'),
+        '【' => Some('】'),
+        '［' => Some('］'),
+        _ => None,
+    }
+}
+
+/// `text` without the brackets that hold only advertising. Nested brackets of the same kind are
+/// matched by depth; an opening bracket that's never closed is kept as text, and the scan
+/// carries on after it.
+fn without_ad_brackets(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let Some(close) = closer(chars[i]) else {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        };
+        let open = chars[i];
+        let mut depth = 0;
+        let mut end = None;
+        for (j, &c) in chars.iter().enumerate().skip(i) {
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(j);
+                    break;
+                }
+            }
+        }
+        match end {
+            Some(j) => {
+                let inner: String = chars[i + 1..j].iter().collect();
+                if !only_advertising(&inner) {
+                    out.extend(&chars[i..=j]);
+                }
+                i = j + 1;
+            }
+            None => {
+                out.push(open);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// A title prepared like an answer, for comparing them: the same separators (an en dash for a
+/// spaced hyphen, `｜` for `|`, as sanitizing does) and advertising removed. Not sanitized or
+/// shortened: every script anywhere in the title counts (#33(b) review).
+fn tidy(text: &str) -> String {
+    strip_advertising(&text.replace('|', "｜").replace(" - ", " – "))
+}
+
+/// The lowercased words of `text` (letters and digits).
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Removes advertising a model left in an answer (owner, 2026-10-22): brackets and trailing
+/// parts that are only [`AD_WORDS`], a trailing "MV" or "Official MV", and emoji. Hashtags stay:
+/// an episode tag like "#12B" is content (architect, D-028, 2026-10-22). Never removes
+/// everything.
+fn strip_advertising(name: &str) -> String {
+    let out = without_emoji(&without_ad_brackets(name));
+    let mut text = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Trailing parts ("– Resmi Klip", "｜ Official Music Video") and a trailing "MV".
+    let separator = |c: char| c == '–' || c == '｜' || c.is_whitespace();
+    loop {
+        text = text.trim_end_matches(separator).to_owned();
+        let cut = [" – ", "｜"]
+            .iter()
+            .filter_map(|sep| text.rfind(sep))
+            .max()
+            .filter(|&i| {
+                // At least two words: a one-word part may be the title itself ("Offiziell").
+                let part = &text[i..];
+                only_advertising(part)
+                    && part
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|w| !w.is_empty())
+                        .count()
+                        >= 2
+                    && !text[..i].trim().is_empty()
+            });
+        if let Some(i) = cut {
+            text.truncate(i);
+            continue;
+        }
+        // "… Official MV" or "… MV", but only after other words of the same part: a song
+        // called "Official" (or "MV") stays.
+        let words: Vec<&str> = text.split(' ').collect();
+        let n = words.len();
+        let is = |w: &str, t: &str| w.to_lowercase().replace(['/', '⧸'], "") == t;
+        let drop = if n >= 3 && is(words[n - 1], "mv") && is(words[n - 2], "official") {
+            2
+        } else if n >= 2 && is(words[n - 1], "mv") {
+            1
+        } else {
+            0
+        };
+        if drop > 0
+            && !words[..n - drop]
+                .last()
+                .is_some_and(|w| *w == "–" || *w == "｜")
+        {
+            text = words[..n - drop].join(" ");
+            continue;
+        }
+        break;
+    }
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = text.trim_matches(separator);
+    if text.is_empty() {
+        name.to_owned()
+    } else {
+        text.to_owned()
+    }
+}
+
 /// Media extensions a model may wrongly add (D-016's failure mode); one trailing one is removed.
 const EXTENSIONS: [&str; 13] = [
     "mp4", "mkv", "webm", "m4a", "mp3", "opus", "wav", "flac", "mov", "avi", "aac", "ogg", "m4v",
@@ -159,6 +406,33 @@ pub fn parse(content: &str, title: Option<&str>) -> Result<String, Reject> {
     {
         clean = naming::sanitize(stem);
     }
+    // The style's separator is an en dash; a model's spaced hyphen ("Artist - Title") becomes
+    // one, and advertising the model left in is removed (owner, 2026-10-22). Hyphens inside
+    // words ("K-Pop", "3-cup") are left alone.
+    let dashed = clean.replace(" - ", " – ");
+    let mut stripped = strip_advertising(&dashed);
+    // Nothing the title itself keeps after the same cleanup is advertising: if stripping
+    // removed such a word (a song called "Official" in "Artist – Official MV"), the answer keeps
+    // everything (#33(b) review).
+    if let Some(title) = title {
+        let kept = words(&tidy(title));
+        let left = words(&stripped);
+        if words(&dashed)
+            .iter()
+            .any(|w| !left.contains(w) && kept.contains(w))
+        {
+            // Emoji carry no words, so they still go; advertising beside the protected word
+            // stays (accepted, architect, D-028, 2026-10-22).
+            stripped = without_emoji(&dashed);
+        }
+    }
+    let mut clean = naming::sanitize(&stripped);
+    // Removing advertising can leave a media extension at the end ("Song.mp4 (Official Video)").
+    if has_media_extension(&clean)
+        && let Some((stem, _)) = clean.rsplit_once('.')
+    {
+        clean = naming::sanitize(stem);
+    }
     if clean == naming::UNTITLED && !name.eq_ignore_ascii_case(naming::UNTITLED) {
         return Err(Reject::Empty);
     }
@@ -168,6 +442,9 @@ pub fn parse(content: &str, title: Option<&str>) -> Result<String, Reject> {
     // Every script the title is written in must still be in the answer, letter for letter: a
     // romanized answer with some other script mixed in doesn't count.
     if let Some(title) = title {
+        // Scripts in the title's advertising ("(Официальный клип)") needn't survive, since the
+        // same cleanup removes that advertising from the answer too (#33(b) review).
+        let title = tidy(title);
         let kept: Vec<Script> = clean.chars().filter_map(script).collect();
         if title.chars().filter_map(script).any(|s| !kept.contains(&s)) {
             return Err(Reject::LostScript);
@@ -784,6 +1061,169 @@ mod tests {
             Ok("⧸..⧸etc⧸passwd".into())
         );
         assert_eq!(ok(r#"{"filename":"CON"}"#), Ok("CON_".into()));
+        assert_eq!(
+            ok(r#"{"filename":"Aya Nakamura - Copines"}"#),
+            Ok("Aya Nakamura – Copines".into()),
+            "a spaced hyphen becomes the style's en dash"
+        );
+        assert_eq!(
+            ok(r#"{"filename":"K-Pop - 3-cup Chicken - Part 2"}"#),
+            Ok("K-Pop – 3-cup Chicken – Part 2".into()),
+            "hyphens inside words stay"
+        );
+        // The script check looks at the title without its advertising (#33(b) review): Cyrillic
+        // that's only "(Официальный клип)" may go, a translated Cyrillic title may not.
+        let with_title = |answer: &str, title: &str| {
+            parse(
+                &serde_json::json!({ "filename": answer }).to_string(),
+                Some(title),
+            )
+        };
+        assert_eq!(
+            with_title(
+                "Artist – Song (Официальный клип)",
+                "Artist - Song (Официальный клип)"
+            ),
+            Ok("Artist – Song".into())
+        );
+        assert_eq!(
+            with_title(
+                "Kino – Gruppa krovi",
+                "Кино - Группа крови (официальный клип)"
+            ),
+            Err(Reject::LostScript)
+        );
+        assert_eq!(
+            with_title(
+                "Кино – Группа крови",
+                "Кино - Группа крови (официальный клип)"
+            ),
+            Ok("Кино – Группа крови".into())
+        );
+        assert_eq!(
+            with_title("&TEAM – Good Boy", "&TEAM 'Good Boy' Official M/V"),
+            Ok("&TEAM – Good Boy".into())
+        );
+        // A word the title keeps is never stripped as advertising (#33(b) review round 2).
+        // Emoji still go; advertising left by the guard is accepted (architect, D-028,
+        // 2026-10-22).
+        assert_eq!(
+            with_title("Artist – Official MV 🔥", "Artist – Official"),
+            Ok("Artist – Official MV".into())
+        );
+        assert_eq!(
+            with_title("Artist – Official MV", "Artist – Official"),
+            Ok("Artist – Official MV".into()),
+            "parsing the result again changes nothing"
+        );
+        // Title and answer are cleaned alike: hyphens, ASCII and fullwidth bars.
+        for title in [
+            "Artist - Song - Официальный клип",
+            "Artist | Song | Официальный клип",
+            "Artist ｜ Song ｜ Официальный клип",
+        ] {
+            assert_eq!(
+                with_title("Artist - Song - Официальный клип", title),
+                Ok("Artist – Song".into()),
+                "{title}"
+            );
+        }
+        assert_eq!(
+            with_title(
+                "Kino – Gruppa krovi",
+                "Кино - Группа крови - Официальный клип"
+            ),
+            Err(Reject::LostScript),
+            "a romanized title still loses its script"
+        );
+        // The cleanup leaves hashtags alone (architect, D-028, 2026-10-22).
+        for name in [
+            "Artist – #Beautiful",
+            "Show #12B – Guest",
+            "Show #12B",
+            "Recipe of the day #shorts #viral",
+        ] {
+            assert_eq!(with_title(name, name), Ok(name.into()), "{name}");
+        }
+        // A hashtag left once a suffix goes stays, and parsing again changes nothing.
+        let once = with_title(
+            "Artist – Song #shorts – Official Music Video",
+            "Artist - Song #shorts - Official Music Video",
+        );
+        assert_eq!(once, Ok("Artist – Song #shorts".into()));
+        assert_eq!(
+            with_title(
+                "Artist – Song #shorts",
+                "Artist - Song #shorts - Official Music Video"
+            ),
+            once
+        );
+        // Every script in the title counts, however long it is (round 3).
+        let long_title = format!("{} 日本語", "a".repeat(151));
+        assert_eq!(
+            with_title("Plain Latin Name", &long_title),
+            Err(Reject::LostScript)
+        );
+        let long_bytes = format!("{} 日本語", "é".repeat(110));
+        assert_eq!(
+            with_title("Plain Latin Name", &long_bytes),
+            Err(Reject::LostScript)
+        );
+        // Advertising a model left in is removed; content that only looks like it stays.
+        for (answer, name) in [
+            (
+                "Aya Nakamura – Copines (Clip officiel)",
+                "Aya Nakamura – Copines",
+            ),
+            ("Cardi B - Up [Official Music Video]", "Cardi B – Up"),
+            (
+                "Дискотека Авария – Фантазёр (Официальный клип, 2018) [HQ]",
+                "Дискотека Авария – Фантазёр",
+            ),
+            ("Hırkamdaki İz – Resmi Klip", "Hırkamdaki İz"),
+            (
+                "Kerem Sav - İllüzyon | Resmi Video Klip | #yenişarkı",
+                "Kerem Sav – İllüzyon ｜ Resmi Video Klip ｜ #yenişarkı",
+            ),
+            ("&TEAM – Good Boy Official MV", "&TEAM – Good Boy"),
+            (
+                "UNCHILD 언차일드 – UNCHILD MV",
+                "UNCHILD 언차일드 – UNCHILD",
+            ),
+            (
+                "JJ - Wasted Love #Eurovision2025 🇦🇹",
+                "JJ – Wasted Love #Eurovision2025",
+            ),
+            (
+                "Neon Roller Skating ✨ 브이로그",
+                "Neon Roller Skating 브이로그",
+            ),
+            ("Dune (2021)", "Dune (2021)"),
+            (
+                "Radiohead – Creep (Live at Glastonbury 1997)",
+                "Radiohead – Creep (Live at Glastonbury 1997)",
+            ),
+            (
+                "FOURTH – ไม่ไหวแล้ว (Officially)",
+                "FOURTH – ไม่ไหวแล้ว (Officially)",
+            ),
+            (
+                "NewJeans – Hype Boy (Performance ver.1)",
+                "NewJeans – Hype Boy (Performance ver.1)",
+            ),
+            (
+                "BotW #102 – Windmills Shrine",
+                "BotW #102 – Windmills Shrine",
+            ),
+            ("CANDY TUNE – 総意♡So Free", "CANDY TUNE – 総意♡So Free"),
+            ("Official Video", "Official Video"),
+            ("Max Weidner - Offiziell", "Max Weidner – Offiziell"),
+            ("Artist – Song (Official M/V)", "Artist – Song"),
+            ("Artist – Song M/V", "Artist – Song"),
+        ] {
+            let json = serde_json::json!({ "filename": answer }).to_string();
+            assert_eq!(ok(&json), Ok(name.into()), "{answer}");
+        }
         assert_eq!(ok(r#"{"filename":"x","extra":1}"#), Ok("x".into()));
         assert_eq!(ok("Daft Punk – Get Lucky"), Err(Reject::NotJson));
         assert_eq!(ok(r#"{"name":"x"}"#), Err(Reject::NotJson));
