@@ -159,6 +159,11 @@ pub fn parse(content: &str, title: Option<&str>) -> Result<String, Reject> {
     {
         clean = naming::sanitize(stem);
     }
+    // The style's separator is an en dash; a model's spaced hyphen ("Artist - Title") becomes
+    // one (owner, 2026-10-22). Hyphens inside words ("K-Pop", "3-cup") are left alone. The en
+    // dash is two bytes longer, so the name is sanitized again to stay within the byte limit
+    // before the checks below see it (#33(b) review).
+    let clean = naming::sanitize(&clean.replace(" - ", " – "));
     if clean == naming::UNTITLED && !name.eq_ignore_ascii_case(naming::UNTITLED) {
         return Err(Reject::Empty);
     }
@@ -784,6 +789,42 @@ mod tests {
             Ok("⧸..⧸etc⧸passwd".into())
         );
         assert_eq!(ok(r#"{"filename":"CON"}"#), Ok("CON_".into()));
+        assert_eq!(
+            ok(r#"{"filename":"Aya Nakamura - Copines"}"#),
+            Ok("Aya Nakamura – Copines".into()),
+            "a spaced hyphen becomes the style's en dash"
+        );
+        assert_eq!(
+            ok(r#"{"filename":"K-Pop - 3-cup Chicken - Part 2"}"#),
+            Ok("K-Pop – 3-cup Chicken – Part 2".into()),
+            "hyphens inside words stay"
+        );
+        assert_eq!(
+            parse(
+                r#"{"filename":"Кино - Группа крови"}"#,
+                Some("Кино - Группа крови")
+            ),
+            Ok("Кино – Группа крови".into()),
+            "the script check is unaffected"
+        );
+        // At the byte limit, the longer dash can't push the title's script out after the checks:
+        // the name is bounded first, so a lost "日" is caught here.
+        let edge = format!("{} - {}日", "é".repeat(50), "a".repeat(94));
+        assert_eq!(edge.len(), naming::MAX_BYTES);
+        let json = serde_json::json!({ "filename": edge }).to_string();
+        let parsed = parse(&json, Some("日"));
+        assert!(
+            parsed.as_ref().is_err_and(|r| *r == Reject::LostScript)
+                || parsed
+                    .as_ref()
+                    .is_ok_and(|n| n.contains('日') && n.len() <= naming::MAX_BYTES),
+            "{parsed:?}"
+        );
+        let many = format!("{}{}", "ab - ".repeat(29), "end"); // 148 chars; 206 bytes once dashed
+        let json = serde_json::json!({ "filename": many }).to_string();
+        let name = parse(&json, None).unwrap();
+        assert!(name.len() <= naming::MAX_BYTES, "{} bytes", name.len());
+        assert_eq!(naming::sanitize(&name), name, "already sanitized");
         assert_eq!(ok(r#"{"filename":"x","extra":1}"#), Ok("x".into()));
         assert_eq!(ok("Daft Punk – Get Lucky"), Err(Reject::NotJson));
         assert_eq!(ok(r#"{"name":"x"}"#), Err(Reject::NotJson));
