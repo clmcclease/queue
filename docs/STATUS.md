@@ -1,8 +1,41 @@
 # Status
 
-**Updated:** 2026-10-21 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** second run under D-028: #96, #30(b) and #91 merged; M4 audit done (YELLOW); M4 open on #33(b) only
+**Updated:** 2026-10-22 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #33(b): the dash fix in PR #106; M4 open on #33 only
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## #33(b) first results (2026-10-22; owner present in the morning, then at work with decisions routed to the architect under D-028)
+- **The eval set (outside the repo, by the owner's choice):** 300 links from the owner's CSV, collected with #102's tool into `~/Developer/sandbox/queue-eval-33b/` (63% non-English). Names were suggested by the 4B and reviewed by Claude against the style rules. **The owner approved every changed English row,** capitalized 7 lowercase names, and couldn't judge the non-English rows, which are Claude-reviewed only. 100 items are held out for measurement and were never used for tuning. The 54-title seed stays in the repo (owner).
+- **What was tried (held-out 100 unless noted; owner's Mac, macOS arm64, Metal, full prompt):**
+  - Before: 4B ~56%, 2B ~12% (on all 300).
+  - **Dash fix** (this PR): 4B 66%, 2B 28%.
+  - Prompt rewrites (3 versions, training 200): no gain; the original prompt is kept.
+  - Advertising stripping in the cleanup: 4B 71%, 2B 34%, but **parked as #104** by the architect after six Codex rounds kept finding cases where it deletes content (branch `naming/33b-prompt-dash` @ baa2df6).
+  - Qwen3 8B (5 GB): 45%, slower. **Rejected.**
+- **Owner decisions (2026-10-22):**
+  - Dash fix: yes.
+  - Advertising stripping: yes, then parked by the architect.
+  - No eval sets in the repo, except the 54-title seed.
+  - A model picker in Settings later: #103 (M5).
+  - Long term the owner expects to use their own OpenAI key through the OpenAI-compatible provider.
+  - Route decisions to the architect and pause only for what it can't decide.
+  - "go" to one review round beyond the architect's cap (round 7).
+- **PR #106 (dash fix), branch `naming/33b-dash`:** `ai::parse` turns a model's spaced hyphen into an en dash and re-sanitizes, so the name stays within 200 bytes before the checks. Tests: 3 dash cases and 2 byte-limit cases. Checks (macOS arm64): fmt, clippy `-D warnings`, `cargo test` 548 passed / 0 failed / 32 ignored, `npm test` 312/312.
+- **QA (reports in each worktree's `qa/reports/`):**
+  - Stripping (`wtprompt`): test pass `20261022-113101-test-BQ5P` FAIL, its 11 tests applied on the parked branch; review rounds 1–5 FAIL (`…114743-aESB`, `…115844-5Mwu`, `…121021-fA1b`, `…122926-MYKu`, `…124111-FQQN`).
+  - Dash fix (`wtdash`): round 6 FAIL (`…124926-review-WLVn`, the byte limit; fixed), round 7 **PASS WITH NOTES** (`…125747-review-RJr0`). **Accepted P3: #105** (a double extension at exactly the byte limit).
+- **Architect rulings (D-028):**
+  - Dropped hashtags from the stripping, then parked the stripping as #104.
+  - Capped the item at six review rounds; the owner allowed a seventh.
+  - Accepted #105 as a P3.
+  - Approved #106's commit, PR and this handoff; the squash is pre-approved on green `test` ×3. If CI fails and the fix is code, it holds for the owner.
+- **Next bounded action:** squash-merge PR #106 once `test` ×3 is green on its head (pre-approved). Then #33 waits on the owner.
+- **For the owner:**
+  1. **#33's target is ≥90% accepted unedited; the held-out result is 66% (4B) / 28% (2B).** Decide: keep the 4B and restate the target, tune against your labelled set, or choose a different model via #103. D-016 stays provisional until then.
+  2. **#33(b)** still owes the CPU-only Windows/Linux runs of both pinned models with the full prompt.
+  3. **#104:** choose (a) a narrow allow-list, (b) a title-aware rework, or (c) drop it.
+  4. **In the dev app, after the merge:** a row named by the 4B shows "Artist – Title" with an en dash, and an edited name is untouched.
+  5. **Carried:** the second run's list below (#31, #30(b) and #91 hand checks; the D-029, PRD Q5 and D-016 confirmations; the post-PASS test-only-fix proposal; `scripts/codex-qa`'s exit code on an empty report). The sandbox folder `~/Developer/sandbox/queue-eval-33b/` holds the set, the runs and the 8B file (~5 GB); delete it when you're done with it.
 
 ## Second run (2026-10-21, until M4 is complete or 17:00, under D-028)
 - **Owner's instruction (11:15):** "have the architect agent take over for me again and push to the completion of this milestone or till 1700, whichever comes first." The owner approved #96's commit, push and draft PR.
@@ -34,7 +67,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **Follow-ups filed:** #97 (Vulkan, M5) and #100 (#91 follow-ups, M5).
   - **M4 stays open on #33 only.**
 - **#101 (the M4 audit docs) merged** as f911b76; `main` was synced at 13:54, so the architect's one extra item, the #33(b) collector, was started.
-- **Next bounded action:** squash-merge PR #102 (the #33(b) collector) once `test` ×3 is green on its head, by 16:45 (pre-approved). If it isn't green by 16:30, it stays a draft and this line stays "squash on green". After that the run is over: M4 waits only on the owner's #33(b).
+- **#102 (the #33(b) collector) merged** as 4e08e62 on 2026-10-21. The current next action is in the 2026-10-22 section above.
 
 ## Done in the second run: #33(b) metadata collector (PR #102, branch `naming/33b-collector`; #33 stays open)
 - **What it is:** a test-only tool in `src-tauri/tests/naming_eval_33.rs`. No app code and no new dependencies.

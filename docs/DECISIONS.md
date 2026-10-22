@@ -212,3 +212,17 @@ The owner found this while testing #31 in the app, and chose to keep it:
 - **Rule:** each download reads the download folder once, when it starts, and places its finished file there (D-014). Changing the folder in Settings applies to downloads that start afterwards. A running download is never moved to the new folder.
 - **Why:** a file never lands in a folder the user picked after starting it, perhaps by mistake, and a job never ends up half in one place and half in another. Browsers behave the same way.
 - **In the app:** while a download is running, Settings shows "Downloads in progress keep the folder they started in." under the folder picker.
+
+## D-031 #33(b) first results: the owner's set, the dash fix, parked stripping — Confirmed by the owner (2026-10-22), with architect additions under D-028
+- The eval set is ~300 real titles from the owner's links, collected with #102's tool and kept outside the repo by the owner's choice; 100 are held out for measurement. The names were suggested by the 4B, reviewed by Claude against the style rules, and approved by the owner on every changed English row; the non-English rows are Claude-reviewed only. The 54-title author-written seed stays in the repo as the shape and regression set. Owner, 2026-10-22.
+- **Dash fix:** `ai::parse` turns a spaced hyphen in a model's answer into the style's en dash. Hyphens inside words stay. The name is sanitized again after the replacement, so it's within `MAX_BYTES` before the Empty, Fallback and LostScript checks. Owner approved; shipped in PR #106. Accepted P3 (#105): at exactly the byte limit, a non-extension suffix can truncate to a media extension after the extension strip, giving a cosmetic double extension. Decided by the architect under D-028.
+- **Advertising stripping** (tag-only brackets, a trailing "Official MV", emoji) was approved by the owner, but the architect parked it as #104 (M5) after six Codex rounds kept finding cases where it deletes content. Branch `naming/33b-prompt-dash` @ baa2df6 holds the work. Decided by the architect under D-028.
+- **Measured on the held-out 100** (owner's Mac, macOS arm64, Metal, full prompt):
+
+  | | Before | Dash fix | Dash fix + stripping |
+  |---|---|---|---|
+  | 4B | ~56% | 66% | 71% |
+  | 2B | ~12% | 28% | 34% |
+
+  The pins don't change, an 8B model is rejected, and a model picker is #103 (M5). Owner, 2026-10-22. What these numbers mean against #33's "≥90% accepted unedited" target is the owner's call; D-016 stays provisional.
+- **QA on the dash fix:** round 6 FAIL (`20261022-124926-review-WLVn`, the byte limit; fixed), round 7 PASS WITH NOTES (`20261022-125747-review-RJr0`). Round 7 ran on the owner's instruction, beyond the architect's cap.
