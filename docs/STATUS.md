@@ -1,8 +1,33 @@
 # Status
 
-**Updated:** 2026-10-22 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** #33(b): the dash fix in PR #106; M4 open on #33 only
+**Updated:** 2026-10-22 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** owner confirmations and the codex-qa exit-status fix (D-032); M4 open on #33 only
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## Owner confirmations (2026-10-22 afternoon, owner present)
+- **Decided (D-032):**
+  - Keep the 4B as the default for now. **D-016 confirmed**, including #30(b)'s runtime flags.
+  - **D-029 confirmed**: every architect bullet.
+  - **PRD Q5's lifecycle** is confirmed as built.
+  - **#104:** option (a), a narrow allow-list of known tags (M5).
+  - **Post-PASS test-only-fix proposal:** rejected. Every change after a PASS still gets a fresh review.
+  - **`scripts/codex-qa`'s exit code:** fix it.
+- **The codex-qa fix:** the script already exited 3 on an empty report, as reproduced with a fake `codex` on PATH. The exit 0s came from callers piping it through `| tail` or running `; echo` after it. Changes:
+  - The script's last line is now `codex-qa exit: <status>`.
+  - `.claude/agents/codex-qa.md` runs the script unpiped and reads that line.
+  - `docs/QA.md` says both.
+- **Checks (macOS arm64):**
+  - `bash -n`.
+  - A fake `codex` that writes nothing: exit 3, and `codex-qa exit: 3` shows through `| tail`, where the pipe itself returned 0.
+  - A fake `codex` that writes a report: `codex-qa exit: 0`.
+  - The usage text is unchanged.
+- **Still the owner's:**
+  - Whether #33 (and with it M4) closes at 66% with the 90% target restated, or stays open.
+  - The CPU-only Windows/Linux runs.
+  - The dev-app hand checks (#31, #30(b), #91, the en dash).
+  - #100's key slot.
+  - Deleting the sandbox folder.
+- **Next bounded action:** the docs PR for these confirmations merges once `test` ×3 is green. Then wait for the owner on #33. #104's allow-list is the next code item when it's scheduled.
 
 ## #33(b) first results (2026-10-22; owner present in the morning, then at work with decisions routed to the architect under D-028)
 - **The eval set (outside the repo, by the owner's choice):** 300 links from the owner's CSV, collected with #102's tool into `~/Developer/sandbox/queue-eval-33b/` (63% non-English). Names were suggested by the 4B and reviewed by Claude against the style rules. **The owner approved every changed English row,** capitalized 7 lowercase names, and couldn't judge the non-English rows, which are Claude-reviewed only. 100 items are held out for measurement and were never used for tuning. The 54-title seed stays in the repo (owner).
