@@ -134,7 +134,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 
 ## 9. Success metrics (personal-project scale)
 - No manual renames needed in a typical week.
-- On the eval set, at least 90% of AI names are accepted unedited. Local naming takes under 3s per item on a recent laptop.
+- On the owner's labelled eval set, at least 65% of AI names match the owner's label (restated 2026-10-22 from "90% accepted unedited", D-033: a large cloud model scored 58–70% on the same set, and most misses are matters of taste). Local naming takes under 3s per item on a recent laptop.
 - Under 5% of downloads fail (excluding the source being unavailable).
 - Adding 10 links and starting the queue takes under 30 seconds.
 

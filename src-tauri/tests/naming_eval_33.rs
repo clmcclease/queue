@@ -7,8 +7,11 @@
 //!   cargo test --test naming_eval_33 -- --ignored --nocapture
 //! ```
 //!
-//! `QUEUE_EVAL_KEY` adds a key for an API provider. The run fails below 90% accepted (PRD §9);
-//! latency is printed, not asserted (it depends on the hardware).
+//! `QUEUE_EVAL_KEY` adds a key for an API provider. `QUEUE_EVAL_SET` scores another set of the
+//! same shape instead, such as the owner's labelled set, which stays outside the repo (D-031).
+//! The run fails below 65% accepted, the target restated on the owner's set (PRD §9, D-033); the
+//! author-written seed scores lower and is a regression set, not the target. Latency is printed,
+//! not asserted (it depends on the hardware).
 //!
 //! #33(b)'s collector fetches the real metadata of a list of links, for the owner to label. It
 //! runs the pinned yt-dlp exactly as the app does (`meta::fetch`), one link at a time, and writes
@@ -52,8 +55,15 @@ fn n9_the_eval_set_is_well_formed() {
         "at least 30% non-English: {other}/{}",
         cases.len()
     );
+    check_labels(&cases);
+}
+
+/// Every case has a unique title, and every listed name is one Queue could produce. Run on the
+/// seed and on a `QUEUE_EVAL_SET` before any request is made.
+fn check_labels(cases: &[Case]) {
+    assert!(!cases.is_empty(), "the set is empty");
     let mut titles = std::collections::HashSet::new();
-    for case in &cases {
+    for case in cases {
         let title = case.meta.title.as_deref().expect("every case has a title");
         assert!(titles.insert(title), "duplicate: {title}");
         for name in std::iter::once(&case.expected).chain(&case.accept) {
@@ -83,7 +93,11 @@ fn n9_eval_scores_a_model() {
         model: std::env::var("QUEUE_EVAL_MODEL").unwrap_or_default(),
         key: std::env::var("QUEUE_EVAL_KEY").ok(),
     };
-    let cases = cases();
+    let cases: Vec<Case> = match std::env::var_os("QUEUE_EVAL_SET") {
+        Some(path) => serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap(),
+        None => cases(),
+    };
+    check_labels(&cases);
     let mut accepted = 0;
     // D-016's measures: how answers fail, and cold (first) vs warm latency.
     let (mut invalid_json, mut fallback, mut errors, mut romanized, mut extension) =
@@ -167,7 +181,7 @@ fn n9_eval_scores_a_model() {
          dropped episode or feat. {dropped}, prompt injection {injection}, style drift {drift}"
     );
     println!("made-up details: manual review of the ✗ lines above (not detected automatically)");
-    assert!(accepted * 10 >= n * 9, "below 90% accepted: {percent}%");
+    assert!(accepted * 100 >= n * 65, "below 65% accepted: {percent}%");
     assert!(
         at(0.5) < Duration::from_secs(60),
         "sanity: the median answer took over a minute"

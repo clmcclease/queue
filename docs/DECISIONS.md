@@ -235,3 +235,18 @@ The owner found this while testing #31 in the app, and chose to keep it:
 - **#104 (advertising stripping):** option (a), a narrow allow-list of known tags. Only tags on a fixed list are stripped; anything else in the title is kept. It stays in M5 and gets its own Codex review.
 - **Post-PASS test-only fixes:** the proposal is rejected. Every change after a PASS, test-only ones included, gets a fresh Codex review.
 - **`scripts/codex-qa`'s exit code:** fixed. The script already exited 3 on an empty report; the exit 0s seen on #14's retry came from callers that piped its output (`| tail`) or ran `; echo` after it. The script's last line is now `codex-qa exit: <status>`, and the codex-qa agent runs it unpiped.
+
+## D-033 #33's target is restated to 65% on the owner's set; #33 and M4 close — Confirmed (2026-10-22)
+- **Target:** at least 65% of names match the owner's label on the held-out 100 of their labelled set, which stays outside the repo (D-031). It replaces "≥90% accepted unedited" (PRD §9). The latency target (<3 s per item) is unchanged. The owner's reasoning: a much larger cloud model does no better, so 90% was beyond what naming can reach on real titles, not just beyond a small model.
+- **Evidence (held-out 100, owner's Mac, Metal for the local runs):**
+
+  | Model and prompt | Exact match | Ignoring case and punctuation |
+  |---|---|---|
+  | 4B, shipping prompt | 66% | 66% |
+  | 4B, "keep the title's own wording" prompt | 34% | 39% |
+  | `gpt-6-luna` (OpenAI), shipping prompt | 58% | 70% |
+  | `gpt-6-luna`, "keep the title's own wording" prompt | 58% | 66% |
+
+  Luna's misses are mostly matters of taste: recasing ("MEANT TO BE" → "Meant to Be"), shortened titles, a dropped "Trailer". It had a few real errors: a wrong artist, a channel name used as the artist, and dropped Korean text. The "keep the title's own wording" prompt was tuned on the 200 training titles (+6 points for Luna there) and didn't hold on the held-out 100, so the shipping prompt stays. Luna's runs used a throwaway build that sent `max_completion_tokens` instead of `max_tokens` and no `temperature`; the app's own 400 with OpenAI's reasoning models is #108.
+- **Result:** the 4B passes at 66% (in-repo runner with `QUEUE_EVAL_SET`, 100% valid JSON, warm p50 0.6 s). The 2B (28%) stays the small option for low-memory machines. #33 closes and M4 closes. Still open, not blocking: the CPU-only Windows/Linux runs of both models, now an M5 check.
+- **The runner** (`tests/naming_eval_33.rs`) asserts 65% and takes `QUEUE_EVAL_SET` to score a set outside the repo. The 54-title seed is a regression set; it scored lower (44% on the 4B, before the dash fix) because its labels are author-written.

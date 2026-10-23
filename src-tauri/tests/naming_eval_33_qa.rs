@@ -107,6 +107,8 @@ fn run_fixture(good: usize, use_alternatives: bool) -> std::process::Output {
         .env("QUEUE_EVAL_ENDPOINT", url)
         .env("QUEUE_EVAL_MODEL", "qa-eval-model")
         .env_remove("QUEUE_EVAL_KEY")
+        // The fixture answers for the seed, whatever set the developer's shell points at.
+        .env_remove("QUEUE_EVAL_SET")
         .output()
         .unwrap();
     assert_eq!(server.join().unwrap(), total);
@@ -134,9 +136,9 @@ fn n9_runner_accepts_listed_alternatives_and_reports_latency_quantiles() {
 }
 
 #[test]
-fn n9_runner_passes_at_the_first_integer_score_above_90_percent() {
+fn n9_runner_passes_at_the_first_integer_score_at_65_percent() {
     let total = cases().len();
-    let minimum = (total * 9).div_ceil(10);
+    let minimum = (total * 65).div_ceil(100);
     let output = run_fixture(minimum, false);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -151,9 +153,9 @@ fn n9_runner_passes_at_the_first_integer_score_above_90_percent() {
 }
 
 #[test]
-fn n9_runner_fails_below_90_percent_instead_of_dropping_invalid_responses() {
+fn n9_runner_fails_below_65_percent_instead_of_dropping_invalid_responses() {
     let total = cases().len();
-    let below = (total * 9).div_ceil(10) - 1;
+    let below = (total * 65).div_ceil(100) - 1;
     let output = run_fixture(below, false);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!output.status.success(), "{stdout}");
@@ -161,5 +163,5 @@ fn n9_runner_fails_below_90_percent_instead_of_dropping_invalid_responses() {
         stdout.contains(&format!("accepted {below}/{total} ")),
         "{stdout}"
     );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("below 90% accepted"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("below 65% accepted"));
 }
