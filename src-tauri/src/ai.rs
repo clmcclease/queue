@@ -16,8 +16,12 @@ use crate::settings::Settings;
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest response read; a name is a few hundred bytes of JSON.
 const MAX_BODY: u64 = 64 * 1024;
-/// Enough for `{"filename": "…"}` with a 150-character name.
+/// Enough for `{"filename": "…"}` with a 150-character name. Every OpenAI-compatible host but
+/// api.openai.com (D-034).
 const MAX_TOKENS: u32 = 128;
+/// api.openai.com's budget (#108, D-034): its reasoning models think before answering (~40–50
+/// tokens observed) and the thinking shares the budget, as for Anthropic.
+const OPENAI_MAX_TOKENS: u32 = 1024;
 /// The Anthropic API's budget (#91): its current models think before answering by default, and
 /// thinking shares `max_tokens`, so 128 could leave no room for the name (D-029).
 const ANTHROPIC_MAX_TOKENS: u32 = 1024;
@@ -579,13 +583,7 @@ pub fn ask_content(endpoint: &Endpoint, meta: &Meta, timeout: Duration) -> Resul
             if let Some(key) = &endpoint.key {
                 request = request.header("Authorization", &format!("Bearer {key}"));
             }
-            serde_json::json!({
-                "model": endpoint.model,
-                "messages": prompt(meta),
-                "response_format": response_format(),
-                "temperature": 0,
-                "max_tokens": MAX_TOKENS,
-            })
+            chat_body(&endpoint.model, meta, &url)
         }
         ApiKind::Anthropic => {
             let Some(key) = &endpoint.key else {
@@ -614,6 +612,26 @@ pub fn ask_content(endpoint: &Endpoint, meta: &Meta, timeout: Duration) -> Resul
         ApiKind::Anthropic => messages_content(&text),
     };
     content.ok_or_else(|| "The naming service sent an unreadable answer.".to_owned())
+}
+
+/// The chat request for `url` (D-034). api.openai.com's reasoning models refuse `max_tokens` and
+/// any `temperature` but the default (HTTP 400, #108), so that host gets `max_completion_tokens`
+/// and no `temperature`. Every other host (the bundled llama-server, Ollama, LM Studio,
+/// OpenRouter) keeps `temperature: 0` and `max_tokens`, as D-016 set them.
+pub fn chat_body(model: &str, meta: &Meta, url: &url::Url) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": prompt(meta),
+        "response_format": response_format(),
+    });
+    // `url` lowercases the host when it parses it.
+    if url.host_str() == Some("api.openai.com") {
+        body["max_completion_tokens"] = OPENAI_MAX_TOKENS.into();
+    } else {
+        body["temperature"] = 0.into();
+        body["max_tokens"] = MAX_TOKENS.into();
+    }
+    body
 }
 
 /// The Messages API request (#91, D-029): the same system rules and the same JSON data as
@@ -728,6 +746,66 @@ fn chat_content(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn body_for(base: &str) -> serde_json::Value {
+        chat_body("m", &titled("A"), &chat_url(base).unwrap())
+    }
+
+    fn keys(body: &serde_json::Value) -> Vec<&str> {
+        let mut keys: Vec<&str> = body
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    #[test]
+    fn api_openai_com_gets_max_completion_tokens_and_no_temperature() {
+        for base in ["https://api.openai.com/v1", "https://API.OPENAI.COM/v1"] {
+            let body = body_for(base);
+            assert_eq!(
+                keys(&body),
+                [
+                    "max_completion_tokens",
+                    "messages",
+                    "model",
+                    "response_format"
+                ],
+                "{base}"
+            );
+            assert_eq!(body["max_completion_tokens"], 1024, "{base}");
+        }
+    }
+
+    #[test]
+    fn every_other_host_keeps_temperature_and_max_tokens() {
+        for base in [
+            "http://127.0.0.1:1234/v1",
+            "https://openrouter.ai/api/v1",
+            "https://evil-api.openai.com/v1",
+            "https://api.openai.com.example/v1",
+        ] {
+            let body = body_for(base);
+            assert_eq!(
+                keys(&body),
+                [
+                    "max_tokens",
+                    "messages",
+                    "model",
+                    "response_format",
+                    "temperature"
+                ],
+                "{base}"
+            );
+            assert_eq!(body["temperature"], 0, "{base}");
+            assert_eq!(body["max_tokens"], 128, "{base}");
+            assert_eq!(body["messages"], serde_json::json!(prompt(&titled("A"))));
+            assert_eq!(body["response_format"], response_format());
+        }
+    }
 
     fn titled(title: &str) -> Meta {
         Meta {
