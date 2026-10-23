@@ -22,6 +22,10 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - `QUEUE_QA_REAL_LLAMA`: the 4B loads in 1.2 s and answers in 0.5 s.
   - QA `test "#108"`: **PASS WITH NOTES** (`20261023-134024-test-Cm1t`), no production bug. Its 7 tests were added as `tests/api_reasoning_n8_108_qa.rs` (7 passed): host selection, the other hosts' request, the wire, reasoning response fields, sanitizing, invalid answers and timeout fallback. Its one note (D-034 not recorded) came from a snapshot taken before the docs were written.
   - The key was read from the Keychain into the environment at run time; it never went into a file or log. About 200 more Luna requests, roughly 900 in total.
+## #109 (third run, 2026-10-23; branch `ui/109-base-url`)
+- **What changed:** with nothing saved, Settings → AI naming → API fills the service's default base URL in as a real value, and the placeholder is gone. The filled-in default alone isn't an unsaved change; typing a model enables Save, which stores both. A saved URL is never replaced. The key-prefix suggestion isn't built (architect).
+- **Checks (macOS arm64):** `tsc`, `npm run build`, `npm test` 314 passed, 0 failed, including 2 new tests in `qa/tests/api-n8-32.test.mjs`.
+- **QA:** `test "#109"` **PASS WITH NOTES** (`20261023-134939-test-pjPN`), no bugs. Its 12 tests were added as `qa/tests/api-base-url-109-qa.test.mjs` (12 passed): defaults for both services, custom URLs, key-first saves, retries, switching services, reopening.
 
 ## #33 and M4 close (2026-10-22 evening, owner present)
 - **Comparison with a cloud model:** the owner's `gpt-6-luna` key, with up to 10,000 runs approved. 58% exact and 70% ignoring case on the held-out 100, against the 4B's 66%. A "keep the title's own wording" prompt helped on the training titles but not on the held-out set, and it halved the 4B's score, so the shipping prompt stays. About 700 requests used. Details are in D-033.

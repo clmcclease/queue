@@ -49,7 +49,9 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
         if (cancelled || !s) return;
         setSetup(s);
         setKind(s.kind);
-        setBaseUrl(s.baseUrl);
+        // With nothing saved, the service's default address is filled in as a real value (#109): as
+        // a placeholder it looked saved, and Queue stayed "Not set up yet".
+        setBaseUrl(s.baseUrl || DEFAULT_BASE_URL[s.kind]);
         setModel(s.model);
       },
       (e) => !cancelled && setError(String(e)),
@@ -93,8 +95,10 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
   }
 
   const saved = setup !== null && setup.baseUrl !== "" && setup.model !== "";
+  // The default filled in on load isn't a change by itself; Save stores it with the model.
+  const savedUrl = setup === null ? "" : setup.baseUrl || DEFAULT_BASE_URL[setup.kind];
   const unsaved =
-    setup !== null && (kind !== setup.kind || baseUrl.trim() !== setup.baseUrl || model.trim() !== setup.model);
+    setup !== null && (kind !== setup.kind || baseUrl.trim() !== savedUrl || model.trim() !== setup.model);
   const anthropic = kind === "anthropic";
 
   return (
@@ -124,7 +128,6 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           data-role="api-base-url"
           className={field}
           value={baseUrl}
-          placeholder={DEFAULT_BASE_URL[kind]}
           spellCheck={false}
           disabled={setup === null || busy}
           onChange={(e) => setBaseUrl(e.target.value)}

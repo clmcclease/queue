@@ -86,7 +86,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #104 | N9 | P2 | naming | **Strip advertising from AI answers (parked from #33(b))** — Tag-only brackets, a trailing "Official MV", emoji; +5 points on the held-out set, parked after six QA rounds found content-deleting edge cases (branch `naming/33b-prompt-dash` @ baa2df6). Owner chose (a), a narrow allow-list of known tags (D-032). |
 | #105 | N9 | P2 | naming | **ai::parse: strip a media extension after the dash normalization and byte cap** — Accepted P3 from #106's review: at exactly the byte limit a cosmetic double extension is possible; move the extension strip after the dash re-sanitize. |
 | #108 | N8 | P1 | naming | **OpenAI-compatible requests fail with HTTP 400 on OpenAI's reasoning models** — Fixed by host (D-034): `api.openai.com` gets `max_completion_tokens` 1024 and no `temperature`; every other host keeps today's body. Live-checked with `gpt-6-luna`. |
-| #109 | N8 | P2 | ui | **API setup: an empty Base URL looks filled in** — The default shows as placeholder text, so it reads as saved. Fill the default in as a real value; optionally suggest the service from an empty field's key prefix. |
+| #109 | N8 | P2 | ui | **API setup: an empty Base URL looks filled in** — Fixed: with nothing saved, the service's default address is filled in as a real value (no placeholder), and Save stores it with the model. A saved URL is never replaced. The key-prefix suggestion is not built (architect, 2026-10-23). |
 | #93 | N8 | P2 | naming | **Keyless API on Linux without a Secret Service** — Treat an unreadable credential store as "no key" for a keyless service (Ollama, LM Studio), keeping the status note. #32 follow-up (P3). |
 
 ## Later

@@ -198,3 +198,27 @@ test("N8 review: a late status reply from the API setup can't undo a switch to L
   await act(async () => late.resolve(API_READY));
   assert.ok(el("naming-banner"), "the older API reply doesn't hide the banner");
 });
+
+test("#109: with nothing saved, the default base URL is a real value, and saving the model stores it", async () => {
+  let savedArgs;
+  const calls = await mount({
+    settings_set_api: (args) => { savedArgs = args; return { ...EMPTY, baseUrl: args.baseUrl, model: args.model }; },
+  });
+  assert.equal(el("api-base-url").value, "https://api.openai.com/v1", "filled in, not a placeholder");
+  assert.equal(el("api-base-url").placeholder, "");
+  assert.equal(el("api-save").disabled, true, "the filled-in default alone isn't a change");
+  await type("api-model", "gpt-6-luna");
+  assert.equal(el("api-save").disabled, false);
+  await click("api-save");
+  assert.deepEqual(
+    { baseUrl: savedArgs.baseUrl, model: savedArgs.model },
+    { baseUrl: "https://api.openai.com/v1", model: "gpt-6-luna" },
+  );
+  assert.ok(calls.some(([command]) => command === "settings_set_api"));
+});
+
+test("#109: a saved base URL is shown as saved, never replaced by the default", async () => {
+  await mount({ settings_api: () => SAVED });
+  assert.equal(el("api-base-url").value, "https://api.example.test/v1");
+  assert.equal(el("api-save").disabled, true);
+});
