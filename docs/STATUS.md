@@ -1,8 +1,30 @@
 # Status
 
-**Updated:** 2026-10-22 · **Milestone:** M1–M3 done · M4 (AI naming) in progress · **Active:** owner confirmations and the codex-qa exit-status fix (D-032); M4 open on #33 only
+**Updated:** 2026-10-22 · **Milestone:** M1–M4 done · M5 (polish & release) next · **Active:** #33 closed at the restated target (D-033)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## #33 and M4 close (2026-10-22 evening, owner present)
+- **Comparison with a cloud model:** the owner's `gpt-6-luna` key, with up to 10,000 runs approved. 58% exact and 70% ignoring case on the held-out 100, against the 4B's 66%. A "keep the title's own wording" prompt helped on the training titles but not on the held-out set, and it halved the 4B's score, so the shipping prompt stays. About 700 requests used. Details are in D-033.
+- **Owner's decision:** the target should be about 66%, not 90%. Restated to 65% on the owner's set (D-033). #33 and M4 close.
+- **Changes:**
+  - `tests/naming_eval_33.rs`: asserts 65% and takes `QUEUE_EVAL_SET`.
+  - PRD §9's target line.
+  - BACKLOG's #33 row.
+  - D-033.
+- **Filed:** #108 (P1, M5), OpenAI reasoning models answer 400 to `max_tokens` and `temperature`. #109 (P2, M5), the empty Base URL looks filled in (its placeholder).
+- **Checks (macOS arm64):**
+  - The in-repo runner against the real 4B on the owner's held-out 100 (`QUEUE_EVAL_SET`): 66/100, passes, 100% valid JSON, warm p50 0.6 s, p95 1.1 s.
+  - fmt, clippy `-D warnings`, and `cargo test --locked`: 548 passed, 0 failed, 32 ignored.
+  - The QA boundary tests in `naming_eval_33_qa.rs` moved to 65%: on the 54-title seed, 36 correct passes and 35 fails. A fixture run ignores the developer's `QUEUE_EVAL_SET`.
+  - Any set the runner scores is checked first: not empty, unique titles, labels Queue can produce. All 300 of the owner's labels pass.
+- **QA:** review round 1 PASS WITH NOTES (`20261023-083420-review-efDT`; 3 P3s, fixed). Round 2 FAIL (`…083650-review-u0lw`; the QA boundary tests still expected 90%, fixed).
+- **Next bounded action:** squash-merge this docs PR once `test` ×3 is green, then close #33 and the M4 milestone. M5 starts with the owner's choice of item; #108 is the P1.
+- **Still the owner's:**
+  - The CPU-only Windows/Linux runs of both models (M5).
+  - The dev-app hand checks (#31, #30(b), #91 Test connection, the en dash).
+  - #100's key slot.
+  - Deleting `~/Developer/sandbox/queue-eval-33b/` when done.
 
 ## Owner confirmations (2026-10-22 afternoon, owner present)
 - **Decided (D-032):**
@@ -22,7 +44,6 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - A fake `codex` that writes a report: `codex-qa exit: 0`.
   - The usage text is unchanged.
 - **Still the owner's:**
-  - Whether #33 (and with it M4) closes at 66% with the 90% target restated, or stays open.
   - The CPU-only Windows/Linux runs.
   - The dev-app hand checks (#31, #30(b), #91, the en dash).
   - #100's key slot.
