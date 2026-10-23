@@ -80,7 +80,7 @@ D-007's default (yt-dlp decides) often yields `.webm` (AV1/VP9 + Opus), which Qu
 - **ffmpeg additions (owner's choice), both LGPL:** `--enable-decoder=vp9`, defense in depth against the corrupt-MP4 trap, and `--enable-demuxer=avi`, for sites like archive.org that serve `.avi`, which today's default can fail on. Done with #11. Measured on macOS arm64: `ffmpeg` grew 3.69 → 4.27 MB (+15.5%) and `ffprobe` 3.51 → 4.10 MB (+16.8%), about +1.2 MB per platform before compression, well inside D-013's 256 MB.
 - **Implemented (#11):** four choices in Settings: Default, Most compatible video (MP4), Audio only, Most compatible audio (M4A). `download::Format` maps each to exactly the flags above. The fallback notice is OS-neutral rather than "Not QuickTime-compatible" (AGENTS.md: no OS-specific wording): "No H.264 version was available, so it's saved as .webm. Some players can't open it." It shows on the finished row and is decided from the codecs yt-dlp reports choosing (`vcodec|acodec`), since an `.mp4` can hold AV1. It falls back to the extension when they're unknown. Running downloads keep the format they started with.
 
-## D-016 Default local naming model: Qwen3-4B-Instruct-2507 — Provisional (2026-10-11)
+## D-016 Default local naming model: Qwen3-4B-Instruct-2507 — Confirmed (2026-10-22; first set 2026-10-11)
 Research of current small GGUF models (sources in the #33 issue). The owner accepted the size; the N9 eval (#33) confirms the choice on the pinned files.
 - **Default:** Qwen3-4B-Instruct-2507 Q4_K_M (2.50 GB, Apache-2.0; reputable GGUFs from bartowski, unsloth, and lmstudio-community; no official Qwen GGUF). It has the best instruction following without a thinking mode in this size range (IFEval 83.4) and strong multilingual scores. About 2.5 s per item on a base M1 (estimate), but 5–6 s on CPU-only machines.
 - **Small option:** Qwen3.5-2B Q4_K_M (1.28 GB, Apache-2.0; bartowski's pinned file is 1.40 GB, #31). Suggested automatically when there's no GPU backend or under 8 GB of RAM; the user can switch either way (#31).
@@ -92,6 +92,7 @@ Research of current small GGUF models (sources in the #33 issue). The owner acce
   - Metadata is passed as data, never as instructions.
   - Pin by HF repo commit plus the file's LFS sha256.
 - **Consequence:** PRD §7's "~1–2 GB" model download becomes ~2.5 GB for the default (~1.4 GB for the small option, as pinned in #31).
+- **Confirmed by the owner (2026-10-22):** the 4B stays the default for now, after the held-out result (66%, D-031), and the 2B stays the small option. The runtime as built in #30(b) replaces the notes above where they differ: Queue's own 120 s idle timer stops the server (not `--sleep-idle-seconds`), the per-launch key goes in `LLAMA_API_KEY`, `-ngl all` on Metal only, and `--cache-ram 0` (D-029).
 
 ## D-017 YouTube 403s: retry and reuse fetched info; stay on stable yt-dlp — Confirmed (2026-10-11)
 The owner hit intermittent `HTTP Error 403: Forbidden` on downloads. ytdlp-expert reproduced it on 2026.08.19: YouTube sometimes rejects a `visionos`-client https link, and yt-dlp never retries 4xx errors. It isn't PO tokens (default clients don't need them; the "GVS PO Token experiment" log line concerns the unused `web` client) and isn't rate limiting (9 extractions in 10 min were fine). The nightly's new `tv_samsung` client fixed the case, but there's no newer stable release yet.
@@ -161,7 +162,8 @@ The owner asked for a software architect agent on Fable 5.1 (`.claude/agents/arc
 - **Ends** when the owner says so; until then it applies to later sessions too.
 - **Time box (second run):** per the owner's instruction of 2026-10-21 11:15, until M4 is complete or 17:00 on 2026-10-21, whichever is first. No new item after 15:00, stop coding at 16:15, handoff pushed by 16:45.
 
-## D-029 M3/M4 scope and order for the overnight run — Provisional (2026-10-20, decided by the architect under D-028)
+## D-029 M3/M4 scope and order for the overnight run — Confirmed (2026-10-22; decided by the architect under D-028 on 2026-10-20–21)
+The owner confirmed every bullet below on 2026-10-22, including the #30(b) runtime flags, the #91 request shape and the audit dispositions.
 - Naming never blocks a download: the Tier-1 name is set as the row becomes Queued; the AI name replaces it later only if the row is still Queued and not user-edited. Edited names are re-sanitized and `%` is escaped in `-o`.
 - Templates in v1 are exactly the three N3 presets; no template language.
 - Names are capped at 150 characters and fit a 200-byte stem on every OS. Until #15, that's yt-dlp's `%(title).200B` with the illegal characters pre-replaced by their fullwidth forms through `--replace-in-metadata` (#77); from #15 the naming engine enforces it on the literal stem it passes to `-o`, with the same replacements. Windows reserved names stay with the naming engine (#14/#15); a QA test for a bare `CON` title is parked behind `QUEUE_QA_KNOWN_GAPS` until #15.
@@ -226,3 +228,10 @@ The owner found this while testing #31 in the app, and chose to keep it:
 
   The pins don't change, an 8B model is rejected, and a model picker is #103 (M5). Owner, 2026-10-22. What these numbers mean against #33's "≥90% accepted unedited" target is the owner's call; D-016 stays provisional.
 - **QA on the dash fix:** round 6 FAIL (`20261022-124926-review-WLVn`, the byte limit; fixed), round 7 PASS WITH NOTES (`20261022-125747-review-RJr0`). Round 7 ran on the owner's instruction, beyond the architect's cap.
+
+## D-032 Owner confirmations and rulings — Confirmed (2026-10-22)
+- **PRD Q5:** the lifecycle as built is confirmed: Fetching info → Queued → Downloading → Processing → Done / Failed, with the Tier-1 name set as the row becomes Queued and the AI name replacing it only while the row is still Queued and not edited.
+- **D-016 and D-029** are confirmed (see each).
+- **#104 (advertising stripping):** option (a), a narrow allow-list of known tags. Only tags on a fixed list are stripped; anything else in the title is kept. It stays in M5 and gets its own Codex review.
+- **Post-PASS test-only fixes:** the proposal is rejected. Every change after a PASS, test-only ones included, gets a fresh Codex review.
+- **`scripts/codex-qa`'s exit code:** fixed. The script already exited 3 on an empty report; the exit 0s seen on #14's retry came from callers that piped its output (`| tail`) or ran `; echo` after it. The script's last line is now `codex-qa exit: <status>`, and the codex-qa agent runs it unpiped.

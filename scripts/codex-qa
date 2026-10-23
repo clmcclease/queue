@@ -5,7 +5,9 @@
 #   scripts/codex-qa test "<scope>"    e.g. "#14" or "N-T1 naming engine"; runs in a snapshot worktree
 #   scripts/codex-qa audit             read-only health check of the whole repo
 #
-# Reports go to qa/reports/<timestamp>-<mode>-<id>.md (git-ignored). Paths are printed on the last lines.
+# Reports go to qa/reports/<timestamp>-<mode>-<id>.md (git-ignored). Paths are printed on the last lines,
+# and the very last line is "codex-qa exit: <status>": a caller that pipes the output (| tail) loses
+# the exit code, so the status is printed too. An empty report is a failure (exit 3).
 set -euo pipefail
 
 MODEL="${CODEX_QA_MODEL:-gpt-6.1-sol}"
@@ -105,4 +107,5 @@ if [[ $status -ne 0 ]]; then
   tail -20 "$log" >&2
 fi
 echo "codex-qa report: $out"
+echo "codex-qa exit: $status"
 exit "$status"
