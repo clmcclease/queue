@@ -22,10 +22,33 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - `QUEUE_QA_REAL_LLAMA`: the 4B loads in 1.2 s and answers in 0.5 s.
   - QA `test "#108"`: **PASS WITH NOTES** (`20261023-134024-test-Cm1t`), no production bug. Its 7 tests were added as `tests/api_reasoning_n8_108_qa.rs` (7 passed): host selection, the other hosts' request, the wire, reasoning response fields, sanitizing, invalid answers and timeout fallback. Its one note (D-034 not recorded) came from a snapshot taken before the docs were written.
   - The key was read from the Keychain into the environment at run time; it never went into a file or log. About 200 more Luna requests, roughly 900 in total.
-## #109 (third run, 2026-10-23; branch `ui/109-base-url`)
+## Third run: where it stands
+- **Merged:**
+  - #108 as 3d20792 (PR #111; CI 40006369282 green on a1220c8; live evidence posted on #108).
+  - #109 as 5f3ce79 (PR #112). `main` was merged into its branch for docs conflicts; it got a fresh review, `20261023-140219-review-wmHz`, PASS WITH NOTES, and CI 40008228295 was green on 967ba0f.
+- **#105:** PR #113, merged once its review passes and `test` ×3 is green.
+- **Accepted P3s (architect's pre-acceptance of test-quality notes):**
+  - #108: a QA fallback case falls back through script loss, not the extra field.
+  - Codex's test suggestions for #108, #109 and #105 are listed in each PR and weren't added: a wire test of the OpenAI body, a cleared-URL retry, a native restart check.
+- **Next bounded action:** after #113 merges, M5's next item is the owner's choice. #104 needs the owner's list of tags. #103, the model picker, and #18, the design pass, are the larger ones.
+- **For the owner:**
+  - Hand checks in the dev app:
+    - API with `https://api.openai.com/v1` and `gpt-6-luna`: Test connection succeeds and a real row gets a name.
+    - With nothing saved, Base URL shows the default as real text.
+    - Keychain Access still shows only `dev.mcclease.queue` / `api-key`.
+  - **Spend:** about 200 more `gpt-6-luna` requests this run, about 900 in total.
+  - **Possible tuning (not built, your call):** `reasoning_effort: "low"` or `"none"` might cut OpenAI latency and cost.
+
+## #109 (third run, 2026-10-23): merged as 5f3ce79 (PR #112)
 - **What changed:** with nothing saved, Settings → AI naming → API fills the service's default base URL in as a real value, and the placeholder is gone. The filled-in default alone isn't an unsaved change; typing a model enables Save, which stores both. A saved URL is never replaced. The key-prefix suggestion isn't built (architect).
 - **Checks (macOS arm64):** `tsc`, `npm run build`, `npm test` 314 passed, 0 failed, including 2 new tests in `qa/tests/api-n8-32.test.mjs`.
 - **QA:** `test "#109"` **PASS WITH NOTES** (`20261023-134939-test-pjPN`), no bugs. Its 12 tests were added as `qa/tests/api-base-url-109-qa.test.mjs` (12 passed): defaults for both services, custom URLs, key-first saves, retries, switching services, reopening.
+## #105 (third run, 2026-10-23; branch `naming/105-ext-after-dash`, PR #113)
+- **What changed:** `ai::parse` strips a media extension both before the dash conversion and after it, with a re-sanitize each time. The issue's boundary answer (`"é"×50 + " - " + "a"×91 + ".mp4XY"`, 200 bytes) no longer ends in `.mp4`.
+- **Tests:** the boundary case (it fails on the old order and passes on the new), and `Artist - Title` / `Artist – Title` name alike yet download to distinct files through `download::place_unique`.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` on top of `main` with #108 and #109: 566 passed, 0 failed, 32 ignored, including Codex's 8. The 4B on the held-out 100: 66/100, unchanged, 100% valid JSON.
+- **Review round 1:** PASS WITH NOTES (`20261023-141955-review-W1CX`), with a P3 regression. Moving the strip after the dash let an extension the first sanitize had exposed be cut to `.m` (`name.m.webm`). It wasn't pre-accepted, so it was fixed by stripping before the dash as well. Codex's two cases were added as tests; they fail on the round-1 code and pass now. After the fix: `cargo test --locked` 566 passed, 0 failed, and the 4B on the held-out 100 still scores 66/100.
+- **QA:** `test "#105"` **PASS WITH NOTES** (`20261023-135834-test-9K4r`), no bugs. Its 8 tests were added as `tests/ai_extension_n9_105_qa.rs` (8 passed): extension boundaries, Unicode, reserved names, validation, fallback, and collisions.
 
 ## #33 and M4 close (2026-10-22 evening, owner present)
 - **Comparison with a cloud model:** the owner's `gpt-6-luna` key, with up to 10,000 runs approved. 58% exact and 70% ignoring case on the held-out 100, against the 4B's 66%. A "keep the title's own wording" prompt helped on the training titles but not on the held-out set, and it halved the 4B's score, so the shipping prompt stays. About 700 requests used. Details are in D-033.

@@ -155,19 +155,21 @@ pub fn parse(content: &str, title: Option<&str>) -> Result<String, Reject> {
     if name.chars().count() > naming::MAX_CHARS {
         return Err(Reject::TooLong);
     }
-    // An extension hidden behind a character that sanitizing removes ("Song.mp4" + U+202E)
-    // shows up only afterwards, so it's stripped again (#33 review).
-    let mut clean = naming::sanitize(name);
-    if has_media_extension(&clean)
-        && let Some((stem, _)) = clean.rsplit_once('.')
-    {
-        clean = naming::sanitize(stem);
-    }
+    // An extension hidden behind a character that sanitizing removes ("Song.mp4" + U+202E), or
+    // one the byte limit cut a longer ending down to, shows up only after sanitizing, so it's
+    // stripped again (#33 review).
+    let strip = |clean: String| match clean.rsplit_once('.') {
+        Some((stem, _)) if has_media_extension(&clean) => naming::sanitize(stem),
+        _ => clean,
+    };
+    let clean = strip(naming::sanitize(name));
     // The style's separator is an en dash; a model's spaced hyphen ("Artist - Title") becomes
     // one (owner, 2026-10-22). Hyphens inside words ("K-Pop", "3-cup") are left alone. The en
     // dash is two bytes longer, so the name is sanitized again to stay within the byte limit
-    // before the checks below see it (#33(b) review).
-    let clean = naming::sanitize(&clean.replace(" - ", " – "));
+    // before the checks below see it (#33(b) review). Stripping before the dash keeps an exposed
+    // extension from being cut to a fragment (".m"), and stripping after it catches an ending
+    // the longer dash cut down to one (#105). A stem only gets shorter, so it stays in the limit.
+    let clean = strip(naming::sanitize(&clean.replace(" - ", " – ")));
     if clean == naming::UNTITLED && !name.eq_ignore_ascii_case(naming::UNTITLED) {
         return Err(Reject::Empty);
     }
@@ -898,6 +900,25 @@ mod tests {
                     .is_ok_and(|n| n.contains('日') && n.len() <= naming::MAX_BYTES),
             "{parsed:?}"
         );
+        // An ending that the byte limit cuts down to a media extension is stripped too (#105).
+        let cut = format!("{} - {}.mp4XY", "é".repeat(50), "a".repeat(91));
+        assert_eq!((cut.chars().count(), cut.len()), (150, 200));
+        let json = serde_json::json!({ "filename": cut }).to_string();
+        let name = parse(&json, None).unwrap();
+        assert!(!has_media_extension(&name), "{name}");
+        assert_eq!(naming::sanitize(&name), name, "already sanitized");
+        // An extension the first sanitize exposes is stripped before the longer dash could cut it
+        // to a fragment (".m"), whether the byte limit or a removed character exposed it (#105
+        // review).
+        for answer in [
+            format!("{} - {}.mp4XY", "é".repeat(52), "a".repeat(89)),
+            format!("{} - {}.mp4\u{202e}", "é".repeat(51), "a".repeat(91)),
+        ] {
+            let json = serde_json::json!({ "filename": answer }).to_string();
+            let name = parse(&json, None).unwrap();
+            let stem = answer.split('.').next().unwrap().replace(" - ", " – ");
+            assert_eq!(name, naming::sanitize(&stem), "{answer:?}");
+        }
         let many = format!("{}{}", "ab - ".repeat(29), "end"); // 148 chars; 206 bytes once dashed
         let json = serde_json::json!({ "filename": many }).to_string();
         let name = parse(&json, None).unwrap();
@@ -1244,5 +1265,32 @@ mod tests {
                 .as_deref(),
             Some("x")
         );
+    }
+
+    #[test]
+    fn a_hyphen_and_an_en_dash_name_alike_and_still_download_to_distinct_files() {
+        let hyphen = parse(r#"{"filename":"Artist - Title"}"#, None).unwrap();
+        let dash = parse(r#"{"filename":"Artist – Title"}"#, None).unwrap();
+        assert_eq!(hyphen, "Artist – Title");
+        assert_eq!(dash, hyphen);
+        let dir = std::env::temp_dir().join(format!("queue-105-{}", std::process::id()));
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let name = format!("{hyphen}.webm");
+        let mut placed = Vec::new();
+        for (i, body) in [b"first", b"other"].into_iter().enumerate() {
+            let src = dir.join(format!("{i}.webm"));
+            std::fs::write(&src, body).unwrap();
+            placed.push(
+                crate::download::place_unique(&src, &out, std::ffi::OsStr::new(&name)).unwrap(),
+            );
+        }
+        assert_eq!(
+            placed,
+            [out.join(&name), out.join("Artist – Title (2).webm")]
+        );
+        assert_eq!(std::fs::read(&placed[0]).unwrap(), b"first");
+        assert_eq!(std::fs::read(&placed[1]).unwrap(), b"other");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
