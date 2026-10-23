@@ -1,8 +1,27 @@
 # Status
 
-**Updated:** 2026-10-22 · **Milestone:** M1–M4 done · M5 (polish & release) next · **Active:** #33 closed at the restated target (D-033)
+**Updated:** 2026-10-23 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** third run under D-028 until 16:00: #108 → #109 → #105
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## Third run (2026-10-23, 13:31–16:00, under D-028)
+- **Owner's instruction (13:31):** "have Architect take over and continue as far as you can get till 1600." The `gpt-6-luna` key may go a little past 10,000 requests.
+- **Architect rulings (13:40):**
+  - Time rules: no new item after 14:45, stop coding at 15:20, handoff pushed by 15:45, at rest by 16:00.
+  - Order: #108 → #109 → #105. #104 is deferred: it needs the owner's list of tags.
+  - #108's design is by host (D-034); a retry or one shape for every host was refused.
+  - Each item is pre-approved: commit, push, draft PR, handoff commit, and the squash once `test` ×3 is green and the Codex review passes.
+  - P3s that are test suggestions, wording or documented limitations are pre-accepted. P1s, P2s, and P3s touching keys, URL checks or a non-OpenAI body are not.
+  - No `ci:bundle`.
+- **#108 (branch `naming/108-openai-shape`):** `ai::chat_body` picks the body by host (D-034). Docs: ARCHITECTURE, BACKLOG, D-034.
+- **#108 checks (macOS arm64):**
+  - fmt, clippy `-D warnings`, `cargo test --locked`: 550 passed, 0 failed, 32 ignored. That includes 2 new unit tests and the existing wire check (`ai_n9_33.rs:103`, `temperature: 0` on loopback).
+  - Live `ai::ask` against api.openai.com / `gpt-6-luna`: `Ok("Me at the zoo")`.
+  - The runner with `gpt-6-luna` on the held-out 100: 0 errors, 100% valid JSON, 61%.
+  - The runner with the 4B: 66/100, unchanged.
+  - `QUEUE_QA_REAL_LLAMA`: the 4B loads in 1.2 s and answers in 0.5 s.
+  - QA `test "#108"`: **PASS WITH NOTES** (`20261023-134024-test-Cm1t`), no production bug. Its 7 tests were added as `tests/api_reasoning_n8_108_qa.rs` (7 passed): host selection, the other hosts' request, the wire, reasoning response fields, sanitizing, invalid answers and timeout fallback. Its one note (D-034 not recorded) came from a snapshot taken before the docs were written.
+  - The key was read from the Keychain into the environment at run time; it never went into a file or log. About 200 more Luna requests, roughly 900 in total.
 
 ## #33 and M4 close (2026-10-22 evening, owner present)
 - **Comparison with a cloud model:** the owner's `gpt-6-luna` key, with up to 10,000 runs approved. 58% exact and 70% ignoring case on the held-out 100, against the 4B's 66%. A "keep the title's own wording" prompt helped on the training titles but not on the held-out set, and it halved the 4B's score, so the shipping prompt stays. About 700 requests used. Details are in D-033.
