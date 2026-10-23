@@ -4,6 +4,11 @@
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
+## #109 (third run, 2026-10-23; branch `ui/109-base-url`)
+- **What changed:** with nothing saved, Settings → AI naming → API fills the service's default base URL in as a real value, and the placeholder is gone. The filled-in default alone isn't an unsaved change; typing a model enables Save, which stores both. A saved URL is never replaced. The key-prefix suggestion isn't built (architect).
+- **Checks (macOS arm64):** `tsc`, `npm run build`, `npm test` 314 passed, 0 failed, including 2 new tests in `qa/tests/api-n8-32.test.mjs`.
+- **QA:** `test "#109"` **PASS WITH NOTES** (`20261023-134939-test-pjPN`), no bugs. Its 12 tests were added as `qa/tests/api-base-url-109-qa.test.mjs` (12 passed): defaults for both services, custom URLs, key-first saves, retries, switching services, reopening.
+
 ## #33 and M4 close (2026-10-22 evening, owner present)
 - **Comparison with a cloud model:** the owner's `gpt-6-luna` key, with up to 10,000 runs approved. 58% exact and 70% ignoring case on the held-out 100, against the 4B's 66%. A "keep the title's own wording" prompt helped on the training titles but not on the held-out set, and it halved the 4B's score, so the shipping prompt stays. About 700 requests used. Details are in D-033.
 - **Owner's decision:** the target should be about 66%, not 90%. Restated to 65% on the owner's set (D-033). #33 and M4 close.
