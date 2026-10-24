@@ -67,7 +67,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | Issue | Req | Pri | Area | Item |
 |---|---|---|---|---|
 | #18 | — | P0 | ui | **Visual design pass, light/dark theme** — Sleek, modern single-window UI that follows the system theme; thumbnails, polished states, empty state. Checked on all three OSes. |
-| #19 | — | P1 | ui | **Keyboard shortcuts** — ⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item; focus starts in the URL bar. |
+| #19 | — | P1 | ui | **Keyboard shortcuts** — Built (D-035): a paste outside a text field goes to the URL bar (one line fills it, several add rows); ⌘/Ctrl+Enter is Download all; rows are focusable, with Up/Down, Delete/Backspace to remove a row that isn't downloading, and Escape back to the URL bar; focus starts in the URL bar. Tooltips name the shortcuts per OS. |
 | #20 | 6.5 | P1 | ui | **Completion notifications and history section** — OS notification on finish; Completed list with Show in folder (reuses #39), Copy URL, and Clear. |
 | #21 | — | P1 | infra | **yt-dlp auto-update (at most daily)** — Run yt-dlp -U at launch if the last check was over 24h ago; setting to disable. |
 | #22 | Q6 | P1 | queue | **Drag to reorder the queue** — Drag rows to change the order Download all uses. Cancel was split out to #74. |

@@ -1,16 +1,30 @@
-import { useRef, useState, type ClipboardEvent, type FormEvent } from "react";
+import { useImperativeHandle, useRef, useState, type ClipboardEvent, type FormEvent, type Ref } from "react";
 import { splitLinks } from "../queue";
+
+/** What the window can do with the field (#19): focus it, or fill it with a pasted link. */
+export interface UrlBarHandle {
+  focus: () => void;
+  fill: (text: string) => void;
+}
 
 interface Props {
   /** Resolves true when the item was added, so the field can clear. */
   onAdd: (url: string) => Promise<boolean>;
   /** Q8: several links pasted at once, one per line (the field keeps what it had). */
   onAddMany: (urls: string[]) => Promise<void>;
+  handle?: Ref<UrlBarHandle>;
 }
 
-export default function UrlBar({ onAdd, onAddMany }: Props) {
+export default function UrlBar({ onAdd, onAddMany, handle }: Props) {
   const [value, setValue] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  useImperativeHandle(handle, () => ({
+    focus: () => input.current?.focus(),
+    fill: (text) => {
+      setValue(text);
+      input.current?.focus();
+    },
+  }));
   const empty = value.trim() === "";
 
   async function submit(event: FormEvent) {

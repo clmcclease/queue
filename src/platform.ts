@@ -13,6 +13,10 @@ export function wordingFor(os: Os) {
   return {
     /** Settings opens with ⌘, on macOS and Ctrl+, elsewhere. */
     settingsShortcut: os === "macos" ? "⌘," : "Ctrl+,",
+    /** Download all (#19). */
+    downloadAllShortcut: os === "macos" ? "⌘↩" : "Ctrl+Enter",
+    /** Removes the focused row (#19); a Mac keyboard's Delete key is Backspace. */
+    removeShortcut: os === "macos" ? "⌫" : "Delete",
     /** Follows "in": "in Finder", "in File Explorer", "in your file manager". */
     fileManager: { macos: "Finder", windows: "File Explorer", linux: "your file manager" }[os],
     /** The label for revealing a finished file (D7). */
@@ -23,5 +27,7 @@ export function wordingFor(os: Os) {
 export const os: Os = detectOs(typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent);
 const wording = wordingFor(os);
 export const SETTINGS_SHORTCUT = wording.settingsShortcut;
+export const DOWNLOAD_ALL_SHORTCUT = wording.downloadAllShortcut;
+export const REMOVE_SHORTCUT = wording.removeShortcut;
 export const FILE_MANAGER = wording.fileManager;
 export const SHOW_FILE = wording.showFile;

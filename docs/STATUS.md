@@ -40,6 +40,20 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
+## #19: keyboard shortcuts (fourth run; branch `ui/19-shortcuts`)
+- **What changed (D-035):**
+  - A paste outside any text field goes to the URL bar: one line fills it and focuses it (Enter adds), and several lines add rows (Q8).
+  - ⌘/Ctrl+Enter is Download all whenever the button is enabled. It saves a name being edited first, it's ignored while Settings is open or during IME input, and the URL bar's Enter doesn't also add.
+  - Rows are focusable. Up/Down move between them. Delete or Backspace removes a focused row that isn't downloading or processing; focus then goes to the next row, else the previous one, else the URL bar, skipping rows still being removed. Escape returns to the URL bar. Keys inside a row's fields and buttons are left alone.
+  - Focus starts in the URL bar. The Download all and ✕ tooltips name their shortcuts per OS: `⌘↩` / `⌫` on macOS, `Ctrl+Enter` / `Delete` elsewhere.
+  - No Rust change and no new dependency. The focused row's look is a plain `focus-visible` ring; #18 will restyle it.
+- **Checks (macOS arm64):** `tsc`, `npm run build`, `npm test` 369 passed, 0 failed, including 10 new tests in `qa/tests/shortcuts-19.test.mjs`. The real webview's paste routing is an owner hand check.
+- **QA:** `test "#19"`: **FAIL** (`20261023-213458-test-oV5F`), with two bugs, both fixed:
+  - An IME Enter (`keyCode` 229 without `isComposing`) started Download all.
+  - Two quick Deletes could move focus to a row already being removed, so focus fell to the page.
+  - Its 33 tests were added as `qa/tests/shortcuts-19-qa.test.mjs`; the 6 that failed pass now.
+- **Review round 1:** **FAIL** (`20261023-214533-review-7VKD`). P2: the arrow keys could land on a row still being removed. P3: a row whose removal failed stayed marked as leaving. Both fixed: the arrows skip leaving rows too, and the mark clears when the removal settles. Two tests were added. After the fix, on top of `main` with #93: `npm test` 377 passed, 0 failed.
+
 ## #93: keyless API when the credential store can't be read (fourth run; branch `naming/93-keyless-store`)
 - **What changed (D-035):**
   - `ai::api_endpoint`: an unreadable credential store means no key for an OpenAI-compatible service, which is still asked; a service that needs a key answers 401, the Fallback tag. Anthropic still gets `StoreUnreachable` and nothing is sent.
