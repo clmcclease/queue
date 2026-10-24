@@ -43,9 +43,11 @@ common=(-c "model=\"$MODEL\"" -c "model_reasoning_effort=\"$EFFORT\"")
 status=0
 # Run Codex with a watchdog so a hang still ends in diagnostics instead of a silent kill.
 # set -m gives Codex its own process group, so the whole tree (including tool subprocesses) is killed.
+# With job control on, bash doesn't give the background job /dev/null as stdin, and `codex exec`
+# reads a piped stdin to EOF, so stdin is closed here: a caller holding a pipe open can't hang it (#122).
 run_codex() {
   set -m
-  codex "$@" >"$log" 2>&1 &
+  codex "$@" </dev/null >"$log" 2>&1 &
   local pid=$! dog
   set +m
   # The watchdog stays off the caller's pipes and kills its own sleep when stopped, so a finished

@@ -42,6 +42,15 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
+## #122: codex-qa closes Codex's stdin (fourth run; branch `infra/122-codex-stdin`)
+- **The architect's ruling (01:20, D-035):** #122 is the last code item tonight, then the handoff.
+- **What changed:**
+  - `scripts/codex-qa` runs `codex` with `</dev/null`. Under `set -m`, bash doesn't give a background job `/dev/null` as stdin, and `codex exec` reads a piped stdin to EOF, so a caller holding a pipe open hung two #86(a) gate runs for 25 minutes each.
+  - `docs/QA.md` and `.claude/agents/codex-qa.md` each say, in one sentence, how to recognize that launch defect, which doesn't count as a Codex failure.
+  - The fail-fast banner watchdog isn't built.
+- **Test:** `qa/tests/codex-qa-stdin-122.test.mjs` runs the script with a fake `codex` while the caller holds stdin open. With the fix, the fake reads EOF (`read=1`) in about 0.15 s. Without it, the run waits 5 s on the pipe and the test fails. #69's watchdog tests still pass.
+- **QA:** `test "#122"` **PASS WITH NOTES** (`20261024-012359-test-aJtz`), run through the changed script without the caller's `</dev/null`. Codex's banner appeared within 5 s, which is the live proof. Its one note, that QA.md's bullet had two sentences where the ruling said one, is fixed. Codex's 14 tests were added as `qa/tests/codex-qa-stdin-122-qa.test.mjs`, including a check that removing the redirect brings the hang back.
+
 ## #86(b): the ffmpeg build environment in the cache key (fourth run; branch `infra/86-build-env`)
 - **What changed:**
   - The `ffmpeg` job's new first step, "Record the build environment", writes `build-env.txt`: the runner image (`ImageOS`, `ImageVersion`), which covers the linker and libraries the probes miss; then, on macOS, `xcodebuild -version`, the SDK and clang; on Linux, the candidate versions of mingw-w64, gcc-mingw-w64-x86-64, libz-mingw-w64-dev and zlib1g-dev, plus gcc; on both, make. It runs under `set -euo pipefail`, so a failing probe stops the step.

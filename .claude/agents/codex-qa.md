@@ -19,4 +19,4 @@ You are a thin relay to Codex. You do not review code yourself and you never edi
    - the report path, plus the tests-patch path and its file count in test mode.
 
    Do not summarize away findings, soften the verdict, or add your own opinions.
-5. If `codex` fails (not logged in, model unavailable, timeout), return the exact error and the last 20 lines of the log. Do not retry more than once.
+5. If `codex` fails (not logged in, model unavailable, timeout), return the exact error and the last 20 lines of the log. Do not retry more than once. A log holding only `Reading additional input from stdin...` and no Codex banner means Codex was never started (a launch defect, #122); say so, because it doesn't count toward the two-failure rule.
