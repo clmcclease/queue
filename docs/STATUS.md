@@ -51,7 +51,13 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Test:** `qa/tests/codex-qa-stdin-122.test.mjs` runs the script with a fake `codex` while the caller holds stdin open. With the fix, the fake reads EOF (`read=1`) in about 0.15 s. Without it, the run waits 5 s on the pipe and the test fails. #69's watchdog tests still pass.
 - **QA:** `test "#122"` **PASS WITH NOTES** (`20261024-012359-test-aJtz`), run through the changed script without the caller's `</dev/null`. Codex's banner appeared within 5 s, which is the live proof. Its one note, that QA.md's bullet had two sentences where the ruling said one, is fixed. Codex's 14 tests were added as `qa/tests/codex-qa-stdin-122-qa.test.mjs`, including a check that removing the redirect brings the hang back.
 
-## #86(b): the ffmpeg build environment in the cache key (fourth run; branch `infra/86-build-env`)
+## #84 (part): `persist` never writes with saving off (fourth run): merged as 900e757 (PR #126); #84 stays open
+- **What changed (tests only):** a unit test in `src-tauri/src/lib.rs` builds a `QueueFile` with `path: None`, as startup does for a newer-format `queue.json` (D-035), adds rows, and calls `persist` several times with a writer that panics. Nothing is written, no event is emitted, and the warning stays. The writable case was already covered.
+- **Not done (#84 stays open):** the startup-level check that a newer-format load sets `path: None`, and the `settings_set_api` save-failure test. Both need a command-level harness (D-035).
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 601 passed, 0 failed, 32 ignored. With saving switched on, the new test fails (the panic), so it guards the case.
+- **QA:** `test "#84"` **PASS WITH NOTES** (`20261024-005231-test-feW3`), no bugs. Its one extra unit test was added: 602 passed.
+
+## #86(b): the ffmpeg build environment in the cache key (fourth run): merged as c2056a9 (PR #125); #86 stays open for (c)
 - **What changed:**
   - The `ffmpeg` job's new first step, "Record the build environment", writes `build-env.txt`: the runner image (`ImageOS`, `ImageVersion`), which covers the linker and libraries the probes miss; then, on macOS, `xcodebuild -version`, the SDK and clang; on Linux, the candidate versions of mingw-w64, gcc-mingw-w64-x86-64, libz-mingw-w64-dev and zlib1g-dev, plus gcc; on both, make. It runs under `set -euo pipefail`, so a failing probe stops the step.
   - The cache key adds `hashFiles('build-env.txt')`.
