@@ -273,7 +273,8 @@ The owner found this while testing #31 in the app, and chose to keep it:
   - ⌘/Ctrl+Enter is Download all, whenever the button is enabled.
   - Rows are focusable. Up/Down move between them, Delete or Backspace removes a focused row that isn't downloading, and Escape returns to the URL bar.
   - Not built: a menu, a help sheet, reorder keys. The focused row's look belongs to #18.
-- **#43** is built, but it merges only after the owner checks the dev app on macOS. The Windows and Linux checks go to #71.
+- **#43**, if it's built tonight, merges only after the owner checks the dev app on macOS. The Windows and Linux checks go to #71.
 - **#83 and #85 ship in one PR:** both `test` runs, one review.
 - **Deferred to a session with the owner:** #18, #20, #21, #22, #23, #103, #104. #24 is the owner's; #71 is the owner's hand checks.
 - **Codex limits overnight:** D-029's pause rule. A reset that is unknown, more than 3 h away or after 07:45 makes that gate the owner's, and the handoff is then pushed as a draft PR, not merged. At most three review rounds per item, then the item is parked.
+- **Review-round cap, one exception (2026-10-23 21:50, decided by the architect under D-028):** #83+#85 gets a fourth review round, because round 3's P2 was an overwrite path (duplicate `items` keys merged by the `serde_json::Value` step that round 2 added) and the fix removes that step instead of adding to it: an object root checked by its first byte, direct struct deserialization, then the version check. Round 4 is final. A PASS, a PASS WITH NOTES or only pre-accepted P3s merge; anything else parks the branch as a draft PR for the owner. No fifth round for any item tonight.
