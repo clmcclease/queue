@@ -45,11 +45,36 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
+      # The toolchain the build would use (#86(b)): its hash is in the cache key, so a runner-image
+      # update rebuilds ffmpeg instead of reusing binaries from another toolchain. Pinning it is #86(c).
+      - name: Record the build environment
+        shell: bash
+        run: |
+          # pipefail and the SDK in a variable: a failing probe stops the step instead of leaving a
+          # blank line in the record (#86 QA).
+          set -euo pipefail
+          {
+            # The runner image covers what the probes below don't (linker, binutils, libraries).
+            echo "image ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+            if [ "$RUNNER_OS" = macOS ]; then
+              xcodebuild -version
+              sdk=$(xcrun --show-sdk-version)
+              echo "SDK $sdk"
+              clang --version | sed -n 1p
+            else
+              sudo apt-get update >/dev/null
+              apt-cache policy mingw-w64 gcc-mingw-w64-x86-64 libz-mingw-w64-dev zlib1g-dev \
+                | awk '/^[^ ]/ { name = $1 } /Candidate:/ { print name, $2 }'
+              gcc --version | sed -n 1p
+            fi
+            make --version | sed -n 1p
+          } > build-env.txt
+          cat build-env.txt
       - id: cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: src-tauri/binaries/queue-ff*
-          key: ffmpeg-${{ matrix.key }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/sidecars.json') }}
+          key: ffmpeg-${{ matrix.key }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/sidecars.json') }}-${{ hashFiles('build-env.txt') }}
       - name: Install mingw-w64 and zlib
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
         run: |
@@ -59,7 +84,10 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: for t in ${{ matrix.targets }}; do scripts/build-ffmpeg.sh "$t"; done
       - name: Split per target
-        run: for t in ${{ matrix.targets }}; do mkdir -p "out/$t" && cp src-tauri/binaries/queue-ff*-"$t"* "out/$t/"; done
+        run: |
+          for t in ${{ matrix.targets }}; do mkdir -p "out/$t" && cp src-tauri/binaries/queue-ff*-"$t"* "out/$t/"; done
+          # Beside the target folders, so `test`'s copy of out/<target>/* never picks it up.
+          cp build-env.txt "out/build-env-${{ matrix.key }}.txt"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ffmpeg-${{ matrix.key }}

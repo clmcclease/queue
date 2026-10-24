@@ -42,6 +42,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
+## #86(b): the ffmpeg build environment in the cache key (fourth run; branch `infra/86-build-env`)
+- **What changed:**
+  - The `ffmpeg` job's new first step, "Record the build environment", writes `build-env.txt`: the runner image (`ImageOS`, `ImageVersion`), which covers the linker and libraries the probes miss; then, on macOS, `xcodebuild -version`, the SDK and clang; on Linux, the candidate versions of mingw-w64, gcc-mingw-w64-x86-64, libz-mingw-w64-dev and zlib1g-dev, plus gcc; on both, make. It runs under `set -euo pipefail`, so a failing probe stops the step.
+  - The cache key adds `hashFiles('build-env.txt')`.
+  - The file is uploaded as `out/build-env-<key>.txt`, beside the target folders, which is where `test` and `bundle` copy from.
+  - Pinning the toolchain is #86(c), the owner's call; #86 stays open for it.
+- **Checks (macOS arm64):** `ci.test.mjs` has a new test for the step's place, the key and the artifact path. The step itself runs first in this PR's CI, where the new key forces one ffmpeg rebuild (about 3.5 min).
+- **QA:** `test "#86"`: **FAIL** (`20261024-003455-test-23gJ`). A failing `xcrun` inside `echo "SDK $(…)"` was swallowed. Fixed with `pipefail` and the SDK read into a variable. Codex's 23 tests were added as `qa/tests/build-env-86b-qa.test.mjs`.
+- **Review round 1:** PASS WITH NOTES (`20261024-003941-review-BtL6`). P3: the probes didn't cover the whole toolchain, such as the linker, so the docs overclaimed. Fixed by recording the runner image's version, so the claim now holds. Two test suggestions weren't added: a macOS `make` failure, and changing each Linux candidate.
+- **Review round 2:** **FAIL** (`20261024-004211-review-jdlK`, P2). Codex's harness still expected the record without the new image line, and the round was run with those 2 tests failing locally. Fixed: the fixtures set `ImageOS`/`ImageVersion` and expect the line, and two new tests check that changing either one changes the digest.
+
 ## #86(a): ffmpeg tarball signature (fourth run; branch `infra/86-ffmpeg-signature`)
 - **The architect's extension (22:50, D-035):** after #44, the order is #86(a) → #120 → #86(b) (optional) → a `persist` no-write test (optional). #18, #20–#23, #103, #104, #84's harness, #97 and #100 part 3 stay deferred, with the reasons in D-035.
 - **What changed:**
