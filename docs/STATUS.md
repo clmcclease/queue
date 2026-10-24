@@ -25,7 +25,9 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **Deferred to a session with the owner:** #18, #20, #21, #22, #23, #103, #104. #24 is the owner's; #71 is the owner's hand checks.
   - **Pre-approved per item:** commit, push, draft PR, handoff commit, and the squash once `test` ×3 is green and the review passes (PASS or PASS WITH NOTES). Not #43's squash.
   - **P3s:** test suggestions, wording and documented limitations are pre-accepted. Not pre-accepted: P1s, P2s, and P3s touching keys or the credential store, URL checks, request bodies, file placement or overwrite safety, queue.json data loss, or the CSP. No `ci:bundle`. No live API calls or key use tonight.
-- **Next bounded action:** #83+#85 on branch `queue/83-85-hardening`, then #93.
+- **Docs PR #114** merged as 899ad4d. Its review was PASS WITH NOTES (`20261023-210901-review-mZJE`); its one wording P3 ("#43 is built") is fixed in #83+#85's PR.
+- **Next bounded action:** #83+#85 (branch `queue/83-85-hardening`), then #93 (branch `naming/93-keyless-store`, coded; its QA bug is being fixed).
+
 - **For the owner (morning):**
   - **Hand checks in the dev app:**
     - #19: paste with focus outside the URL field; ⌘⏎ for Download all; arrows and Delete on rows; Escape back to the field.
@@ -40,7 +42,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
-## #93: keyless API when the credential store can't be read (fourth run; branch `naming/93-keyless-store`)
+## #93: keyless API when the credential store can't be read (fourth run): merged as 37dfd72 (PR #115)
 - **What changed (D-035):**
   - `ai::api_endpoint`: an unreadable credential store means no key for an OpenAI-compatible service, which is still asked; a service that needs a key answers 401, the Fallback tag. Anthropic still gets `StoreUnreachable` and nothing is sent.
   - `NamingStatus` has a new `store_unreachable` flag. Settings → API says "Couldn't reach your system's credential store, so the service is asked without a key."
@@ -48,6 +50,19 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 576 passed, 0 failed, 32 ignored; `tsc`, `npm run build`, `npm test` 332 passed, 0 failed. The real case, Linux without a Secret Service, can't be checked on a Mac.
 - **QA:** `test "#93"`: **FAIL** (`20261023-211902-test-JOmV`). Test connection read the store a second time, so a store that failed and then recovered sent a keyless request whose result didn't say so. Fixed: it reads the store once (`api_endpoint_with`). Its tests were added as `tests/api_keyless_n8_93_qa.rs` (9) and `qa/tests/api-keyless-n8-93-qa.test.mjs` (4); the failing one passes now.
   - Review: **PASS WITH NOTES** (`20261023-212858-review-WbaB`), no defects. Its P3 (the updated `api_n8_32` test could hang if a request were never sent) is a pre-accepted test note, left for #100's bounded `accept()`. Its two test suggestions weren't added: a 401 then a success across two rows, and a store-read count.
+
+## #83 + #85: queue.json hardening (fourth run; branch `queue/83-85-hardening`)
+- **#83:** a `queue.json` with a `version` that isn't exactly the integer 1 (of any size or type) comes from a newer Queue. `load_checked` returns `Saving::Newer`: the queue starts empty, saving is off, and the window says "The saved list is from a newer version of Queue, so it isn't shown and changes made now won't be saved. The file is untouched." The file is never moved aside or written. A file with no `version`, or that isn't JSON, is still damaged and is set aside (D-025).
+- **#85:** `queue::MAX_ID` = 2^53 − 1. Saved rows above it are dropped, and `add` at the limit fails with D-025's message.
+- **Checks (macOS arm64, on top of `main` with #93):** fmt, clippy `-D warnings`, `cargo test --locked` 593 passed, 0 failed, 32 ignored; `tsc`, `npm run build`, `npm test` (count in the PR).
+- **QA:**
+  - `test "#85"`: PASS WITH NOTES (`20261023-211326-test-oen4`), no bugs. Its tests were added as `tests/row_ids_q7_85_qa.rs` (7) and `qa/tests/row-ids-q7-85-qa.test.mjs` (3).
+  - `test "#83 and #85"`: **FAIL** (`20261023-211319-test-Fpy9`). A `version` above `u32::MAX` failed to parse, so the file was treated as damaged and moved aside. Fixed: any numeric `version` other than 1 counts as another format. Its tests were added as `tests/queue_version_ids_q7_83_85_qa.rs` (8; the 2 that failed pass now) and `qa/tests/queue-version-ids-q7-83-85-qa.test.mjs` (2).
+  - Review round 1: **FAIL** (`20261023-212422-review-6Kcd`, P2). A `1e400` or 400-digit version is out of the JSON number parser's range, so the file was still set aside. Fixed: any `version` that isn't exactly the integer 1, of any size or type, is another format. Tests cover `4294967296`, `1e400`, 400 digits, `"1"`, `null` and `1.5` (all kept as they are) and a missing `version` (still set aside).
+  - Review round 2: **FAIL** (`20261023-212854-review-46tW`, P2). serde reads a struct from a JSON array, so `[2, []]` loaded as version 2, and the file could be saved over. Fixed: `from_json` accepts only a JSON object and checks `version` after parsing. An array is damaged and is set aside, byte for byte (tested with `[2,[]]` and `[1,[]]`). Not added: the round's suggested test that the app never writes after a newer-format load (that path is `QueueFile.path = None`).
+  - Review round 3: **FAIL** (`20261023-213437-review-fhp7`). P2: round 2's generic JSON value merged duplicate keys, so `"items":[rows],"items":[]` loaded empty and could be saved over. P3: `[2]` read as a newer format.
+  - **The architect's exception (21:50, D-035):** a fourth review round, because this was an overwrite path and the fix removes code instead of adding to it. Round 4 is final; if it fails, the item is parked for the owner. No fifth round for any item tonight.
+  - **Round-4 fix:** `is_object` (the first byte after JSON whitespace is `{`) gates both the version probe and `from_json`, which deserializes straight into the struct again, so serde refuses duplicate keys, and then checks `version`. The generic-value step is gone. New tests, each set aside with every byte kept: duplicate `items`, duplicate `version` (`1,1` and `1,2`), a duplicate `id` in a row, `[2]`, `[null]`, `[{}]`, and a byte order mark. Leading whitespace before a newer format still leaves it untouched.
 
 ## Third run (2026-10-23, 13:31–16:00, under D-028)
 - **Owner's instruction (13:31):** "have Architect take over and continue as far as you can get till 1600." The `gpt-6-luna` key may go a little past 10,000 requests.

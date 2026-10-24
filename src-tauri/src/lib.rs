@@ -1507,19 +1507,20 @@ pub fn run() {
                     });
                 }
             }
-            let (mut queue, writable) = queue_file
+            let (mut queue, saving) = queue_file
                 .as_deref()
                 .map(Queue::load_checked)
-                .unwrap_or_default();
+                .unwrap_or((Queue::default(), queue::Saving::Safe));
             // Names follow the saved template (#17); hand-edited ones are kept.
             queue.set_template(template);
-            let problem = match (&queue_file, lock.is_some(), writable) {
+            let problem = match (&queue_file, lock.is_some(), saving) {
                 (None, ..) => Some("Queue couldn't find its data folder, so this list won't be saved.".to_string()),
                 (Some(_), false, _) => Some("Another copy of Queue is still using the saved list, so changes made now won't be saved. Quit and reopen Queue.".to_string()),
-                (Some(_), true, false) => Some("Queue couldn't read or set aside its saved list, so changes made now won't be saved. The old file is untouched.".to_string()),
+                (Some(_), true, queue::Saving::Unsafe) => Some("Queue couldn't read or set aside its saved list, so changes made now won't be saved. The old file is untouched.".to_string()),
+                (Some(_), true, queue::Saving::Newer) => Some("The saved list is from a newer version of Queue, so it isn't shown and changes made now won't be saved. The file is untouched.".to_string()),
                 _ => None,
             };
-            let writable = writable && lock.is_some();
+            let writable = saving == queue::Saving::Safe && lock.is_some();
             let refetch = queue.fetching();
             let unnamed = queue.awaiting_ai();
             let saved = queue.changes();

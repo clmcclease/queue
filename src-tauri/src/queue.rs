@@ -114,6 +114,25 @@ pub enum AddError {
     Duplicate { message: String, id: u64 },
 }
 
+/// The highest row id (#85): ids go to the window as JavaScript numbers, which are exact only
+/// up to 2^53 − 1 (`Number.MAX_SAFE_INTEGER`). Past it, two ids could round to one.
+pub const MAX_ID: u64 = (1 << 53) - 1;
+
+/// The `queue.json` format this Queue reads and writes (#83). Fields added later keep it at 1
+/// (old copies ignore what they don't know); it goes up only for an incompatible change.
+const VERSION: u32 = 1;
+
+/// Whether the loaded `queue.json` may be saved over (D-025, #83).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Saving {
+    /// Missing, or read and loaded: save freely.
+    Safe,
+    /// It exists but couldn't be read, or was damaged and couldn't be moved aside.
+    Unsafe,
+    /// Saved by a newer Queue (another `version`): it's left exactly as it is.
+    Newer,
+}
+
 #[derive(Debug, Default)]
 pub struct Queue {
     next_id: u64,
@@ -154,7 +173,7 @@ impl Queue {
         }
         // Ids only grow and are never reused; a saved queue can't push them past the limit
         // into a panic (#12).
-        let Some(id) = self.next_id.checked_add(1) else {
+        let Some(id) = self.next_id.checked_add(1).filter(|&id| id <= MAX_ID) else {
             return Err(AddError::Invalid {
                 message: "The queue is full. Remove some rows to add more.".into(),
             });
@@ -623,7 +642,7 @@ impl Queue {
     /// The queue as `queue.json` (#12).
     pub fn to_json(&self) -> Vec<u8> {
         let saved = SavedQueue {
-            version: 1,
+            version: VERSION,
             items: self
                 .items
                 .iter()
@@ -647,15 +666,27 @@ impl Queue {
     /// a row still fetching its info stays Fetching (the caller fetches it again). Rows whose
     /// link no longer validates are dropped. Ids keep counting from the highest one.
     pub fn from_json(bytes: &[u8]) -> Result<Queue, String> {
+        if is_another_format(bytes) {
+            return Err("queue saved in another format".to_owned());
+        }
+        // Only the object `to_json` writes: serde would also read a struct from an array
+        // (`[1, []]`). Read straight into the struct, which refuses a duplicate key that a
+        // generic JSON value would silently collapse (#83 review).
+        if !is_object(bytes) {
+            return Err("unreadable queue: not a JSON object".to_owned());
+        }
         let saved: SavedQueue =
             serde_json::from_slice(bytes).map_err(|e| format!("unreadable queue: {e}"))?;
+        if saved.version != VERSION {
+            return Err("queue saved in another format".to_owned());
+        }
         let mut queue = Queue::default();
         for row in saved.items {
             let Ok(link) = link::parse(&row.url) else {
                 continue;
             };
-            if row.id == 0 || row.id == u64::MAX {
-                continue; // not an id Queue hands out; keeping it would break the next add
+            if row.id == 0 || row.id > MAX_ID {
+                continue; // not an id Queue hands out; keeping it would break the next add (#85)
             }
             let (status, notice) = match row.status {
                 Status::Downloading | Status::Processing => {
@@ -714,23 +745,62 @@ impl Queue {
     }
 
     /// Loads `queue.json`, and says whether it's safe to save over it. A missing file is an
-    /// empty queue; one that exists but can't be read is too, but not safe to save over. A damaged one is moved aside (to `queue.json.bad`, or a unique
-    /// `queue.json.bad-<time>` if that's taken) and the queue starts empty. If it can't be moved,
-    /// saving isn't safe: the next save would destroy the only copy, so the caller must not save.
-    pub fn load_checked(path: &std::path::Path) -> (Queue, bool) {
+    /// empty queue; one that exists but can't be read is too, but not safe to save over. A
+    /// damaged one is moved aside (to `queue.json.bad`, or a unique `queue.json.bad-<time>` if
+    /// that's taken) and the queue starts empty. If it can't be moved, saving isn't safe: the
+    /// next save would destroy the only copy, so the caller must not save. One saved by a newer
+    /// Queue isn't damaged: the queue starts empty and the file is never moved or written (#83).
+    pub fn load_checked(path: &std::path::Path) -> (Queue, Saving) {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             // No queue saved yet: start empty and save freely.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Queue::default(), true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return (Queue::default(), Saving::Safe);
+            }
             // It exists but can't be read (permissions, a folder, a disk error): start empty,
             // but never save over it.
-            Err(_) => return (Queue::default(), false),
+            Err(_) => return (Queue::default(), Saving::Unsafe),
         };
+        // Checked before the rest is read: a newer format may not parse as this one at all.
+        if is_another_format(&bytes) {
+            return (Queue::default(), Saving::Newer);
+        }
         match Queue::from_json(&bytes) {
-            Ok(queue) => (queue, true),
-            Err(_) => (Queue::default(), set_aside(path).is_ok()),
+            Ok(queue) => (queue, Saving::Safe),
+            Err(_) if set_aside(path).is_ok() => (Queue::default(), Saving::Safe),
+            Err(_) => (Queue::default(), Saving::Unsafe),
         }
     }
+}
+
+/// Whether the file starts, after JSON whitespace, with `{`. Anything else (an array, a byte
+/// order mark) isn't a queue any Queue wrote, so it's damaged.
+fn is_object(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .find(|b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+        == Some(&b'{')
+}
+
+/// Whether the file is a JSON object with a `version` that isn't exactly [`VERSION`], of any
+/// type or size (#83 review: `4294967296`, `1e400` or a 400-digit number must not read as
+/// damaged). Such a file is kept as it is; one with no `version`, or that isn't JSON, is damaged.
+fn is_another_format(bytes: &[u8]) -> bool {
+    if !is_object(bytes) {
+        return false;
+    }
+    // `IgnoredAny` skips the value without converting it, so no number is out of its range.
+    #[derive(Deserialize)]
+    struct HasVersion {
+        #[allow(dead_code)]
+        version: serde::de::IgnoredAny,
+    }
+    #[derive(Deserialize)]
+    struct Versioned {
+        version: u32,
+    }
+    serde_json::from_slice::<HasVersion>(bytes).is_ok()
+        && !serde_json::from_slice::<Versioned>(bytes).is_ok_and(|v| v.version == VERSION)
 }
 
 /// Moves a damaged queue file out of the way without overwriting anything.
@@ -1374,21 +1444,147 @@ mod tests {
         std::fs::write(&path, q.to_json()).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
         let readable = std::fs::read(&path).is_ok(); // e.g. running as root
-        let (loaded, writable) = Queue::load_checked(&path);
+        let (loaded, saving) = Queue::load_checked(&path);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         if !readable {
             assert!(loaded.items().is_empty());
-            assert!(
-                !writable,
+            assert_eq!(
+                saving,
+                Saving::Unsafe,
                 "an existing file we can't read must not be replaced"
             );
         }
         assert_eq!(std::fs::read(&path).unwrap(), q.to_json(), "untouched");
-        assert!(
+        assert_eq!(
             Queue::load_checked(&dir.join("missing.json")).1,
+            Saving::Safe,
             "a missing file is fine to create"
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_queue_saved_by_a_newer_queue_is_left_exactly_as_it_is() {
+        let dir = std::env::temp_dir().join(format!("queue-83-newer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("queue.json");
+        // Compatible rows, an incompatible shape, and a version below 1: none is this format.
+        for newer in [
+            &br#"{"version":2,"items":[{"id":1,"url":"https://e.test/a","status":{"state":"queued"},"future":true}]}"#[..],
+            br#"{"version":2,"rows":"another shape entirely"}"#,
+            br#"{"version":0,"items":[]}"#,
+        ] {
+            std::fs::write(&path, newer).unwrap();
+            let (loaded, saving) = Queue::load_checked(&path);
+            assert!(loaded.items().is_empty());
+            assert_eq!(saving, Saving::Newer);
+            assert_eq!(std::fs::read(&path).unwrap(), newer, "byte for byte");
+            assert!(!path.with_extension("json.bad").exists(), "not moved aside");
+            assert!(Queue::from_json(newer).is_err());
+        }
+        // A version of any size or type is another format, not damage (#83 review).
+        let huge = format!(r#"{{"version":{},"items":[]}}"#, "9".repeat(400));
+        for other in [
+            &br#"{"version":4294967296,"items":[]}"#[..],
+            br#"{"version":1e400,"items":[]}"#,
+            huge.as_bytes(),
+            br#"{"version":"1","items":[]}"#,
+            br#"{"version":null,"items":[]}"#,
+            br#"{"version":1.5,"items":[]}"#,
+        ] {
+            std::fs::write(&path, other).unwrap();
+            assert_eq!(Queue::load_checked(&path).1, Saving::Newer);
+            assert_eq!(std::fs::read(&path).unwrap(), other);
+            assert!(!path.with_extension("json.bad").exists());
+        }
+        // No version at all is damaged, as before (D-025).
+        std::fs::write(&path, br#"{"items":[]}"#).unwrap();
+        assert_eq!(Queue::load_checked(&path).1, Saving::Safe);
+        assert!(!path.exists() && path.with_extension("json.bad").exists());
+        std::fs::remove_file(path.with_extension("json.bad")).unwrap();
+        // An array isn't a saved queue, whatever it holds: it's set aside (kept) as damaged, so
+        // it can never be saved over (#83 review).
+        for array in [&b"[2,[]]"[..], b"[1,[]]"] {
+            std::fs::write(&path, array).unwrap();
+            let (loaded, saving) = Queue::load_checked(&path);
+            assert!(loaded.items().is_empty());
+            assert_eq!(saving, Saving::Safe);
+            assert!(!path.exists());
+            let bad = path.with_extension("json.bad");
+            assert_eq!(std::fs::read(&bad).unwrap(), array, "kept byte for byte");
+            std::fs::remove_file(bad).unwrap();
+            assert!(Queue::from_json(array).is_err());
+        }
+        // Damaged, not another format: set aside with every byte kept, so nothing is saved
+        // over it (#83 review round 3). Duplicate keys would otherwise collapse and lose rows.
+        let rows = r#"[{"id":1,"url":"https://e.test/a","status":{"state":"queued"}}]"#;
+        let damaged = [
+            format!(r#"{{"version":1,"items":{rows},"items":[]}}"#),
+            r#"{"version":1,"version":1,"items":[]}"#.to_owned(),
+            r#"{"version":1,"version":2,"items":[]}"#.to_owned(),
+            r#"{"version":1,"items":[{"id":1,"id":2,"url":"https://e.test/a","status":{"state":"queued"}}]}"#.to_owned(),
+            "[2]".to_owned(),
+            "[null]".to_owned(),
+            "[{}]".to_owned(),
+            // A byte order mark isn't JSON whitespace: pinned, so it never turns into an overwrite.
+            "\u{feff}{\"version\":1,\"items\":[]}".to_owned(),
+        ];
+        for bytes in damaged.iter().map(String::as_bytes) {
+            std::fs::write(&path, bytes).unwrap();
+            let (loaded, saving) = Queue::load_checked(&path);
+            assert!(
+                loaded.items().is_empty(),
+                "{}",
+                String::from_utf8_lossy(bytes)
+            );
+            assert_eq!(saving, Saving::Safe);
+            assert!(!path.exists());
+            let bad = path.with_extension("json.bad");
+            assert_eq!(std::fs::read(&bad).unwrap(), bytes, "kept byte for byte");
+            std::fs::remove_file(bad).unwrap();
+        }
+        // Leading JSON whitespace is fine: a newer format after it is still left as it is.
+        let spaced = b" \n\t\r {\"version\":2,\"items\":[]}";
+        std::fs::write(&path, spaced).unwrap();
+        assert_eq!(Queue::load_checked(&path).1, Saving::Newer);
+        assert_eq!(std::fs::read(&path).unwrap(), spaced);
+        // Version 1 still loads, and saves as version 1.
+        let mut q = Queue::default();
+        ready(&mut q, "https://e.test/one");
+        std::fs::write(&path, q.to_json()).unwrap();
+        let (loaded, saving) = Queue::load_checked(&path);
+        assert_eq!((loaded.items().len(), saving), (1, Saving::Safe));
+        let json: serde_json::Value = serde_json::from_slice(&loaded.to_json()).unwrap();
+        assert_eq!(json["version"], 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ids_stay_within_javascripts_safe_integers() {
+        assert_eq!(MAX_ID, 9_007_199_254_740_991);
+        let row = |id: u64| {
+            format!(
+                r#"{{"version":1,"items":[{{"id":{id},"url":"https://e.test/{id}","status":{{"state":"queued"}}}}]}}"#
+            )
+        };
+        // A saved id past the limit is dropped like any impossible id; the limit itself is kept.
+        for id in [MAX_ID + 1, MAX_ID + 2, u64::MAX] {
+            let q = Queue::from_json(row(id).as_bytes()).unwrap();
+            assert!(q.items().is_empty(), "{id}");
+        }
+        let mut q = Queue::from_json(row(MAX_ID).as_bytes()).unwrap();
+        assert_eq!(q.items()[0].id, MAX_ID);
+        // Adding at the limit fails with D-025's message instead of handing out an unsafe id.
+        match q.add("https://e.test/next") {
+            Err(AddError::Invalid { message }) => {
+                assert_eq!(message, "The queue is full. Remove some rows to add more.")
+            }
+            other => panic!("{other:?}"),
+        }
+        let mut q = Queue::from_json(row(MAX_ID - 1).as_bytes()).unwrap();
+        assert_eq!(q.add("https://e.test/last").unwrap().id, MAX_ID);
+        assert!(q.add("https://e.test/after").is_err());
     }
 
     #[test]
