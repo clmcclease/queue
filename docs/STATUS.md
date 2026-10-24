@@ -42,7 +42,13 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
-## #86(b): the ffmpeg build environment in the cache key (fourth run; branch `infra/86-build-env`)
+## #84 (part): `persist` never writes with saving off (fourth run; branch `tests/84-persist-no-write`)
+- **What changed (tests only):** a unit test in `src-tauri/src/lib.rs` builds a `QueueFile` with `path: None`, as startup does for a newer-format `queue.json` (D-035), adds rows, and calls `persist` several times with a writer that panics. Nothing is written, no event is emitted, and the warning stays. The writable case was already covered.
+- **Not done (#84 stays open):** the startup-level check that a newer-format load sets `path: None`, and the `settings_set_api` save-failure test. Both need a command-level harness (D-035).
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 601 passed, 0 failed, 32 ignored. With saving switched on, the new test fails (the panic), so it guards the case.
+- **QA:** `test "#84"` **PASS WITH NOTES** (`20261024-005231-test-feW3`), no bugs. Its one extra unit test was added: 602 passed.
+
+## #86(b): the ffmpeg build environment in the cache key (fourth run): merged as c2056a9 (PR #125); #86 stays open for (c)
 - **What changed:**
   - The `ffmpeg` job's new first step, "Record the build environment", writes `build-env.txt`: the runner image (`ImageOS`, `ImageVersion`), which covers the linker and libraries the probes miss; then, on macOS, `xcodebuild -version`, the SDK and clang; on Linux, the candidate versions of mingw-w64, gcc-mingw-w64-x86-64, libz-mingw-w64-dev and zlib1g-dev, plus gcc; on both, make. It runs under `set -euo pipefail`, so a failing probe stops the step.
   - The cache key adds `hashFiles('build-env.txt')`.
