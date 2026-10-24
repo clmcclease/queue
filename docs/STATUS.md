@@ -42,6 +42,12 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
+## #84 (part): `persist` never writes with saving off (fourth run; branch `tests/84-persist-no-write`)
+- **What changed (tests only):** a unit test in `src-tauri/src/lib.rs` builds a `QueueFile` with `path: None`, as startup does for a newer-format `queue.json` (D-035), adds rows, and calls `persist` several times with a writer that panics. Nothing is written, no event is emitted, and the warning stays. The writable case was already covered.
+- **Not done (#84 stays open):** the startup-level check that a newer-format load sets `path: None`, and the `settings_set_api` save-failure test. Both need a command-level harness (D-035).
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 601 passed, 0 failed, 32 ignored. With saving switched on, the new test fails (the panic), so it guards the case.
+- **QA:** `test "#84"` **PASS WITH NOTES** (`20261024-005231-test-feW3`), no bugs. Its one extra unit test was added: 602 passed.
+
 ## #86(a): ffmpeg tarball signature (fourth run; branch `infra/86-ffmpeg-signature`)
 - **The architect's extension (22:50, D-035):** after #44, the order is #86(a) → #120 → #86(b) (optional) → a `persist` no-write test (optional). #18, #20–#23, #103, #104, #84's harness, #97 and #100 part 3 stay deferred, with the reasons in D-035.
 - **What changed:**

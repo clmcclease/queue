@@ -1804,6 +1804,79 @@ mod tests {
         assert_eq!(persist(&file, &queue, works), None);
     }
 
+    /// #84 (from #83's review): with saving off for the session (`path: None`, e.g. a queue.json
+    /// from a newer Queue, D-035), no change is ever written and the warning stays as it was.
+    #[test]
+    fn with_saving_off_no_change_is_ever_written_and_the_warning_stays() {
+        let queue = Mutex::new(Queue::default());
+        let warning = "The saved list is from a newer version of Queue, so it isn't shown and changes made now won't be saved. The file is untouched.";
+        let file = QueueFile {
+            path: None,
+            saved: Mutex::new(0),
+            _lock: None,
+            problem: Mutex::new(Some(warning.to_owned())),
+        };
+        let never = |_: &std::path::Path, _: &[u8]| -> std::io::Result<()> {
+            panic!("saving is off: nothing may be written")
+        };
+        assert_eq!(persist(&file, &queue, never), None);
+        queue.lock().unwrap().add("https://e.test/a").unwrap();
+        queue.lock().unwrap().add("https://e.test/b").unwrap();
+        for _ in 0..3 {
+            assert_eq!(persist(&file, &queue, never), None, "no write and no event");
+        }
+        assert_eq!(*file.saved.lock().unwrap(), 0);
+        assert_eq!(file.problem.lock().unwrap().as_deref(), Some(warning));
+    }
+
+    /// Q7 / #84: disabling persistence preserves an existing save checkpoint and any warning,
+    /// even as rows change or the list becomes empty again. No startup/command harness needed.
+    #[test]
+    fn saving_off_preserves_nonzero_checkpoint_and_warning_across_row_changes_84_qa() {
+        for warning in [
+            None,
+            Some(String::new()),
+            Some("保存できません — queue.json".into()),
+        ] {
+            let mut initial = Queue::default();
+            let id = initial.add("https://e.test/persist-84").unwrap().id;
+            let checkpoint = initial.changes();
+            assert!(checkpoint > 0);
+            let queue = Mutex::new(initial);
+            let file = QueueFile {
+                path: None,
+                saved: Mutex::new(checkpoint),
+                _lock: None,
+                problem: Mutex::new(warning.clone()),
+            };
+            let check = || {
+                let before = queue.lock().unwrap().to_json();
+                for _ in 0..3 {
+                    assert_eq!(
+                        persist(&file, &queue, |_, _| panic!("disabled writer called")),
+                        None,
+                        "disabled saving must not request a storage event"
+                    );
+                    assert_eq!(*file.saved.lock().unwrap(), checkpoint);
+                    assert_eq!(*file.problem.lock().unwrap(), warning);
+                    assert_eq!(queue.lock().unwrap().to_json(), before);
+                }
+            };
+            check(); // No changes since the previous save.
+            queue
+                .lock()
+                .unwrap()
+                .fetched(id, Ok(Meta::default()))
+                .unwrap();
+            assert_ne!(queue.lock().unwrap().changes(), checkpoint);
+            check();
+            queue.lock().unwrap().remove(id).unwrap();
+            assert!(queue.lock().unwrap().items().is_empty());
+            assert_ne!(queue.lock().unwrap().changes(), checkpoint);
+            check(); // An empty list with unsaved removals must not bypass the guard either.
+        }
+    }
+
     #[test]
     fn a_panicking_job_fails_its_row_and_the_next_job_still_works() {
         let queue = Mutex::new(Queue::default());
