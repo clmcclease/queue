@@ -1,5 +1,8 @@
 //! Independent #32(a) / N8 QA: saved endpoint resolution, optional keys, Test connection,
 //! and provider switches before the request starts. Only fake credentials and loopback HTTP.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Mutex, mpsc};
@@ -35,20 +38,7 @@ impl Service {
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let (stop, stopped) = mpsc::channel();
         let worker = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(15);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        if stopped.try_recv().is_ok() || Instant::now() >= deadline {
-                            return None;
-                        }
-                        thread::sleep(Duration::from_millis(2));
-                    }
-                    Err(e) => panic!("fixture accept: {e}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
+            let mut stream = accept::accept_until(&listener, || stopped.try_recv().is_ok())?;
             stream
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
@@ -102,6 +92,22 @@ fn settings(url: &str) -> Settings {
         api_model: "qa-model".into(),
         ..Default::default()
     }
+}
+
+/// #100 part 1: even when the client never connects, a single-request fixture must finish
+/// accepting after 10 seconds. Keep the stop sender alive to exercise the actual deadline.
+#[test]
+fn n8_100_single_request_fixture_without_a_client_obeys_the_ten_second_accept_budget() {
+    let started = Instant::now();
+    let Service { stop, worker, .. } = Service::start(200, chat("Unused"), false);
+    let received = worker.join().unwrap();
+    let elapsed = started.elapsed();
+    drop(stop);
+    assert!(received.is_none());
+    assert!(
+        elapsed < Duration::from_secs(12),
+        "accept took {elapsed:?}; #100 requires 10 s (plus scheduling slack)"
+    );
 }
 
 fn queued(title: &str) -> (Mutex<Queue>, u64) {

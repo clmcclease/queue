@@ -1,5 +1,8 @@
 //! #32 / N8: the OpenAI-compatible API provider against a fake server on 127.0.0.1, with the key
 //! in an in-memory store. No network, and the real credential store is never touched.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
@@ -23,7 +26,7 @@ fn serve(status: u16, body: String) -> (String, thread::JoinHandle<String>) {
         listener.local_addr().unwrap().port()
     );
     let request = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();

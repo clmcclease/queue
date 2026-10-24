@@ -1,5 +1,8 @@
 //! #33 / N9: `ai::ask` against a fake OpenAI-compatible server on 127.0.0.1. No network, no
 //! model, no key.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
@@ -21,7 +24,7 @@ fn serve(status: u16, body: String, delay: Duration) -> Fake {
         listener.local_addr().unwrap().port()
     );
     let request = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
