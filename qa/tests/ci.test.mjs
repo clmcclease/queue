@@ -178,3 +178,18 @@ test("#44/#86: a job of its own verifies the signatures before any runner builds
   assert.match(test_, /^    needs: \[ffmpeg, verify-signatures\]$/m);
   for (const job of [test_, bundle, block("  ffmpeg:")]) assert.ok(!job.includes("--verify-signatures"));
 });
+
+test("#86(b): the ffmpeg cache key includes the recorded build environment", () => {
+  const ffmpeg = block("  ffmpeg:");
+  const entries = steps(ffmpeg);
+  const record = entries.findIndex((entry) => entry.startsWith("name: Record the build environment"));
+  const cache = entries.findIndex((entry) => entry.startsWith("id: cache"));
+  assert.ok(record >= 0 && record < cache, "recorded before the cache is looked up");
+  assert.match(entries[record], /> build-env\.txt/);
+  assert.match(entries[record], /xcodebuild -version/);
+  assert.match(entries[record], /echo "image \$\{ImageOS:-unknown\} \$\{ImageVersion:-unknown\}"/);
+  assert.match(entries[record], /apt-cache policy mingw-w64 gcc-mingw-w64-x86-64 libz-mingw-w64-dev zlib1g-dev/);
+  assert.match(entries[cache], /key: ffmpeg-\$\{\{ matrix\.key \}\}-\$\{\{ hashFiles\('scripts\/build-ffmpeg\.sh', 'scripts\/sidecars\.json'\) \}\}-\$\{\{ hashFiles\('build-env\.txt'\) \}\}$/m);
+  assert.match(ffmpeg, /cp build-env\.txt "out\/build-env-\$\{\{ matrix\.key \}\}\.txt"/);
+  assert.match(test_, /cp ffmpeg-out\/\$\{\{ matrix\.target \}\}\/\* src-tauri\/binaries\//, "test copies only the target folder");
+});

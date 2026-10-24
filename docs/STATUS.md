@@ -42,7 +42,18 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
-## #120: real-gpg tests for the signature check (fourth run; branch `tests/120-gpg-negatives`)
+## #86(b): the ffmpeg build environment in the cache key (fourth run; branch `infra/86-build-env`)
+- **What changed:**
+  - The `ffmpeg` job's new first step, "Record the build environment", writes `build-env.txt`: the runner image (`ImageOS`, `ImageVersion`), which covers the linker and libraries the probes miss; then, on macOS, `xcodebuild -version`, the SDK and clang; on Linux, the candidate versions of mingw-w64, gcc-mingw-w64-x86-64, libz-mingw-w64-dev and zlib1g-dev, plus gcc; on both, make. It runs under `set -euo pipefail`, so a failing probe stops the step.
+  - The cache key adds `hashFiles('build-env.txt')`.
+  - The file is uploaded as `out/build-env-<key>.txt`, beside the target folders, which is where `test` and `bundle` copy from.
+  - Pinning the toolchain is #86(c), the owner's call; #86 stays open for it.
+- **Checks (macOS arm64):** `ci.test.mjs` has a new test for the step's place, the key and the artifact path. The step itself runs first in this PR's CI, where the new key forces one ffmpeg rebuild (about 3.5 min).
+- **QA:** `test "#86"`: **FAIL** (`20261024-003455-test-23gJ`). A failing `xcrun` inside `echo "SDK $(…)"` was swallowed. Fixed with `pipefail` and the SDK read into a variable. Codex's 23 tests were added as `qa/tests/build-env-86b-qa.test.mjs`.
+- **Review round 1:** PASS WITH NOTES (`20261024-003941-review-BtL6`). P3: the probes didn't cover the whole toolchain, such as the linker, so the docs overclaimed. Fixed by recording the runner image's version, so the claim now holds. Two test suggestions weren't added: a macOS `make` failure, and changing each Linux candidate.
+- **Review round 2:** **FAIL** (`20261024-004211-review-jdlK`, P2). Codex's harness still expected the record without the new image line, and the round was run with those 2 tests failing locally. Fixed: the fixtures set `ImageOS`/`ImageVersion` and expect the line, and two new tests check that changing either one changes the digest.
+
+## #120: real-gpg tests for the signature check (fourth run): merged as f2f7bb4 (PR #124)
 - **What changed (tests only):**
   - `qa/fixtures/signatures/yt-dlp-2026.08.19/` holds yt-dlp's own `SHA2-256SUMS` and `SHA2-256SUMS.sig`, marked binary in `.gitattributes` so git never changes their bytes.
   - `qa/tests/signature-gpg-120.test.mjs` exercises the shared `verifyDetached` with real gpg:
