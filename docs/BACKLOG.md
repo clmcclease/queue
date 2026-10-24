@@ -87,7 +87,7 @@ Requirement IDs refer to [PRD-001](prds/PRD-001-queue-v1.md). `N-T1` = §6.3 Tie
 | #105 | N9 | P2 | naming | **ai::parse: strip a media extension after the dash normalization and byte cap** — Fixed: the dash conversion and its re-sanitize now run before the second extension strip, so the strip is the last cleanup and an ending cut down to `.mp4` at the byte limit is removed. |
 | #108 | N8 | P1 | naming | **OpenAI-compatible requests fail with HTTP 400 on OpenAI's reasoning models** — Fixed by host (D-034): `api.openai.com` gets `max_completion_tokens` 1024 and no `temperature`; every other host keeps today's body. Live-checked with `gpt-6-luna`. |
 | #109 | N8 | P2 | ui | **API setup: an empty Base URL looks filled in** — Fixed: with nothing saved, the service's default address is filled in as a real value (no placeholder), and Save stores it with the model. A saved URL is never replaced. The key-prefix suggestion is not built (architect, 2026-10-23). |
-| #93 | N8 | P2 | naming | **Keyless API on Linux without a Secret Service** — Treat an unreadable credential store as "no key" for a keyless service (Ollama, LM Studio), keeping the status note. #32 follow-up (P3). |
+| #93 | N8 | P2 | naming | **Keyless API on Linux without a Secret Service** — Fixed (D-035): an unreadable credential store is no key for an OpenAI-compatible service, which is still asked; Settings and Test connection say the store can't be read. Anthropic still sends nothing without a key. |
 
 ## Later
 

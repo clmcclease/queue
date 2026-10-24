@@ -403,6 +403,9 @@ fn set_naming_provider(app: &AppHandle, provider: ai::Provider) -> Result<Naming
 struct NamingStatus {
     provider: ai::Provider,
     unavailable: Option<ai::Unavailable>,
+    /// The API is chosen and the credential store can't be read (#93); an OpenAI-compatible
+    /// service is still asked, without a key.
+    store_unreachable: bool,
 }
 
 #[tauri::command]
@@ -412,13 +415,11 @@ async fn naming_status(app: AppHandle) -> Result<NamingStatus, String> {
 
 fn status_of_naming(app: &AppHandle) -> Result<NamingStatus, String> {
     let settings = current_settings(app)?;
+    let vault = app.state::<Vault>();
     Ok(NamingStatus {
         provider: settings.naming_provider,
-        unavailable: ai::unavailable(
-            &settings,
-            app.state::<Vault>().0.as_ref(),
-            local_model(app, &settings),
-        ),
+        unavailable: ai::unavailable(&settings, vault.0.as_ref(), local_model(app, &settings)),
+        store_unreachable: ai::store_unreachable(&settings, vault.0.as_ref()),
     })
 }
 

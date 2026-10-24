@@ -178,6 +178,25 @@ test("N8: an unreachable credential store is said plainly, not hidden", async ()
   assert.match(el("provider-note").textContent, /credential store/);
 });
 
+test("#93: with the store unreadable, an OpenAI-compatible service is asked without a key, and the note says so", async () => {
+  await mount({
+    settings_api: () => ({ ...SAVED, storeError: "Couldn't reach your system's credential store." }),
+    naming_status: () => ({ provider: "api", unavailable: null, store_unreachable: true }),
+  });
+  assert.equal(
+    el("provider-note").textContent,
+    "Couldn't reach your system's credential store, so the service is asked without a key.",
+  );
+});
+
+test("#93: no store note when the store is fine", async () => {
+  await mount({
+    settings_api: () => SAVED,
+    naming_status: () => ({ provider: "api", unavailable: null, store_unreachable: false }),
+  });
+  assert.equal(el("provider-note"), null);
+});
+
 test("N8 review: a late status reply from the API setup can't undo a switch to Local", async () => {
   const late = deferred();
   let statusCalls = 0;

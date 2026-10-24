@@ -40,6 +40,15 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
+## #93: keyless API when the credential store can't be read (fourth run; branch `naming/93-keyless-store`)
+- **What changed (D-035):**
+  - `ai::api_endpoint`: an unreadable credential store means no key for an OpenAI-compatible service, which is still asked; a service that needs a key answers 401, the Fallback tag. Anthropic still gets `StoreUnreachable` and nothing is sent.
+  - `NamingStatus` has a new `store_unreachable` flag. Settings → API says "Couldn't reach your system's credential store, so the service is asked without a key."
+  - Test connection reads the store once, sends keyless, and appends "Couldn't reach your system's credential store. No key was sent."
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 576 passed, 0 failed, 32 ignored; `tsc`, `npm run build`, `npm test` 332 passed, 0 failed. The real case, Linux without a Secret Service, can't be checked on a Mac.
+- **QA:** `test "#93"`: **FAIL** (`20261023-211902-test-JOmV`). Test connection read the store a second time, so a store that failed and then recovered sent a keyless request whose result didn't say so. Fixed: it reads the store once (`api_endpoint_with`). Its tests were added as `tests/api_keyless_n8_93_qa.rs` (9) and `qa/tests/api-keyless-n8-93-qa.test.mjs` (4); the failing one passes now.
+  - Review: **PASS WITH NOTES** (`20261023-212858-review-WbaB`), no defects. Its P3 (the updated `api_n8_32` test could hang if a request were never sent) is a pre-accepted test note, left for #100's bounded `accept()`. Its two test suggestions weren't added: a 401 then a success across two rows, and a store-read count.
+
 ## Third run (2026-10-23, 13:31–16:00, under D-028)
 - **Owner's instruction (13:31):** "have Architect take over and continue as far as you can get till 1600." The `gpt-6-luna` key may go a little past 10,000 requests.
 - **Architect rulings (13:40):**
