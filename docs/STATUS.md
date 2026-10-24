@@ -42,6 +42,14 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
+## #100 parts 1–2: test hardening (fourth run; branch `tests/100-bounded-accept`)
+- **What changed (tests only):**
+  - `tests/support/accept.rs` has `accept` (panics) and `accept_until` (gives up quietly) with one 10 s deadline. Every single-shot loopback fixture uses one of them, across 11 test files.
+  - New `tests/api_followups_n8_100.rs`: a kind switched mid-job never sends the stale job, and the next one goes to Anthropic. An Anthropic failure then a success tags the rows `rules` then `AI`.
+  - Not done: the failed-save-during-kind-change test needs the command layer (#84). Part 3, one key slot, is the owner's.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 583 passed, 0 failed, 32 ignored, before `main` came in.
+- **QA:** `test "#100"`: **FAIL** (`20261023-215549-test-tLBN`). Three QA fixtures still had their own 15 s accept loops, plus two more at 10 s and 5 s. Fixed: all of them use the shared helper. Codex's tests were added as `tests/accept_100_qa.rs`, `tests/api_followups_n8_100_qa.rs` and a regression in `tests/api_n8_32_qa.rs`.
+
 ## #19: keyboard shortcuts (fourth run): merged as e9d0fdb (PR #116)
 - **What changed (D-035):**
   - A paste outside any text field goes to the URL bar: one line fills it and focuses it (Enter adds), and several lines add rows (Q8).

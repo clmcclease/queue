@@ -1,4 +1,7 @@
 //! Independent #33(a) / N9 QA. Only loopback fixtures; no real model or API credentials.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -197,7 +200,7 @@ fn serve(reply: String, split_at: Option<usize>) -> (String, thread::JoinHandle<
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();

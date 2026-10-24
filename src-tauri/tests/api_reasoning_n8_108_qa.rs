@@ -1,5 +1,8 @@
 //! Independent #108 / N8 QA. Pure request checks plus bounded loopback fixtures; no API keys
 //! from the real store and no requests to external services.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Mutex, mpsc};
@@ -162,20 +165,9 @@ impl Service {
         };
         let (stop, stopped) = mpsc::channel();
         let worker = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        if stopped.recv_timeout(Duration::from_millis(2)).is_ok()
-                            || Instant::now() >= deadline
-                        {
-                            return None;
-                        }
-                    }
-                    Err(e) => panic!("accept: {e}"),
-                }
-            };
+            let mut stream = accept::accept_until(&listener, || {
+                stopped.recv_timeout(Duration::from_millis(2)).is_ok()
+            })?;
             let received = request(&mut stream);
             let headers = format!(
                 "HTTP/1.1 {status} QA\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

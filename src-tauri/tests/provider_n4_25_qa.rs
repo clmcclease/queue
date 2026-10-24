@@ -1,5 +1,8 @@
 //! Independent QA for #25 / N4: real provider answers through the queue worker, not just
 //! parser errors or a fake namer returning an error. Only loopback HTTP; no external service.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -44,7 +47,7 @@ fn service(body: Option<String>) -> (Endpoint, mpsc::Sender<()>, thread::JoinHan
     };
     let (release, released) = mpsc::channel();
     let worker = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();

@@ -1,5 +1,8 @@
 //! #25 / N4: the naming worker's job (`run_naming_job`) with fake namers, and with the real
 //! `ai::ask` against a fake OpenAI server on 127.0.0.1. No model, no network.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
@@ -162,7 +165,7 @@ fn n4_the_real_ask_path_names_the_row() {
         listener.local_addr().unwrap().port()
     );
     let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         let mut buf = [0; 65536];
         let mut seen = Vec::new();
         while !String::from_utf8_lossy(&seen).contains("\r\n\r\n") || !seen.ends_with(b"}") {

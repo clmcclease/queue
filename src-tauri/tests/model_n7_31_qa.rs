@@ -1,4 +1,7 @@
 //! Independent #31 / N7 QA. Tiny loopback responses; never downloads a real model.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -122,7 +125,7 @@ fn a_corrupt_complete_partial_is_deleted_without_publishing_or_network() {
 #[test]
 fn an_oversize_partial_restarts_at_zero_and_checks_the_new_whole_file() {
     let (url, worker) = server(|listener| {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         assert!(request(&mut stream).contains(&format!("bytes=0-{}", DATA.len() - 1)));
         response(
             &mut stream,
@@ -145,11 +148,11 @@ fn an_oversize_partial_restarts_at_zero_and_checks_the_new_whole_file() {
 #[test]
 fn range_416_discards_the_partial_and_a_retry_requests_zero() {
     let (url, worker) = server(|listener| {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         assert!(request(&mut stream).contains("bytes=4-"));
         response(&mut stream, 416, None, b"");
         drop(stream);
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         assert!(request(&mut stream).contains("bytes=0-"));
         response(
             &mut stream,
@@ -178,7 +181,7 @@ fn malformed_or_wrong_start_ranges_preserve_the_existing_partial() {
         Some("bytes 4-3/27"),
     ] {
         let (url, worker) = server(move |listener| {
-            let (mut stream, _) = listener.accept().unwrap();
+            let mut stream = accept::accept(&listener);
             request(&mut stream);
             response(&mut stream, 206, range, &DATA[4..]);
         });
@@ -257,7 +260,7 @@ fn two_body_timeouts_stop_and_preserve_the_resumable_bytes() {
     let (url, server) = server(|listener| {
         let mut held = Vec::new();
         for _ in 0..2 {
-            let (mut stream, _) = listener.accept().unwrap();
+            let mut stream = accept::accept(&listener);
             assert!(request(&mut stream).contains("bytes=4-26"));
             write!(stream, "HTTP/1.1 206 X\r\nContent-Length: 23\r\nContent-Range: bytes 4-26/27\r\nConnection: close\r\n\r\n").unwrap();
             stream.flush().unwrap();
@@ -309,7 +312,7 @@ fn cancel_during_a_stalled_body_must_not_wait_for_the_request_budget() {
     // Release the server even on failure, so the assertion cannot leave a hung test process.
     let (release_tx, release_rx) = mpsc::channel();
     let (url, server) = server(move |listener| {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept::accept(&listener);
         request(&mut stream);
         write!(stream, "HTTP/1.1 206 X\r\nContent-Length: {}\r\nContent-Range: bytes 0-{}/{}\r\nConnection: close\r\n\r\n", DATA.len(), DATA.len() - 1, DATA.len()).unwrap();
         stream.write_all(b"GGUF").unwrap();
