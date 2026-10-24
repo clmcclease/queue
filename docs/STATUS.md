@@ -53,7 +53,25 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review round 1:** PASS WITH NOTES (`20261024-003941-review-BtL6`). P3: the probes didn't cover the whole toolchain, such as the linker, so the docs overclaimed. Fixed by recording the runner image's version, so the claim now holds. Two test suggestions weren't added: a macOS `make` failure, and changing each Linux candidate.
 - **Review round 2:** **FAIL** (`20261024-004211-review-jdlK`, P2). Codex's harness still expected the record without the new image line, and the round was run with those 2 tests failing locally. Fixed: the fixtures set `ImageOS`/`ImageVersion` and expect the line, and two new tests check that changing either one changes the digest.
 
-## #86(a): ffmpeg tarball signature (fourth run; branch `infra/86-ffmpeg-signature`)
+## #120: real-gpg tests for the signature check (fourth run): merged as f2f7bb4 (PR #124)
+- **What changed (tests only):**
+  - `qa/fixtures/signatures/yt-dlp-2026.08.19/` holds yt-dlp's own `SHA2-256SUMS` and `SHA2-256SUMS.sig`, marked binary in `.gitattributes` so git never changes their bytes.
+  - `qa/tests/signature-gpg-120.test.mjs` exercises the shared `verifyDetached` with real gpg:
+    - the real signature passes with the pinned key;
+    - a flipped byte in the sums fails;
+    - a flipped byte in the signature fails;
+    - a throwaway key's signature fails against the pinned key;
+    - the throwaway key in the committed key's place fails at import;
+    - the throwaway key's own fingerprint doesn't adopt the real signature.
+  - The throwaway key is generated at test time, so no private key is committed and nothing uses the network.
+  - A gpg-free test checks that the fixture sums pair every pinned asset, so a pin bump without a fixture refresh fails on every OS.
+  - The gpg cases skip on this Mac (no gpg) and on Windows, where Git's MSYS gpg can't read Windows paths. ffmpeg failure cases aren't built: the tarball is 10 MB and the helper is shared.
+- **Checks:** on macOS arm64, 1 passed and 6 skipped. In a throwaway Linux container (`node:24.21.0`, gpg 2.2.40, files streamed in with tar, nothing installed on the Mac), all 7 passed. CI's Linux and macOS `test` jobs run them too.
+- **QA:** `test "#120"`: **FAIL** (`20261024-002749-test-kEl6`), a harness bug. The gpg probe ignored a non-zero exit, so a broken gpg ran the cases instead of skipping them. Fixed: the probe needs exit 0. Codex's 10 tests were added as `qa/tests/signature-gpg-120-qa.test.mjs`.
+- **Review:** PASS WITH NOTES (`20261024-003214-review-kyLH`), no findings.
+- **CI on 475bae1:** Linux and macOS ran the real-gpg cases and passed. **Windows failed:** Git for Windows' MSYS `gpg` passes the probe but can't read Windows paths, so an import finds no key. Fixed: both files skip on Windows explicitly, with the reason. The signature mode itself only runs in CI's Linux job.
+
+## #86(a): ffmpeg tarball signature (fourth run): merged as 075598c (PR #123); #86 stays open for (b) and (c)
 - **The architect's extension (22:50, D-035):** after #44, the order is #86(a) → #120 → #86(b) (optional) → a `persist` no-write test (optional). #18, #20–#23, #103, #104, #84's harness, #97 and #100 part 3 stay deferred, with the reasons in D-035.
 - **What changed:**
   - FFmpeg's release key is committed at `scripts/keys/ffmpeg-release.asc`, byte for byte as ffmpeg.org serves it. Its fingerprint, `FCF986EA15E6E293A5644F10B4322F04D67658D8`, was read from ffmpeg.org's download page; it matches the primary key packet computed locally, and the key has one signing subkey.
