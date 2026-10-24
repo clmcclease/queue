@@ -162,6 +162,7 @@ The owner asked for a software architect agent on Fable 5.1 (`.claude/agents/arc
 - **Ends** when the owner says so; until then it applies to later sessions too.
 - **Time box (second run):** per the owner's instruction of 2026-10-21 11:15, until M4 is complete or 17:00 on 2026-10-21, whichever is first. No new item after 15:00, stop coding at 16:15, handoff pushed by 16:45.
 - **Time box (third run, 2026-10-23):** per the owner's instruction at 13:31, until 16:00. No new item after 14:45, stop coding at 15:20, handoff pushed by 15:45. The order is #108 → #109 → #105; #104 is deferred. The owner's `gpt-6-luna` key may go a little past 10,000 requests (owner, 13:31). Decided by the architect under D-028.
+- **Time box (fourth run, 2026-10-23 21:00 → 2026-10-24 09:00):** per the owner's instruction at 20:59 ("let architect run the decisions until I prompt you tomorrow"). No new item after 06:00, stop coding at 07:30, last Codex run by 07:45, nothing merges after 08:30 unless already green and pre-approved, handoff by 08:30, at rest by 09:00. The order is the docs PR → #83+#85 → #93 → #19, then optionally #100 (parts 1–2), #43 (merge held for the owner) and #44. Decided by the architect under D-028.
 
 ## D-029 M3/M4 scope and order for the overnight run — Confirmed (2026-10-22; decided by the architect under D-028 on 2026-10-20–21)
 The owner confirmed every bullet below on 2026-10-22, including the #30(b) runtime flags, the #91 request shape and the audit dispositions.
@@ -262,3 +263,17 @@ The owner found this while testing #31 in the app, and chose to keep it:
   - The in-repo runner with `gpt-6-luna` on the held-out 100: 0 service errors, 100% valid JSON, 61% accepted (below the 65% target, as expected for that model).
   - The 4B on the held-out 100: 66/100, unchanged.
   - `QUEUE_QA_REAL_LLAMA`: the 4B answers `Ok("Me at the zoo")`.
+
+## D-035 Fourth-run scope and small rulings — Provisional (2026-10-23, decided by the architect under D-028)
+- **#83:** a `queue.json` with a `version` other than 1 comes from a newer Queue; it isn't damaged. The queue starts empty, saving is off for the session with a warning that says why, and the file is never moved aside or written. Additive fields keep version 1; the number goes up only for an incompatible change.
+- **#85:** row ids are capped at 2^53 − 1, JavaScript's safe range. Saved rows above it are dropped like other impossible ids, and adding a row at the limit fails with D-025's message.
+- **#93:** an unreadable credential store counts as "no key" for an OpenAI-compatible endpoint. The row is asked (a 401 gets the Fallback tag), and the status note still shows. Anthropic still sends nothing without a key.
+- **#19:**
+  - A paste outside a text field goes to the URL bar: one line fills it, several lines add rows.
+  - ⌘/Ctrl+Enter is Download all, whenever the button is enabled.
+  - Rows are focusable. Up/Down move between them, Delete or Backspace removes a focused row that isn't downloading, and Escape returns to the URL bar.
+  - Not built: a menu, a help sheet, reorder keys. The focused row's look belongs to #18.
+- **#43** is built, but it merges only after the owner checks the dev app on macOS. The Windows and Linux checks go to #71.
+- **#83 and #85 ship in one PR:** both `test` runs, one review.
+- **Deferred to a session with the owner:** #18, #20, #21, #22, #23, #103, #104. #24 is the owner's; #71 is the owner's hand checks.
+- **Codex limits overnight:** D-029's pause rule. A reset that is unknown, more than 3 h away or after 07:45 makes that gate the owner's, and the handoff is then pushed as a draft PR, not merged. At most three review rounds per item, then the item is parked.

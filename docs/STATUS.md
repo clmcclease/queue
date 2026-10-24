@@ -1,8 +1,44 @@
 # Status
 
-**Updated:** 2026-10-23 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** third run under D-028 until 16:00: #108 → #109 → #105
+**Updated:** 2026-10-23 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** fourth run under D-028 until 09:00 on 2026-10-24: docs → #83+#85 → #93 → #19
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## Fourth run (2026-10-23 21:00 → 2026-10-24 09:00, under D-028)
+- **Owner's instruction (20:59):** "continue, you have until 0900 before i need to move again. let architect run the decisions until i prompt you tomorrow."
+- The Mac is held awake with `caffeinate` until about 09:05, on AC power. Closing the lid still sleeps it.
+- **Architect rulings (21:05; D-035 and D-028's fourth-run line):**
+  - **Time rules:**
+    - No new item after 06:00.
+    - Stop coding at 07:30; last Codex run by 07:45.
+    - Nothing merges after 08:30 unless its CI was already green and its squash pre-approved.
+    - Handoff merged by 08:30; at rest by 09:00.
+    - Every PR carries its own STATUS section.
+    - At most 3 review rounds per item, then the item is parked.
+    - Codex usage limits: D-029's pause rule. A reset that is unknown, more than 3 h away, or after 07:45 makes that gate the owner's; the handoff is then a draft PR.
+  - **Order:**
+    1. This docs PR.
+    2. #83 and #85 together (queue.json hardening).
+    3. #93 (keyless API when the credential store is unreachable).
+    4. #19 (keyboard shortcuts).
+    5. Optional, if started before 06:00: #100 parts 1–2 (tests only); #43 CSP, built but with its merge held for the owner; #44 (yt-dlp signature check).
+  - **Deferred to a session with the owner:** #18, #20, #21, #22, #23, #103, #104. #24 is the owner's; #71 is the owner's hand checks.
+  - **Pre-approved per item:** commit, push, draft PR, handoff commit, and the squash once `test` ×3 is green and the review passes (PASS or PASS WITH NOTES). Not #43's squash.
+  - **P3s:** test suggestions, wording and documented limitations are pre-accepted. Not pre-accepted: P1s, P2s, and P3s touching keys or the credential store, URL checks, request bodies, file placement or overwrite safety, queue.json data loss, or the CSP. No `ci:bundle`. No live API calls or key use tonight.
+- **Next bounded action:** #83+#85 on branch `queue/83-85-hardening`, then #93.
+- **For the owner (morning):**
+  - **Hand checks in the dev app:**
+    - #19: paste with focus outside the URL field; ⌘⏎ for Download all; arrows and Delete on rows; Escape back to the field.
+    - #83 (optional): set queue.json's `version` to 2 and relaunch. The queue starts empty, the warning shows, and the file is unchanged.
+    - #43, if built: click through the dev app with the CSP set, then merge it yourself.
+  - **Inputs only you can give:**
+    - #104: the tag list.
+    - #103: the model list.
+    - #18: the design direction.
+    - #100: one key slot.
+    - #21: where the updated yt-dlp lives.
+    - #24: the certificate.
+  - **Confirm or revise:** D-035.
 
 ## Third run (2026-10-23, 13:31–16:00, under D-028)
 - **Owner's instruction (13:31):** "have Architect take over and continue as far as you can get till 1600." The `gpt-6-luna` key may go a little past 10,000 requests.
@@ -26,11 +62,12 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Merged:**
   - #108 as 3d20792 (PR #111; CI 40006369282 green on a1220c8; live evidence posted on #108).
   - #109 as 5f3ce79 (PR #112). `main` was merged into its branch for docs conflicts; it got a fresh review, `20261023-140219-review-wmHz`, PASS WITH NOTES, and CI 40008228295 was green on 967ba0f.
-- **#105:** PR #113, merged once its review passes and `test` ×3 is green.
+  - #105 as 26a4bea (PR #113; review round 2 `20261023-142524-review-3dsc` PASS WITH NOTES; CI 40011501608 green on 74c480c).
+- **The run ended early:** the Mac slept at about 14:50 and dropped the network, after #113 had merged but before this STATUS was updated. The fourth run fixes it.
 - **Accepted P3s (architect's pre-acceptance of test-quality notes):**
   - #108: a QA fallback case falls back through script loss, not the extra field.
   - Codex's test suggestions for #108, #109 and #105 are listed in each PR and weren't added: a wire test of the OpenAI body, a cleared-URL retry, a native restart check.
-- **Next bounded action:** after #113 merges, M5's next item is the owner's choice. #104 needs the owner's list of tags. #103, the model picker, and #18, the design pass, are the larger ones.
+- **Next bounded action:** superseded by the fourth run below.
 - **For the owner:**
   - Hand checks in the dev app:
     - API with `https://api.openai.com/v1` and `gpt-6-luna`: Test connection succeeds and a real row gets a name.
@@ -43,7 +80,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **What changed:** with nothing saved, Settings → AI naming → API fills the service's default base URL in as a real value, and the placeholder is gone. The filled-in default alone isn't an unsaved change; typing a model enables Save, which stores both. A saved URL is never replaced. The key-prefix suggestion isn't built (architect).
 - **Checks (macOS arm64):** `tsc`, `npm run build`, `npm test` 314 passed, 0 failed, including 2 new tests in `qa/tests/api-n8-32.test.mjs`.
 - **QA:** `test "#109"` **PASS WITH NOTES** (`20261023-134939-test-pjPN`), no bugs. Its 12 tests were added as `qa/tests/api-base-url-109-qa.test.mjs` (12 passed): defaults for both services, custom URLs, key-first saves, retries, switching services, reopening.
-## #105 (third run, 2026-10-23; branch `naming/105-ext-after-dash`, PR #113)
+## #105 (third run, 2026-10-23): merged as 26a4bea (PR #113)
 - **What changed:** `ai::parse` strips a media extension both before the dash conversion and after it, with a re-sanitize each time. The issue's boundary answer (`"é"×50 + " - " + "a"×91 + ".mp4XY"`, 200 bytes) no longer ends in `.mp4`.
 - **Tests:** the boundary case (it fails on the old order and passes on the new), and `Artist - Title` / `Artist – Title` name alike yet download to distinct files through `download::place_unique`.
 - **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` on top of `main` with #108 and #109: 566 passed, 0 failed, 32 ignored, including Codex's 8. The 4B on the held-out 100: 66/100, unchanged, 100% valid JSON.
