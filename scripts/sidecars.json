@@ -1,8 +1,13 @@
 {
-  "$comment": "Pinned sidecars (#2, D-012). Change versions only in a dedicated commit; update every sha256 from the upstream checksum files.",
+  "$comment": "Pinned sidecars (#2, D-012). Change versions only in a dedicated commit; update every sha256 from the upstream checksum files. CI's `verify-ytdlp` job, which `test` needs, verifies yt-dlp's signed SHA2-256SUMS against the committed key before any job runs yt-dlp (`--verify-ytdlp-signature`, #44); run it locally if gpg is installed.",
   "ytdlp": {
     "version": "2026.08.19",
     "url": "https://github.com/yt-dlp/yt-dlp/releases/download/{version}/{asset}",
+    "signing": {
+      "key": "scripts/keys/yt-dlp.asc",
+      "fingerprint": "AC0CBBE6848D6A873464AF4E57CF65933B5A7581",
+      "source": "https://github.com/yt-dlp/yt-dlp/blob/fa9886678eb65103303c627b8e013f13f8999b41/public.key"
+    },
     "assets": {
       "aarch64-apple-darwin": { "asset": "yt-dlp_macos", "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202" },
       "x86_64-apple-darwin": { "asset": "yt-dlp_macos", "sha256": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202" },

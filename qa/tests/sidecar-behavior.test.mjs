@@ -74,6 +74,8 @@ function fixture(t, { target = host, archive, method = 8, dirname = "Queue æ—¥æœ
   const bin = join(root, "src-tauri", "binaries");
   mkdirSync(scripts, { recursive: true }); mkdirSync(bin, { recursive: true });
   copyFileSync(new URL("scripts/fetch-sidecars.mjs", project), join(scripts, "fetch-sidecars.mjs"));
+  mkdirSync(join(scripts, "lib"));
+  copyFileSync(new URL("scripts/lib/signature.mjs", project), join(scripts, "lib/signature.mjs"));
   const ext = target.includes("windows") ? ".exe" : "";
   const deno = archive ?? zip(`deno${ext}`, payload, method);
   // #30: llama-server, as a one-entry zip on every host (the script picks its reader by name).

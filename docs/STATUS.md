@@ -42,7 +42,22 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
-## #100 parts 1–2: test hardening (fourth run; branch `tests/100-bounded-accept`)
+## #44: yt-dlp signature check (fourth run; branch `infra/44-ytdlp-signature`)
+- **What changed (D-035, the architect's #44 ruling):**
+  - `node scripts/fetch-sidecars.mjs --verify-ytdlp-signature` downloads the pinned version's `SHA2-256SUMS` and `.sig` and verifies them with gpg, in a throwaway home, against upstream's key committed at `scripts/keys/yt-dlp.asc`.
+  - The key's fingerprint, `AC0CBBE6848D6A873464AF4E57CF65933B5A7581`, and its source commit are pinned in `sidecars.json`.
+  - A pass needs three things: gpg exits 0, `VALIDSIG`'s primary key is the pinned fingerprint, and a signed line pairs every pinned asset name with its pinned sha256.
+  - CI runs it in its own `verify-ytdlp` job, which every `test` job needs, so no OS runs the pinned yt-dlp before its signed sums are checked. No other mode calls gpg, and the mode fails before downloading when gpg is missing.
+- **Checks (macOS arm64; no gpg here, so the success path runs only in CI on Linux):**
+  - The fingerprint was computed locally from the key packet (`AC0C…7581`), and a key with it is on keys.openpgp.org.
+  - The real `SHA2-256SUMS` for 2026.08.19 pairs all 3 pinned assets.
+  - With no gpg on `PATH`, the mode fails with "gpg is required" before downloading.
+  - `npm test` 408 passed, 0 failed.
+- **QA:** `test "#44"`: **FAIL** (`20261023-221425-test-yGn2`). Two targets pinning the same file name to different hashes had only the first pin checked. Fixed: one check per name and hash. Also fixed: two existing fixtures that run a copy of the script failed on its new import; the module now loads only in its mode. Codex's 25 tests were added as `qa/tests/signature-44-qa.test.mjs`.
+- **Review round 1:** **FAIL** (`20261023-222305-review-Kc2w`, P2). The step ran after `--check`, which executes yt-dlp, and the Windows and macOS jobs didn't wait for it. Architect's ruling (22:30): a dedicated `verify-ytdlp` job that downloads only the sums and executes nothing, with `test: needs: [ffmpeg, verify-ytdlp]`. Codex's real-gpg negative fixtures are a P3 follow-up, #120. `main` has no branch protection, so merging only on green CI is what holds this (D-028). Requiring these checks on `main` is the owner's setting.
+- **CI proof (run 40058742141 on 05dbe47):** `verify-ytdlp` printed `VALIDSIG AC0CBBE6848D6A873464AF4E57CF65933B5A7581: yt-dlp 2026.08.19's signed sums pair every pinned asset with its sha256 (3 assets)`. This first real-gpg run confirms the locally computed fingerprint independently. `test` was green on all three OSes.
+- **For the owner:** confirm the key fingerprint against a second source. Optionally, `brew install gnupg` to run the mode locally.
+## #100 parts 1–2: test hardening (fourth run): merged as e1c5dee (PR #119); #100 stays open
 - **What changed (tests only):**
   - `tests/support/accept.rs` has `accept` (panics) and `accept_until` (gives up quietly) with one 10 s deadline. Every single-shot loopback fixture uses one of them, across 11 test files.
   - New `tests/api_followups_n8_100.rs`: a kind switched mid-job never sends the stale job, and the next one goes to Anthropic. An Anthropic failure then a success tags the rows `rules` then `AI`.

@@ -6,14 +6,19 @@
 //   node scripts/fetch-sidecars.mjs [--target <triple>] [--check]
 //   node scripts/fetch-sidecars.mjs [--target <triple>] --check-llama <dir>
 //   node scripts/fetch-sidecars.mjs --test-model <dir>
+//   node scripts/fetch-sidecars.mjs --verify-ytdlp-signature
 //
 // --target defaults to the host. --check runs yt-dlp's verbose header to confirm it sees our
 // ffmpeg, ffprobe and deno, and runs llama-server --version and --list-devices to confirm it
 // and its libraries load (skipped when the target can't run on this host). --test-model only
 // fetches the pinned test GGUF (CI's real llama-server test, #30(b)) into <dir>.
+// --verify-ytdlp-signature checks, with gpg, that yt-dlp's signed SHA2-256SUMS for the pinned
+// version pairs every pinned asset name with its pinned sha256 (#44, D-035). CI's own `verify-ytdlp`
+// job runs it before any job runs yt-dlp; other modes never need gpg.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { arch, platform } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -33,6 +38,65 @@ const HOSTS = {
 const host = HOSTS[`${platform}-${arch}`];
 
 const args = process.argv.slice(2);
+
+if (args.includes("--verify-ytdlp-signature")) {
+  try {
+    await verifyYtdlpSignature();
+    process.exit(0);
+  } catch (e) {
+    console.error(`--verify-ytdlp-signature: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+// Downloads the pinned version's SHA2-256SUMS and its .sig, and verifies them with gpg in a
+// throwaway home against the committed key and its pinned fingerprint. Both files are untrusted
+// data: they're only ever gpg's file arguments and the sums parser's input.
+async function verifyYtdlpSignature() {
+  // Loaded only here, so the other modes run from a copy of this file alone.
+  const { parseStatus, parseSums, unsignedAssets } = await import("./lib/signature.mjs");
+  const { version, url, assets, signing } = manifest.ytdlp;
+  if (!signing?.fingerprint || !signing?.key) throw new Error("sidecars.json has no ytdlp.signing key and fingerprint");
+  const want = signing.fingerprint.toUpperCase();
+  // gpg is checked first, so a machine without it fails before any download.
+  if (spawnSync("gpg", ["--version"]).error?.code === "ENOENT") {
+    throw new Error("gpg is required for this mode and wasn't found");
+  }
+  const home = mkdtempSync(join(tmpdir(), "queue-gpg-"));
+  try {
+    const fetchTo = async (name) => {
+      const src = url.replace("{version}", version).replace("{asset}", name);
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`${src}: HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      writeFileSync(join(home, name), buf);
+      return buf;
+    };
+    const sums = (await fetchTo("SHA2-256SUMS")).toString("utf8");
+    await fetchTo("SHA2-256SUMS.sig");
+    const gpg = (...argv) => {
+      const run = spawnSync("gpg", ["--homedir", home, "--batch", "--no-tty", "--status-fd", "1", ...argv], { encoding: "utf8" });
+      if (run.error?.code === "ENOENT") throw new Error("gpg is required for this mode and wasn't found");
+      if (run.error) throw run.error;
+      return run;
+    };
+    const imported = parseStatus(gpg("--import", fileURLToPath(new URL(signing.key, root))).stdout).imported;
+    if (imported.length !== 1 || imported[0] !== want) {
+      throw new Error(`the committed key imported as [${imported.join(", ")}], expected exactly ${want}`);
+    }
+    const verified = gpg("--verify", join(home, "SHA2-256SUMS.sig"), join(home, "SHA2-256SUMS"));
+    const valid = parseStatus(verified.stdout).valid;
+    if (verified.status !== 0 || !valid.includes(want)) {
+      throw new Error(`no valid signature by ${want} (gpg exit ${verified.status}; valid: [${valid.join(", ")}])\n${verified.stderr}`);
+    }
+    const problems = unsignedAssets(parseSums(sums), assets);
+    if (problems.length > 0) throw new Error(`pinned assets don't match the signed sums:\n${problems.join("\n")}`);
+    console.log(`VALIDSIG ${want}: yt-dlp ${version}'s signed sums pair every pinned asset with its sha256 (${new Set(Object.values(assets).map((a) => a.asset)).size} assets)`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
 const checkOnly = args.indexOf("--check-llama");
 const targetIndex = args.indexOf("--target");
 const target = targetIndex >= 0 ? args[targetIndex + 1] : host;

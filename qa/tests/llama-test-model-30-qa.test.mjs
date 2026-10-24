@@ -15,6 +15,8 @@ function fixture(t, { body = bytes, size = bytes.length, digest = hash(bytes), s
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "scripts"));
   copyFileSync(new URL("../../scripts/fetch-sidecars.mjs", import.meta.url), join(root, "scripts/fetch-sidecars.mjs"));
+  mkdirSync(join(root, "scripts/lib"));
+  copyFileSync(new URL("../../scripts/lib/signature.mjs", import.meta.url), join(root, "scripts/lib/signature.mjs"));
   const manifest = JSON.parse(readFileSync(new URL("../../scripts/sidecars.json", import.meta.url)));
   manifest.testModel = { url: "https://fixture.invalid/model.gguf", file: "test.gguf", size, sha256: digest };
   writeFileSync(join(root, "scripts/sidecars.json"), JSON.stringify(manifest));

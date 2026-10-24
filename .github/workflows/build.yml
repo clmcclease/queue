@@ -64,10 +64,23 @@ jobs:
           name: ffmpeg-${{ matrix.key }}
           path: out/
 
+  # yt-dlp's signed checksums (#44, D-035), in a job of their own: nothing downloaded here is
+  # executed, and `test` (so `bundle` too) needs it, so no OS runs the pinned yt-dlp before its
+  # signed sums are checked.
+  verify-ytdlp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+      - run: node scripts/fetch-sidecars.mjs --verify-ytdlp-signature
+
   # The same checks on each OS, so OS-specific behavior (paths, process trees, file managers,
   # filesystem case and Unicode rules) is tested where it runs. One OS failing doesn't hide the others.
   test:
-    needs: ffmpeg
+    needs: [ffmpeg, verify-ytdlp]
     strategy:
       fail-fast: false
       matrix:
