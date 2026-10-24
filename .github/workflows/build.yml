@@ -27,6 +27,7 @@ env:
 
 jobs:
   ffmpeg:
+    needs: verify-signatures
     strategy:
       fail-fast: false
       matrix:
@@ -64,10 +65,10 @@ jobs:
           name: ffmpeg-${{ matrix.key }}
           path: out/
 
-  # yt-dlp's signed checksums (#44, D-035), in a job of their own: nothing downloaded here is
-  # executed, and `test` (so `bundle` too) needs it, so no OS runs the pinned yt-dlp before its
-  # signed sums are checked.
-  verify-ytdlp:
+  # The sidecars' upstream signatures (#44, #86, D-035), in a job of their own: nothing downloaded
+  # here is executed, and `ffmpeg` and `test` (so `bundle` too) need it, so no runner builds the
+  # ffmpeg source or runs the pinned yt-dlp before their signatures are checked.
+  verify-signatures:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -75,12 +76,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
-      - run: node scripts/fetch-sidecars.mjs --verify-ytdlp-signature
+      - run: node scripts/fetch-sidecars.mjs --verify-signatures
 
   # The same checks on each OS, so OS-specific behavior (paths, process trees, file managers,
   # filesystem case and Unicode rules) is tested where it runs. One OS failing doesn't hide the others.
   test:
-    needs: [ffmpeg, verify-ytdlp]
+    needs: [ffmpeg, verify-signatures]
     strategy:
       fail-fast: false
       matrix:

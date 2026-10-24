@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned sidecars (#2, D-012). Change versions only in a dedicated commit; update every sha256 from the upstream checksum files. CI's `verify-ytdlp` job, which `test` needs, verifies yt-dlp's signed SHA2-256SUMS against the committed key before any job runs yt-dlp (`--verify-ytdlp-signature`, #44); run it locally if gpg is installed.",
+  "$comment": "Pinned sidecars (#2, D-012). Change versions only in a dedicated commit; update every sha256 from the upstream checksum files. CI's `verify-signatures` job, which `ffmpeg` and `test` need, verifies yt-dlp's signed SHA2-256SUMS (#44) and the ffmpeg tarball's .asc (#86) against the committed keys before any job builds or runs a sidecar (`--verify-signatures`); run it locally if gpg is installed.",
   "ytdlp": {
     "version": "2026.08.19",
     "url": "https://github.com/yt-dlp/yt-dlp/releases/download/{version}/{asset}",
@@ -134,7 +134,12 @@
   "ffmpeg": {
     "version": "9.0.2",
     "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
-    "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+    "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+    "signing": {
+      "key": "scripts/keys/ffmpeg-release.asc",
+      "fingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+      "source": "https://ffmpeg.org/download.html"
+    }
   },
   "testModel": {
     "$comment": "CI only, never bundled (#30(b), D-029): a 1.2 MB GGUF the real llama-server loads on every OS to prove its CPU backend, the lifecycle and the key. Pinned by Hugging Face commit; the sha256 is as measured by two independent downloads.",

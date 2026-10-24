@@ -164,17 +164,17 @@ test("all Actions are SHA-pinned and every bundle runs frontend tests after buil
   assert.equal(JSON.parse(read("src-tauri/tauri.conf.json")).build.beforeBuildCommand, "npm run build");
 });
 
-test("#44: a job of its own verifies yt-dlp's signed checksums before any OS runs yt-dlp", () => {
-  const verify = block("  verify-ytdlp:");
+test("#44/#86: a job of its own verifies the signatures before any runner builds or runs a sidecar", () => {
+  const verify = block("  verify-signatures:");
   assert.ok(verify, "the job exists");
   assert.match(verify, /^    runs-on: ubuntu-24\.04$/m);
   assert.match(verify, /^    timeout-minutes: \d+$/m);
   const runs = verify.split("\n").filter((line) => /^\s+(- )?run: /.test(line));
-  assert.deepEqual(runs.map((line) => line.trim()), ["- run: node scripts/fetch-sidecars.mjs --verify-ytdlp-signature"]);
-  for (const forbidden of ["--check", "--target", "download-artifact", "cargo", "npm ci"]) {
+  assert.deepEqual(runs.map((line) => line.trim()), ["- run: node scripts/fetch-sidecars.mjs --verify-signatures"]);
+  for (const forbidden of ["--check", "--target", "download-artifact", "cargo", "npm ci", "build-ffmpeg"]) {
     assert.ok(!verify.includes(forbidden), `nothing in the job executes or installs sidecars: ${forbidden}`);
   }
-  assert.match(test_, /^    needs: \[ffmpeg, verify-ytdlp\]$/m);
-  assert.ok(!test_.includes("--verify-ytdlp-signature"));
-  assert.ok(!bundle.includes("--verify-ytdlp-signature"));
+  assert.match(block("  ffmpeg:"), /^    needs: verify-signatures$/m);
+  assert.match(test_, /^    needs: \[ffmpeg, verify-signatures\]$/m);
+  for (const job of [test_, bundle, block("  ffmpeg:")]) assert.ok(!job.includes("--verify-signatures"));
 });
