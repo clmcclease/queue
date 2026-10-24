@@ -54,6 +54,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Its 33 tests were added as `qa/tests/shortcuts-19-qa.test.mjs`; the 6 that failed pass now.
 - **Review round 1:** **FAIL** (`20261023-214533-review-7VKD`). P2: the arrow keys could land on a row still being removed. P3: a row whose removal failed stayed marked as leaving. Both fixed: the arrows skip leaving rows too, and the mark clears when the removal settles. Two tests were added. After the fix, on top of `main` with #93: `npm test` 377 passed, 0 failed.
 
+## #43: Content Security Policy (fourth run; branch `infra/43-csp`, draft PR; **merge held for the owner**, D-035)
+- **What changed:** `tauri.conf.json` sets `app.security.csp`:
+  - `script-src` and `style-src` are `'self'` only, with no inline code and no eval.
+  - `img-src 'self' https: data:`, so thumbnails from any https site load. Thumbnails served over plain http are blocked on purpose.
+  - `connect-src ipc: http://ipc.localhost`: the IPC origins on macOS/Linux and on Windows.
+  - `object-src`, `base-uri` and `frame-ancestors` are `'none'`; `form-action` is `'self'`.
+  - `devCsp` adds `http://localhost:1420`, `ws://localhost:1420` and inline scripts and styles for Vite's dev server.
+- **Checks (macOS arm64):** `npm run build`; the built `dist/index.html` loads only external script and CSS files (no inline code, no eval). `npm test` passes, with 3 new tests in `qa/tests/csp-43.test.mjs` and Codex's 7 in `qa/tests/csp-43-qa.test.mjs`.
+- **QA:** `test "#43"` **PASS WITH NOTES** (`20261023-220634-test-Cixk`), no bugs. Native enforcement in the real webviews is untested.
+- **For the owner:** run `npm run tauri dev`. The dev app uses `devCsp`; the release CSP applies to `npm run tauri build`. Check thumbnails, Settings, Test connection and a download, then merge. Windows and Linux go to #71.
+
 ## #93: keyless API when the credential store can't be read (fourth run; branch `naming/93-keyless-store`)
 - **What changed (D-035):**
   - `ai::api_endpoint`: an unreadable credential store means no key for an OpenAI-compatible service, which is still asked; a service that needs a key answers 401, the Fallback tag. Anthropic still gets `StoreUnreachable` and nothing is sent.
