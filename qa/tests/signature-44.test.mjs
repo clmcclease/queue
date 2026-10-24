@@ -57,7 +57,7 @@ test("#44: the manifest pins the committed key, its fingerprint and its source",
 });
 
 test("#44: without gpg, the mode fails loudly before downloading anything", () => {
-  const run = spawnSync(process.execPath, [fileURLToPath(new URL("scripts/fetch-sidecars.mjs", root)), "--verify-ytdlp-signature"], {
+  const run = spawnSync(process.execPath, [fileURLToPath(new URL("scripts/fetch-sidecars.mjs", root)), "--verify-signatures"], {
     encoding: "utf8",
     env: { PATH: "/nonexistent" },
     timeout: 20000,

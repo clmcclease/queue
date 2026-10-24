@@ -42,7 +42,22 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
-## #44: yt-dlp signature check (fourth run; branch `infra/44-ytdlp-signature`)
+## #86(a): ffmpeg tarball signature (fourth run; branch `infra/86-ffmpeg-signature`)
+- **The architect's extension (22:50, D-035):** after #44, the order is #86(a) → #120 → #86(b) (optional) → a `persist` no-write test (optional). #18, #20–#23, #103, #104, #84's harness, #97 and #100 part 3 stay deferred, with the reasons in D-035.
+- **What changed:**
+  - FFmpeg's release key is committed at `scripts/keys/ffmpeg-release.asc`, byte for byte as ffmpeg.org serves it. Its fingerprint, `FCF986EA15E6E293A5644F10B4322F04D67658D8`, was read from ffmpeg.org's download page; it matches the primary key packet computed locally, and the key has one signing subkey.
+  - The gpg steps moved into `scripts/lib/gpg.mjs` (`verifyDetached`), which yt-dlp's check and the new ffmpeg check share.
+  - The mode is now `--verify-signatures`. It runs yt-dlp's check as before, then downloads the pinned tarball, checks its sha256 against the pin, downloads `<url>.asc` and verifies it.
+  - The CI job is renamed `verify-signatures`, and now `ffmpeg` needs it too.
+- **Checks (macOS arm64; no gpg here):**
+  - The real tarball's sha256 matches the pin, and its `.asc` is an armored signature.
+  - 52 signature, CI and sidecar tests pass, including 6 new ffmpeg failure cases in the #44 QA harness: a tarball that isn't the pinned one, a rejected signature, another key's signature, a wrong import, a download error, and missing config.
+  - The real-gpg success path for ffmpeg runs first in this PR's CI.
+- **QA launch hangs (D-035, 00:05):** the first two `test` runs (`20261023-230758-test-2m4T`, `…233306-test-Wkye`) hung for 25 minutes each before Codex started, because its stdin was an open pipe. That's a launch defect, not a Codex failure. The gate was re-run with `</dev/null` (`20261024-000135-test-ILae`), and the script fix is #122. Until #122 merges, run `scripts/codex-qa … </dev/null`.
+- **QA:** `test "#86"` **PASS WITH NOTES** (`20261024-000135-test-ILae`), no bugs. Its 14 tests were added: `qa/tests/ffmpeg-key-86-qa.test.mjs`, an independent fingerprint check of the committed key, and more cases in `qa/tests/signature-44-qa.test.mjs`. The focused signature and CI set is 66 passed, 0 failed.
+- **Review round 1:** PASS WITH NOTES (`20261024-000546-review-zt2h`). Its P3, a blank line at the end of `ci.test.mjs` that fails `git diff --check`, is fixed. Its real-gpg suggestions are #120's.
+
+## #44: yt-dlp signature check (fourth run): merged as 94e42e4 (PR #121)
 - **What changed (D-035, the architect's #44 ruling):**
   - `node scripts/fetch-sidecars.mjs --verify-ytdlp-signature` downloads the pinned version's `SHA2-256SUMS` and `.sig` and verifies them with gpg, in a throwaway home, against upstream's key committed at `scripts/keys/yt-dlp.asc`.
   - The key's fingerprint, `AC0CBBE6848D6A873464AF4E57CF65933B5A7581`, and its source commit are pinned in `sidecars.json`.
