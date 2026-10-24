@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { SHOW_FILE } from "../platform";
+import { REMOVE_SHORTCUT, SHOW_FILE } from "../platform";
 import { formatDuration, progressText, type QueueItem } from "../queue";
 
 interface Props {
@@ -7,8 +7,8 @@ interface Props {
   onDownload: (id: number) => void;
   /** Q6: a Failed row tries again. */
   onRetry: (id: number) => void;
-  /** Q6: removes a row that isn't downloading. */
-  onRemove: (id: number) => void;
+  /** Q6: removes a row that isn't downloading; settles once the backend has answered. */
+  onRemove: (id: number) => void | Promise<void>;
   /** N1 (#15): renames a Queued row's file (the backend sanitizes it). */
   onRename: (id: number, name: string) => void;
   /** Q6 (#74): stops a downloading or processing row. */
@@ -23,7 +23,12 @@ interface Props {
   busy: boolean;
   /** Row to flash briefly, e.g. the existing row for a duplicate link. */
   highlight?: number | null;
+  /** #19: Escape on a row, or removing the last one, returns focus to the URL bar. */
+  onLeave?: () => void;
 }
+
+/** Whether a row can be removed: not while it's downloading or processing (Q6). */
+const removable = (item: QueueItem) => item.status.state !== "downloading" && item.status.state !== "processing";
 
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
@@ -179,7 +184,12 @@ export default function QueueList({
   connected,
   busy,
   highlight,
+  onLeave,
 }: Props) {
+  const rows = useRef(new Map<number, HTMLLIElement>());
+  // Rows removed from the keyboard whose removal hasn't come back yet: focus never lands on one,
+  // or it would fall to the page when that row goes (#19 QA).
+  const leaving = useRef(new Set<number>());
   if (items.length === 0) {
     return <p className="mt-16 text-center text-sm text-neutral-500 dark:text-neutral-400">Queue is empty.</p>;
   }
@@ -188,9 +198,47 @@ export default function QueueList({
       {items.map((item) => (
         <li
           key={item.id}
+          ref={(el) => {
+            if (el) rows.current.set(item.id, el);
+            else rows.current.delete(item.id);
+          }}
+          // #19: rows are focusable; keys act only on the row itself, never inside its fields
+          // or buttons.
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget || e.metaKey || e.ctrlKey || e.altKey) return;
+            const at = items.findIndex((i) => i.id === item.id);
+            const focusRow = (i: number) => {
+              const row = items[i] && rows.current.get(items[i].id);
+              row?.focus();
+              return Boolean(row);
+            };
+            // The nearest row in `step`'s direction that isn't being removed.
+            const focusStaying = (step: number) => {
+              for (let i = at + step; i >= 0 && i < items.length; i += step) {
+                if (!leaving.current.has(items[i].id)) return focusRow(i);
+              }
+              return false;
+            };
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              focusStaying(e.key === "ArrowDown" ? 1 : -1);
+            } else if (e.key === "Delete" || e.key === "Backspace") {
+              e.preventDefault();
+              if (!removable(item)) return;
+              leaving.current.add(item.id);
+              // Once the backend answers, the row is gone or, if it couldn't be removed, can be
+              // focused again (#19 review).
+              void Promise.resolve(onRemove(item.id)).finally(() => leaving.current.delete(item.id));
+              if (!focusStaying(1) && !focusStaying(-1)) onLeave?.();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onLeave?.();
+            }
+          }}
           data-state={item.status.state}
           data-highlight={item.id === highlight ? "" : undefined}
-          className={`flex items-center gap-3 rounded py-2 text-sm transition-colors ${item.id === highlight ? "bg-amber-100 dark:bg-amber-900/40" : ""}`}
+          className={`flex items-center gap-3 rounded py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-neutral-400 ${item.id === highlight ? "bg-amber-100 dark:bg-amber-900/40" : ""}`}
         >
           <Thumbnail src={item.meta?.thumbnail ?? null} />
           <div className="min-w-0 flex-1">
@@ -269,12 +317,12 @@ export default function QueueList({
               {cancelling.has(item.id) ? "Cancelling…" : "Cancel"}
             </button>
           )}
-          {item.status.state !== "downloading" && item.status.state !== "processing" && (
+          {removable(item) && (
             <button
               type="button"
               onClick={() => onRemove(item.id)}
               aria-label="Remove"
-              title="Remove from queue"
+              title={`Remove from queue (${REMOVE_SHORTCUT})`}
               className="shrink-0 rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             >
               ✕
