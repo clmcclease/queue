@@ -55,7 +55,15 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - `npm test` 408 passed, 0 failed.
 - **QA:** `test "#44"`: **FAIL** (`20261023-221425-test-yGn2`). Two targets pinning the same file name to different hashes had only the first pin checked. Fixed: one check per name and hash. Also fixed: two existing fixtures that run a copy of the script failed on its new import; the module now loads only in its mode. Codex's 25 tests were added as `qa/tests/signature-44-qa.test.mjs`.
 - **Review round 1:** **FAIL** (`20261023-222305-review-Kc2w`, P2). The step ran after `--check`, which executes yt-dlp, and the Windows and macOS jobs didn't wait for it. Architect's ruling (22:30): a dedicated `verify-ytdlp` job that downloads only the sums and executes nothing, with `test: needs: [ffmpeg, verify-ytdlp]`. Codex's real-gpg negative fixtures are a P3 follow-up, #120. `main` has no branch protection, so merging only on green CI is what holds this (D-028). Requiring these checks on `main` is the owner's setting.
+- **CI proof (run 40058742141 on 05dbe47):** `verify-ytdlp` printed `VALIDSIG AC0CBBE6848D6A873464AF4E57CF65933B5A7581: yt-dlp 2026.08.19's signed sums pair every pinned asset with its sha256 (3 assets)`. This first real-gpg run confirms the locally computed fingerprint independently. `test` was green on all three OSes.
 - **For the owner:** confirm the key fingerprint against a second source. Optionally, `brew install gnupg` to run the mode locally.
+## #100 parts 1–2: test hardening (fourth run): merged as e1c5dee (PR #119); #100 stays open
+- **What changed (tests only):**
+  - `tests/support/accept.rs` has `accept` (panics) and `accept_until` (gives up quietly) with one 10 s deadline. Every single-shot loopback fixture uses one of them, across 11 test files.
+  - New `tests/api_followups_n8_100.rs`: a kind switched mid-job never sends the stale job, and the next one goes to Anthropic. An Anthropic failure then a success tags the rows `rules` then `AI`.
+  - Not done: the failed-save-during-kind-change test needs the command layer (#84). Part 3, one key slot, is the owner's.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --locked` 583 passed, 0 failed, 32 ignored, before `main` came in.
+- **QA:** `test "#100"`: **FAIL** (`20261023-215549-test-tLBN`). Three QA fixtures still had their own 15 s accept loops, plus two more at 10 s and 5 s. Fixed: all of them use the shared helper. Codex's tests were added as `tests/accept_100_qa.rs`, `tests/api_followups_n8_100_qa.rs` and a regression in `tests/api_n8_32_qa.rs`.
 
 ## #19: keyboard shortcuts (fourth run): merged as e9d0fdb (PR #116)
 - **What changed (D-035):**

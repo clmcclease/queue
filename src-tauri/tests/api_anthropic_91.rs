@@ -1,6 +1,9 @@
 //! #91 / N8: the Anthropic Messages API provider against a fake `/v1/messages` on 127.0.0.1.
 //! No network and no real key. The request shape follows D-029's #91 ruling: structured
 //! outputs, no forced tool, no sampling, thinking or effort fields.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
@@ -25,21 +28,7 @@ fn serve(status: u16, body: String) -> Fake {
     listener.set_nonblocking(true).unwrap();
     let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let request = thread::spawn(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let mut stream = loop {
-            match listener.accept() {
-                Ok((stream, _)) => break stream,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "the client never connected"
-                    );
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(e) => panic!("{e}"),
-            }
-        };
-        stream.set_nonblocking(false).unwrap();
+        let mut stream = accept::accept(&listener);
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();

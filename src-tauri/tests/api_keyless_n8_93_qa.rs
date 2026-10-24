@@ -1,4 +1,7 @@
 //! Independent #93 / N8 / D-035 regressions. Bounded loopback fixtures and fake stores only.
+#[path = "support/accept.rs"]
+mod accept;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Mutex, mpsc};
@@ -32,20 +35,7 @@ impl Service {
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let (stop, stopped) = mpsc::channel();
         let worker = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(15);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        if stopped.try_recv().is_ok() || Instant::now() >= deadline {
-                            return None;
-                        }
-                        thread::sleep(Duration::from_millis(2));
-                    }
-                    Err(e) => panic!("fixture accept: {e}"),
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
+            let mut stream = accept::accept_until(&listener, || stopped.try_recv().is_ok())?;
             stream
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
