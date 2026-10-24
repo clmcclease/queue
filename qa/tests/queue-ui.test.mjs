@@ -972,7 +972,7 @@ test("Q6: ✕ is offered on every row except one downloading or processing", asy
   const hasRemove = list.map((_, i) => buttonsIn(i).includes("✕"));
   assert.deepEqual(hasRemove, [true, true, false, false, true, true]);
   const x = container.querySelector('li button[aria-label="Remove"]');
-  assert.equal(x.getAttribute("title"), "Remove from queue");
+  assert.match(x.getAttribute("title"), /^Remove from queue \((⌫|Delete)\)$/);
 });
 
 test("Q6: removing a row drops it, and later events or snapshots can't bring it back", async (t) => {
@@ -1260,9 +1260,9 @@ test("D7: wording follows the OS, and only macOS says Finder", async () => {
   assert.equal(detectOs("Win32"), "windows");
   assert.equal(detectOs("Linux x86_64"), "linux");
   assert.equal(detectOs(""), "linux");
-  assert.deepEqual(wordingFor("macos"), { settingsShortcut: "⌘,", fileManager: "Finder", showFile: "Show in Finder" });
-  assert.deepEqual(wordingFor("windows"), { settingsShortcut: "Ctrl+,", fileManager: "File Explorer", showFile: "Show in File Explorer" });
-  assert.deepEqual(wordingFor("linux"), { settingsShortcut: "Ctrl+,", fileManager: "your file manager", showFile: "Show in folder" });
+  assert.deepEqual(wordingFor("macos"), { settingsShortcut: "⌘,", downloadAllShortcut: "⌘↩", removeShortcut: "⌫", fileManager: "Finder", showFile: "Show in Finder" });
+  assert.deepEqual(wordingFor("windows"), { settingsShortcut: "Ctrl+,", downloadAllShortcut: "Ctrl+Enter", removeShortcut: "Delete", fileManager: "File Explorer", showFile: "Show in File Explorer" });
+  assert.deepEqual(wordingFor("linux"), { settingsShortcut: "Ctrl+,", downloadAllShortcut: "Ctrl+Enter", removeShortcut: "Delete", fileManager: "your file manager", showFile: "Show in folder" });
   for (const other of ["windows", "linux"]) assert.doesNotMatch(JSON.stringify(wordingFor(other)), /Finder/);
 });
 

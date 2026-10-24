@@ -3,7 +3,7 @@ import FolderPicker from "./components/FolderPicker";
 import ModelBanner from "./components/ModelBanner";
 import QueueList from "./components/QueueList";
 import SettingsPanel from "./components/SettingsPanel";
-import UrlBar from "./components/UrlBar";
+import UrlBar, { type UrlBarHandle } from "./components/UrlBar";
 import {
   addItem,
   addManySummary,
@@ -23,6 +23,7 @@ import {
   runAll,
   runnerState,
   onStorageChanged,
+  splitLinks,
   storageProblem,
   type QueueItem,
 } from "./queue";
@@ -30,7 +31,7 @@ import { namingStatus, type NamingStatus } from "./settings";
 import { useModelStatus } from "./models";
 import { useDownloadFolder } from "./useDownloadFolder";
 
-import { FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
+import { DOWNLOAD_ALL_SHORTCUT, FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
 
 // How often the save status is read when its event can't be listened to (#68).
 const STORAGE_POLL_MS = 2000;
@@ -153,15 +154,49 @@ export default function App() {
     };
   }, []);
 
+  // #19: the window's shortcuts read the latest state through this ref, as their listeners
+  // are added once.
+  const urlBar = useRef<UrlBarHandle>(null);
+  const latest = useRef({ settingsOpen, canDownloadAll: false, downloadAll: () => {}, addMany: async (_: string[]) => {} });
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((os === "macos" ? e.metaKey : e.ctrlKey) && e.key === ",") {
+      const mod = os === "macos" ? e.metaKey : e.ctrlKey;
+      if (mod && e.key === ",") {
         e.preventDefault();
         openSettings();
+      } else if (mod && e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && !latest.current.settingsOpen) {
+        // keyCode 229 is an input method's Enter even when isComposing isn't set, as the name
+        // field also treats it.
+        // Download all (#19). A name being edited is saved first: leaving the field commits it,
+        // and Download all waits for the rename. Enter never also adds the URL bar's text.
+        e.preventDefault();
+        const editing = document.activeElement as HTMLElement | null;
+        if (editing?.tagName === "INPUT" && editing.getAttribute("aria-label") === "File name") editing.blur();
+        if (latest.current.canDownloadAll) latest.current.downloadAll();
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture, so it runs before a field's own Enter handling.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  useEffect(() => {
+    // #19: a paste outside any text field goes to the URL bar: one line fills it, several add
+    // rows (Q8). A paste into a field is the field's own.
+    function onPaste(e: ClipboardEvent) {
+      if (latest.current.settingsOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) return;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (text.trim() === "") return;
+      e.preventDefault();
+      const lines = splitLinks(text);
+      if (lines) void latest.current.addMany(lines);
+      else urlBar.current?.fill(text.trim());
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
   }, []);
 
   useEffect(() => {
@@ -355,6 +390,8 @@ export default function App() {
 
   const anyQueued = items.some((item) => item.status.state === "queued");
   const anyActive = items.some((item) => item.status.state === "downloading" || item.status.state === "processing");
+  const canDownloadAll = listening && !running && anyQueued;
+  latest.current = { settingsOpen, canDownloadAll, downloadAll, addMany };
 
   return (
     <main className="relative flex h-screen flex-col bg-white p-4 dark:bg-neutral-900">
@@ -362,7 +399,7 @@ export default function App() {
       <div inert={settingsOpen} className="flex min-h-0 flex-1 flex-col">
         <div className="flex gap-2">
           <div className="min-w-0 flex-1">
-            <UrlBar onAdd={add} onAddMany={addMany} />
+            <UrlBar onAdd={add} onAddMany={addMany} handle={urlBar} />
           </div>
           <button
             type="button"
@@ -387,7 +424,8 @@ export default function App() {
           <button
             type="button"
             onClick={downloadAll}
-            disabled={!listening || running || !anyQueued}
+            disabled={!canDownloadAll}
+            title={`Download all (${DOWNLOAD_ALL_SHORTCUT})`}
             className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
           >
             {running ? "Downloading all…" : "Download all"}
@@ -425,6 +463,7 @@ export default function App() {
             connected={listening}
             busy={!listening || running || anyActive}
             highlight={highlight}
+            onLeave={() => urlBar.current?.focus()}
           />
         </div>
         {toast && (
