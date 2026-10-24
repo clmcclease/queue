@@ -3,3 +3,5 @@
 # Test media fixtures (#70) are binary: never touch their bytes.
 *.mp4 binary
 *.m4a binary
+# Signature fixtures (#120) are signed bytes: never touch them.
+qa/fixtures/signatures/** binary
