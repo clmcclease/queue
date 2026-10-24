@@ -1,10 +1,57 @@
 # Status
 
-**Updated:** 2026-10-23 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** fourth run under D-028 until 09:00 on 2026-10-24: docs → #83+#85 → #93 → #19
+**Updated:** 2026-10-24 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** fourth run complete; waiting for the owner
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
-## Fourth run (2026-10-23 21:00 → 2026-10-24 09:00, under D-028)
+## Fourth run: final state (2026-10-24, about 02:00; code work ended early under the architect's 01:20 ruling)
+- **Merged to `main` (each with green CI on all three OSes and a Codex review of PASS or PASS WITH NOTES on its final head):**
+  - #114 docs (899ad4d).
+  - #93 keyless API when the credential store can't be read (37dfd72).
+  - #19 keyboard shortcuts (e9d0fdb).
+  - #83 + #85 queue.json hardening (7ac5986); the one exception to the 3-round cap (D-035).
+  - #100 parts 1–2 test hardening (e1c5dee).
+  - #44 yt-dlp signature check (94e42e4).
+  - #86(a) ffmpeg tarball signature (075598c).
+  - #120 real-gpg tests (f2f7bb4).
+  - #86(b) the build environment in the cache key (c2056a9).
+  - #84 part, `persist` never writes with saving off (900e757).
+  - #122 codex-qa closes Codex's stdin (c0a3fa5).
+- **Closed:** #19, #44, #83, #85, #93, #120, #122. **Still open:** #84 (the command-level harness), #86 ((c), toolchain pinning, the owner's), #100 (part 3, the key slot, the owner's, and the larger CI test GGUF).
+- **Held for the owner:** #43's CSP, PR #118 (draft). The worktree stays at `…/scratchpad/wt43`.
+- **Signatures, proven in CI:** `verify-signatures` printed `VALIDSIG AC0CBBE6848D6A873464AF4E57CF65933B5A7581` for yt-dlp 2026.08.19 and `VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8` for the ffmpeg 9.0.2 tarball. `ffmpeg` and `test` need that job.
+- **Incidents:**
+  - **Codex launch hang:** two #86(a) gate runs hung for 25 minutes each, because Codex's stdin was an inherited open pipe. That's a launch defect, not a Codex failure (D-035). The fix is #122, merged.
+  - **Windows gpg:** Git for Windows' MSYS `gpg` can't read Windows paths, so #120's real-gpg cases skip on Windows.
+  - **Process slip:** #86(b)'s review round 2 ran while 2 tests were failing locally; Codex caught it, and it was fixed in round 3.
+- **Known limitations shipped:**
+  - #86(b)'s cache key misses mingw dependencies it doesn't record, such as binutils, when the image version and the recorded candidates stay the same.
+  - #120's real-gpg cases don't run on Windows.
+- **Evidence gap:** QA reports live in each branch's worktree (git-ignored), and the worktrees of merged branches were removed before tonight's "copy before removing" rule (D-035, 01:20). Of the 30 reports this file cites from tonight and yesterday, **27 are no longer on disk**: those for #105, #108, #109, the third-run reviews, #83+#85, #85, #93, #19, #100, #44, #86(a), #86(b) and #120. Every PR body still lists its verdicts and report names. The reports from #43, #84, #122 and the #114 docs PR were copied into `qa/reports/`.
+- **Next bounded action:** the owner's morning list below. Nothing else is in flight. No new item starts without the owner, per the architect's 01:20 ruling.
+- **For the owner (morning):**
+  - **#43, PR #118:** click through the dev app on macOS with the CSP set (the release-build check is in the PR), then merge it yourself.
+  - **Hand checks:**
+    - #19: paste with focus outside the URL field; ⌘⏎ for Download all; arrows and Delete on rows; Escape back to the field.
+    - #83 (optional): a `version: 2` queue.json is left untouched, and the warning shows.
+  - **Confirm or revise D-035**, including the #83+#85 round-4 exception, the #44, #86 and #120 signature rulings, and the #122 ruling that touched the QA launcher.
+  - **GitHub setting (yours):** `main` has no branch protection. Consider requiring `verify-signatures` and the three `test` jobs.
+  - **Keys:** confirm yt-dlp's `AC0CBBE6848D6A873464AF4E57CF65933B5A7581` and FFmpeg's `FCF986EA15E6E293A5644F10B4322F04D67658D8`, each against a second source. Optionally, `brew install gnupg` to run `--verify-signatures` locally.
+  - **Inputs only you can give:**
+    - #86(c): toolchain pinning.
+    - #100 part 3: one key slot.
+    - #103: the model list.
+    - #104: the tag list.
+    - #18: the design direction.
+    - #21: where the updated yt-dlp lives.
+    - #24: the certificate.
+  - **Housekeeping:**
+    - Older scratchpad worktrees (wt17, wt25, wt30, …) are left for you.
+    - `~/Developer/sandbox/queue-eval-33b/` and the `wtluna` worktree it builds from.
+    - Colima is still running.
+    - `caffeinate` runs until about 09:05.
+
+## Fourth run: rulings and record (2026-10-23 21:00 → 2026-10-24 09:00, under D-028)
 - **Owner's instruction (20:59):** "continue, you have until 0900 before i need to move again. let architect run the decisions until i prompt you tomorrow."
 - The Mac is held awake with `caffeinate` until about 09:05, on AC power. Closing the lid still sleeps it.
 - **Architect rulings (21:05; D-035 and D-028's fourth-run line):**
@@ -26,9 +73,8 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **Pre-approved per item:** commit, push, draft PR, handoff commit, and the squash once `test` ×3 is green and the review passes (PASS or PASS WITH NOTES). Not #43's squash.
   - **P3s:** test suggestions, wording and documented limitations are pre-accepted. Not pre-accepted: P1s, P2s, and P3s touching keys or the credential store, URL checks, request bodies, file placement or overwrite safety, queue.json data loss, or the CSP. No `ci:bundle`. No live API calls or key use tonight.
 - **Docs PR #114** merged as 899ad4d. Its review was PASS WITH NOTES (`20261023-210901-review-mZJE`); its one wording P3 ("#43 is built") is fixed in #83+#85's PR.
-- **Next bounded action:** #83+#85 (branch `queue/83-85-hardening`), then #93 (branch `naming/93-keyless-store`, coded; its QA bug is being fixed).
-
-- **For the owner (morning):**
+- **Next bounded action, as planned at 21:05 (superseded by the final state above).**
+- **For the owner, as planned at 21:05 (superseded by the final list above):**
   - **Hand checks in the dev app:**
     - #19: paste with focus outside the URL field; ⌘⏎ for Download all; arrows and Delete on rows; Escape back to the field.
     - #83 (optional): set queue.json's `version` to 2 and relaunch. The queue starts empty, the warning shows, and the file is unchanged.
@@ -42,7 +88,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - #24: the certificate.
   - **Confirm or revise:** D-035.
 
-## #122: codex-qa closes Codex's stdin (fourth run; branch `infra/122-codex-stdin`)
+## #122: codex-qa closes Codex's stdin (fourth run): merged as c0a3fa5 (PR #127)
 - **The architect's ruling (01:20, D-035):** #122 is the last code item tonight, then the handoff.
 - **What changed:**
   - `scripts/codex-qa` runs `codex` with `</dev/null`. Under `set -m`, bash doesn't give a background job `/dev/null` as stdin, and `codex exec` reads a piped stdin to EOF, so a caller holding a pipe open hung two #86(a) gate runs for 25 minutes each.
@@ -97,7 +143,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - The real tarball's sha256 matches the pin, and its `.asc` is an armored signature.
   - 52 signature, CI and sidecar tests pass, including 6 new ffmpeg failure cases in the #44 QA harness: a tarball that isn't the pinned one, a rejected signature, another key's signature, a wrong import, a download error, and missing config.
   - The real-gpg success path for ffmpeg runs first in this PR's CI.
-- **QA launch hangs (D-035, 00:05):** the first two `test` runs (`20261023-230758-test-2m4T`, `…233306-test-Wkye`) hung for 25 minutes each before Codex started, because its stdin was an open pipe. That's a launch defect, not a Codex failure. The gate was re-run with `</dev/null` (`20261024-000135-test-ILae`), and the script fix is #122. Until #122 merges, run `scripts/codex-qa … </dev/null`.
+- **QA launch hangs (D-035, 00:05):** the first two `test` runs (`20261023-230758-test-2m4T`, `…233306-test-Wkye`) hung for 25 minutes each before Codex started, because its stdin was an open pipe. That's a launch defect, not a Codex failure. The gate was re-run with `</dev/null` (`20261024-000135-test-ILae`), and the script fix is #122. #122 has merged, so the script closes stdin itself.
 - **QA:** `test "#86"` **PASS WITH NOTES** (`20261024-000135-test-ILae`), no bugs. Its 14 tests were added: `qa/tests/ffmpeg-key-86-qa.test.mjs`, an independent fingerprint check of the committed key, and more cases in `qa/tests/signature-44-qa.test.mjs`. The focused signature and CI set is 66 passed, 0 failed.
 - **Review round 1:** PASS WITH NOTES (`20261024-000546-review-zt2h`). Its P3, a blank line at the end of `ci.test.mjs` that fails `git diff --check`, is fixed. Its real-gpg suggestions are #120's.
 
@@ -147,7 +193,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **QA:** `test "#93"`: **FAIL** (`20261023-211902-test-JOmV`). Test connection read the store a second time, so a store that failed and then recovered sent a keyless request whose result didn't say so. Fixed: it reads the store once (`api_endpoint_with`). Its tests were added as `tests/api_keyless_n8_93_qa.rs` (9) and `qa/tests/api-keyless-n8-93-qa.test.mjs` (4); the failing one passes now.
   - Review: **PASS WITH NOTES** (`20261023-212858-review-WbaB`), no defects. Its P3 (the updated `api_n8_32` test could hang if a request were never sent) is a pre-accepted test note, left for #100's bounded `accept()`. Its two test suggestions weren't added: a 401 then a success across two rows, and a store-read count.
 
-## #83 + #85: queue.json hardening (fourth run; branch `queue/83-85-hardening`)
+## #83 + #85: queue.json hardening (fourth run): merged as 7ac5986 (PR #117)
 - **#83:** a `queue.json` with a `version` that isn't exactly the integer 1 (of any size or type) comes from a newer Queue. `load_checked` returns `Saving::Newer`: the queue starts empty, saving is off, and the window says "The saved list is from a newer version of Queue, so it isn't shown and changes made now won't be saved. The file is untouched." The file is never moved aside or written. A file with no `version`, or that isn't JSON, is still damaged and is set aside (D-025).
 - **#85:** `queue::MAX_ID` = 2^53 − 1. Saved rows above it are dropped, and `add` at the limit fails with D-025's message.
 - **Checks (macOS arm64, on top of `main` with #93):** fmt, clippy `-D warnings`, `cargo test --locked` 593 passed, 0 failed, 32 ignored; `tsc`, `npm run build`, `npm test` (count in the PR).
