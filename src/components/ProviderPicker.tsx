@@ -78,6 +78,11 @@ export default function ProviderPicker({
                 Couldn't reach your system's credential store. Names come from the rules for now.
               </span>
             )}
+            {provider === "api" && p.value === "api" && status?.unavailable === null && status.store_unreachable && (
+              <span data-role="provider-note" className="block text-xs text-amber-700 dark:text-amber-400">
+                Couldn't reach your system's credential store, so the service is asked without a key.
+              </span>
+            )}
           </span>
         </label>
       ))}

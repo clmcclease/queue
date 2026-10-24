@@ -164,13 +164,59 @@ fn n8_test_connection_reports_an_unreachable_service_and_an_unset_or_broken_setu
     );
     let tested = ai::test_connection(&Settings::default(), &Memory::with(KEY));
     assert_eq!(tested.message, "Save a base URL and a model first.");
-    let (url, listener) = recorder();
+    // An unreadable store is no key for an OpenAI-compatible service (#93, D-035): it's asked
+    // without one, and the result says why.
+    let (url, request) = serve(200, chat(r#"{"filename": "Me at the zoo"}"#));
     let tested = ai::test_connection(&api(&url), &Memory::broken());
-    assert_eq!(tested.message, UNREACHABLE);
-    assert!(
-        !connected(&listener),
-        "nothing is sent without the key store"
+    let received = request.join().unwrap();
+    assert!(tested.ok, "{tested:?}");
+    assert_eq!(
+        tested.message,
+        format!(
+            "Connected. It would name the sample \u{201c}Me at the zoo\u{201d}. {UNREACHABLE} No key was sent."
+        )
     );
+    assert!(!received.to_ascii_lowercase().contains("authorization:"));
+}
+
+/// #93: on Linux without a Secret Service, a keyless service (Ollama, LM Studio) still names
+/// the row, and the status keeps saying the store can't be read.
+#[test]
+fn n8_an_unreadable_store_still_names_rows_with_a_keyless_service() {
+    let (url, request) = serve(200, chat(r#"{"filename": "Named"}"#));
+    let settings = api(&url);
+    let store = Memory::broken();
+    let mut q = Queue::default();
+    let id = queued(&mut q, "Title");
+    let q = Mutex::new(q);
+    let resolve = ai::Resolving(|| ai::endpoint(&settings, &store, ai::LocalModel::Missing));
+    assert!(run_naming_job(&q, id, &resolve).is_some(), "asked");
+    let received = request.join().unwrap();
+    assert!(!received.to_ascii_lowercase().contains("authorization:"));
+    let row = q.lock().unwrap().items()[0].clone();
+    assert_eq!(row.name.as_deref(), Some("Named"));
+    assert_eq!(row.name_source, Some(NameSource::Ai));
+    assert_eq!(
+        ai::unavailable(&settings, &store, ai::LocalModel::Missing),
+        None
+    );
+    assert!(
+        ai::store_unreachable(&settings, &store),
+        "the note still shows"
+    );
+    // Anthropic needs a key: with the store down, nothing is sent.
+    let (url, listener) = recorder();
+    let anthropic = Settings {
+        api_kind: ai::ApiKind::Anthropic,
+        ..api(&url)
+    };
+    assert_eq!(
+        ai::unavailable(&anthropic, &store, ai::LocalModel::Missing),
+        Some(ai::Unavailable::StoreUnreachable)
+    );
+    let tested = ai::test_connection(&anthropic, &store);
+    assert_eq!((tested.ok, tested.message.as_str()), (false, UNREACHABLE));
+    assert!(!connected(&listener), "nothing is sent without the key");
 }
 
 /// #25's cross-wiring check: with Local chosen, a stored API service is never contacted, and

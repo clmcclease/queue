@@ -302,7 +302,8 @@ pub enum Unavailable {
     RuntimeMissing,
     /// No API service is set up: no valid base URL or no model (#32). A missing key is fine.
     NotSetUp,
-    /// The OS credential store couldn't be read (#32). It never stops the app.
+    /// The OS credential store couldn't be read, so an Anthropic service, which needs a key,
+    /// can't be asked (#32). An OpenAI-compatible one is asked without a key (#93).
     StoreUnreachable,
 }
 
@@ -354,21 +355,43 @@ pub fn unavailable(
 /// The user's API service (#32), whichever provider is chosen (Test connection uses it): its
 /// base URL and model from the settings, and its key, if any, from the credential store.
 /// Anthropic needs a key (#91): without one nothing is sent, since the request could only be
-/// refused after the item's metadata had left the machine.
+/// refused after the item's metadata had left the machine. A credential store that can't be
+/// read (Linux without a Secret Service) means no key for an OpenAI-compatible service, which
+/// may need none (Ollama, LM Studio); one that does answers 401, the Fallback tag (#93, D-035).
 pub fn api_endpoint(settings: &Settings, secrets: &dyn Secrets) -> Result<Endpoint, Unavailable> {
     if !api_set_up(settings) {
         return Err(Unavailable::NotSetUp);
     }
-    let key = secrets.get().map_err(|_| Unavailable::StoreUnreachable)?;
+    api_endpoint_with(settings, secrets.get()).map(|(endpoint, _)| endpoint)
+}
+
+/// [`api_endpoint`] from one read of the credential store, and whether that read failed (so
+/// the endpoint has no key because of it, #93).
+fn api_endpoint_with(
+    settings: &Settings,
+    read: Result<Option<String>, String>,
+) -> Result<(Endpoint, bool), Unavailable> {
+    let (key, store_failed) = match read {
+        Ok(key) => (key, false),
+        Err(_) if settings.api_kind == ApiKind::OpenaiCompatible => (None, true),
+        Err(_) => return Err(Unavailable::StoreUnreachable),
+    };
     if settings.api_kind == ApiKind::Anthropic && key.is_none() {
         return Err(Unavailable::NotSetUp);
     }
-    Ok(Endpoint {
+    let endpoint = Endpoint {
         kind: settings.api_kind,
         base_url: settings.api_base_url.clone(),
         model: settings.api_model.clone(),
         key,
-    })
+    };
+    Ok((endpoint, store_failed))
+}
+
+/// Whether the API provider is chosen and the credential store can't be read (#93): Settings
+/// says so even while an OpenAI-compatible service is asked without a key.
+pub fn store_unreachable(settings: &Settings, secrets: &dyn Secrets) -> bool {
+    settings.naming_provider == Provider::Api && secrets.get().is_err()
 }
 
 /// Whether the chosen provider could be asked, without reading the key: the cheap check before
@@ -475,17 +498,38 @@ pub struct Tested {
 pub fn test_connection(settings: &Settings, secrets: &dyn Secrets) -> Tested {
     let failed = |message: String| Tested { ok: false, message };
     let anthropic = settings.api_kind == ApiKind::Anthropic;
-    if anthropic && api_set_up(settings) && matches!(secrets.get(), Ok(None)) {
+    if !api_set_up(settings) {
+        return failed("Save a base URL and a model first.".to_owned());
+    }
+    // The store is read once, so the result describes the request that was actually sent.
+    let read = secrets.get();
+    if anthropic && matches!(read, Ok(None)) {
         return failed("Anthropic needs an API key.".to_owned());
     }
-    let endpoint = match api_endpoint(settings, secrets) {
-        Ok(endpoint) => endpoint,
+    let (endpoint, store_failed) = match api_endpoint_with(settings, read) {
+        Ok(resolved) => resolved,
         Err(Unavailable::StoreUnreachable) => {
             return failed(crate::secrets::UNREACHABLE.to_owned());
         }
         Err(_) => return failed("Save a base URL and a model first.".to_owned()),
     };
-    match ask(&endpoint, &naming::sample()) {
+    // Asked without a key because the store couldn't be read (#93): the result says so.
+    let keyless = if store_failed {
+        format!(" {} No key was sent.", crate::secrets::UNREACHABLE)
+    } else {
+        String::new()
+    };
+    let tested = test_endpoint(&endpoint, anthropic);
+    Tested {
+        message: tested.message + &keyless,
+        ..tested
+    }
+}
+
+/// [`test_connection`]'s ask and its message.
+fn test_endpoint(endpoint: &Endpoint, anthropic: bool) -> Tested {
+    let failed = |message: String| Tested { ok: false, message };
+    match ask(endpoint, &naming::sample()) {
         Ok(name) => Tested {
             ok: true,
             message: format!("Connected. It would name the sample \u{201c}{name}\u{201d}."),
@@ -1131,8 +1175,18 @@ mod tests {
         );
         let keyed = endpoint(&ready, &Memory::with("sk-1"), LocalModel::Missing).unwrap();
         assert_eq!(keyed.key.as_deref(), Some("sk-1"));
+        // An unreadable store is no key for an OpenAI-compatible service (#93), and still
+        // stops Anthropic, which needs one.
+        let keyless = endpoint(&ready, &Memory::broken(), LocalModel::Missing).unwrap();
+        assert_eq!(keyless.key, None);
+        assert!(store_unreachable(&ready, &Memory::broken()));
+        assert!(!store_unreachable(&ready, &Memory::with("sk-1")));
+        let anthropic = Settings {
+            api_kind: ApiKind::Anthropic,
+            ..ready.clone()
+        };
         assert_eq!(
-            endpoint(&ready, &Memory::broken(), LocalModel::Missing).err(),
+            endpoint(&anthropic, &Memory::broken(), LocalModel::Missing).err(),
             Some(Unavailable::StoreUnreachable)
         );
         assert!(askable(&ready), "decided without reading the key");

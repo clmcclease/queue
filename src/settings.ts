@@ -53,6 +53,8 @@ export const PROVIDERS: { value: Provider; label: string; detail: string }[] = [
 export interface NamingStatus {
   provider: Provider;
   unavailable: "off" | "model_missing" | "runtime_missing" | "not_set_up" | "store_unreachable" | null;
+  /** The API is chosen and the credential store can't be read (#93). */
+  store_unreachable?: boolean;
 }
 
 export const namingStatus = () => invoke<NamingStatus>("naming_status");
