@@ -15,7 +15,8 @@ const fixtures = new URL(`qa/fixtures/signatures/yt-dlp-${version}/`, root);
 const dataFile = fileURLToPath(new URL("SHA2-256SUMS", fixtures));
 const sigFile = fileURLToPath(new URL("SHA2-256SUMS.sig", fixtures));
 const probe = spawnSync("gpg", ["--version"], { timeout: 5000 });
-const skip = probe.error || probe.status !== 0 ? "gpg is not runnable" : false;
+// Windows skips too: Git for Windows' MSYS gpg can't read Windows paths (see signature-gpg-120).
+const skip = process.platform === "win32" || probe.error || probe.status !== 0 ? "gpg is not usable here" : false;
 
 function temp(t) {
   const dir = mkdtempSync(join(tmpdir(), "q120qa-"));

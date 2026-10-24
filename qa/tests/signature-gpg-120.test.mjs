@@ -22,9 +22,11 @@ const sums = join(fixtures, "SHA2-256SUMS");
 const sig = join(fixtures, "SHA2-256SUMS.sig");
 
 // Runnable means it starts and exits 0; a gpg that's present but broken skips too (#120 QA).
+// Windows skips as well: Git for Windows' MSYS gpg can't read Windows paths (an import finds no
+// key), and the signature mode itself only runs in CI's Linux job.
 const probe = spawnSync("gpg", ["--version"]);
-const hasGpg = !probe.error && probe.status === 0;
-const skip = hasGpg ? false : "gpg isn't on PATH (CI runs these on Linux and macOS)";
+const hasGpg = process.platform !== "win32" && !probe.error && probe.status === 0;
+const skip = hasGpg ? false : "gpg isn't usable here (CI runs these on Linux and macOS)";
 
 // A fresh gpg home for one case, removed with its agent afterwards.
 function home(t) {
