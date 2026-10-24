@@ -52,7 +52,7 @@ test("the ffmpeg build is LGPL-only with networking off", () => {
 test("CI installs and checks sidecars before tests and bundles", () => {
   const workflow = read(".github/workflows/build.yml");
   assert.match(workflow, /^  ffmpeg:$/m);
-  assert.match(workflow, /^  test:\n    needs: ffmpeg$/m);
+  assert.match(workflow, /^  test:\n    needs: \[ffmpeg, verify-ytdlp\]$/m);
   assert.match(workflow, /node scripts\/fetch-sidecars\.mjs --target \$\{\{ matrix\.target \}\} --check$/m);
   assert.match(workflow, /scripts\/build-ffmpeg\.sh "\$t"/);
 });
