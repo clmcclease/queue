@@ -4,6 +4,19 @@
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
+## #131: verify-signatures downloads with curl (2026-10-26, the owner's pick)
+- **Why:** CI's `verify-signatures` failed three times on PR #130 (run 40347332667) with a bare `fetch failed`, which skipped every later job. Reproduced locally with Node 24.21.0: Node's fetch caps connect + TLS at 10 s (`UND_ERR_CONNECT_TIMEOUT`), and ffmpeg.org took 9–21 s (curl measured TCP 1–7 s, then TLS about 14 s). The owner chose option 2: fix the download, not wait.
+- **What changed:**
+  - `scripts/fetch-sidecars.mjs --verify-signatures` downloads with `curl`, like `build-ffmpeg.sh`: argument array, no shell, `--proto =https --proto-redir =https`, `--retry 3`, `--connect-timeout 60`, `--max-time 120`. Errors carry the URL and curl's message; a missing curl says "curl is required for this mode". Other modes still use fetch.
+  - `qa/tests/signature-44-qa.test.mjs` fakes curl instead of fetch, plus two tests for the flags and for a missing curl.
+  - ARCHITECTURE and BACKLOG updated.
+- **Checks:**
+  - macOS arm64: `npm test` 495 passed, 0 failed, 13 skipped (the real-gpg cases; no gpg here). `git diff --check` clean.
+  - Live, in a throwaway Linux container (`node:24.21.0`, curl 7.88.1, gpg; files streamed in with tar): `--verify-signatures` printed both VALIDSIGs against the real, slow ffmpeg.org in about 25 s.
+  - Windows wasn't run; the job runs only on Linux CI.
+- **QA:** `test "#131"` **PASS WITH NOTES** (`20261026-102946-test-PHn8`), no bugs. Its 13 tests were added as `qa/tests/signature-curl-131-qa.test.mjs` (timeouts, partial-file cleanup, subprocess errors, binary data, shell characters, other modes untouched). Its notes: live slow-server recovery and Windows/Linux runs were untested by Codex; the container run above covers Linux and the slow server.
+- **Next bounded action:** merge this PR, then rebase PR #130 on it, rerun its CI and squash-merge it.
+
 ## Fourth run: final state (2026-10-24, about 02:00; code work ended early under the architect's 01:20 ruling)
 - **Merged to `main` (each with green CI on all three OSes and a Codex review of PASS or PASS WITH NOTES on its final head):**
   - #114 docs (899ad4d).
