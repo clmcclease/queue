@@ -1,10 +1,21 @@
 # Status
 
-**Updated:** 2026-10-24 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** fourth run complete; waiting for the owner
+**Updated:** 2026-10-26 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** the owner is back; working through the morning list
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
-## #131: verify-signatures downloads with curl (2026-10-26, the owner's pick)
+## 2026-10-26 (the owner is back)
+- **#19 hand check (owner):** ⌘/Ctrl+Enter starts Download all in the dev app. The other #19 shortcuts (paste routing, arrows and Delete on rows, Escape) haven't been reported yet.
+- **Version bumps approved (owner):** Dependabot bumps are taken through the normal gates: green CI on all three OSes, a local `npm ci` with the build and `npm test`, a `codex-qa review`, then a squash merge. Toolchain and sidecar bumps (Rust, Node, the Tauri CLI, yt-dlp, ffmpeg, deno) still need the owner's approval first.
+- **Merged:** #128, Dependabot's undici 8.11.2 → 8.12.3 (a dev dependency through jsdom; lockfile only), as 8ba8f9f.
+  - CI passed on all three OSes.
+  - Local checks on macOS: `npm ci`, the build, and `npm test` (465 passed, 0 failed, 13 skipped).
+  - Review: **PASS WITH NOTES**, no findings (`qa/reports/20261026-100856-review-JboH.md`).
+  - The lockfile also gained six optional bundled entries for `@tailwindcss/oxide-wasm32-wasi`, which install only on WASM targets.
+- **Merged:** #131's fix for the `verify-signatures` timeouts, as 169a638 (PR #132); see its section below.
+- **Next bounded action:** the rest of the morning list below (#118, the remaining #19 checks, D-035, branch protection, the key fingerprints, the owner's inputs).
+
+## #131: verify-signatures downloads with curl (2026-10-26, the owner's pick): merged as 169a638 (PR #132)
 - **Why:** CI's `verify-signatures` failed three times on PR #130 (run 40347332667) with a bare `fetch failed`, which skipped every later job. Reproduced locally with Node 24.21.0: Node's fetch caps connect + TLS at 10 s (`UND_ERR_CONNECT_TIMEOUT`), and ffmpeg.org took 9–21 s (curl measured TCP 1–7 s, then TLS about 14 s). The owner chose option 2: fix the download, not wait.
 - **What changed:**
   - `scripts/fetch-sidecars.mjs --verify-signatures` downloads with `curl`, like `build-ffmpeg.sh`: argument array, no shell, `--proto =https --proto-redir =https`, `--retry 3`, `--connect-timeout 60`, `--max-time 120`. Errors carry the URL and curl's message; a missing curl says "curl is required for this mode". Other modes still use fetch.
@@ -15,7 +26,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Live, in a throwaway Linux container (`node:24.21.0`, curl 7.88.1, gpg; files streamed in with tar): `--verify-signatures` printed both VALIDSIGs against the real, slow ffmpeg.org in about 25 s.
   - Windows wasn't run; the job runs only on Linux CI.
 - **QA:** `test "#131"` **PASS WITH NOTES** (`20261026-102946-test-PHn8`), no bugs. Its 13 tests were added as `qa/tests/signature-curl-131-qa.test.mjs` (timeouts, partial-file cleanup, subprocess errors, binary data, shell characters, other modes untouched). Its notes: live slow-server recovery and Windows/Linux runs were untested by Codex; the container run above covers Linux and the slow server.
-- **Next bounded action:** merge this PR, then rebase PR #130 on it, rerun its CI and squash-merge it.
+- **CI on PR #132:** green on all three OSes; `verify-signatures` passed in 27 s against the same slow ffmpeg.org.
 
 ## Fourth run: final state (2026-10-24, about 02:00; code work ended early under the architect's 01:20 ruling)
 - **Merged to `main` (each with green CI on all three OSes and a Codex review of PASS or PASS WITH NOTES on its final head):**
