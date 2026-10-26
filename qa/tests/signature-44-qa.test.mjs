@@ -61,20 +61,29 @@ function runFixture(t, options = {}, args = ["--verify-signatures"]) {
   writeFileSync(preload, `
 import cp from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { appendFileSync, readFileSync, existsSync } from 'node:fs';
+import { appendFileSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 const options = JSON.parse(readFileSync(new URL('./options.json', import.meta.url)));
 const log = event => appendFileSync(new URL('./events', import.meta.url), JSON.stringify(event) + '\\n');
 globalThis.fetch = async url => {
   log({kind: 'fetch', url});
+  throw new Error('offline stop before asset download');
+};
+// --verify-signatures downloads with curl (#131).
+const curl = (args, spawnOptions) => {
+  const url = args.at(-1);
+  log({kind: 'fetch', url, args, spawnOptions});
+  if (options.missingCurl) return {error: Object.assign(new Error('not found'), {code: 'ENOENT'})};
   const name = new URL(url).pathname.split('/').at(-1);
-  if (!['SHA2-256SUMS', 'SHA2-256SUMS.sig', options.tarball, options.tarball + '.asc'].includes(name)) throw new Error('offline stop before asset download');
-  if (options.httpFailure === name) return {ok: false, status: 503};
-  if (options.fetchTimeout === name) throw Object.assign(new Error('fixture download timeout'), {name: 'TimeoutError'});
+  if (!['SHA2-256SUMS', 'SHA2-256SUMS.sig', options.tarball, options.tarball + '.asc'].includes(name)) return {status: 6, stdout: '', stderr: 'curl: (6) offline stop before asset download'};
+  if (options.httpFailure === name) return {status: 22, stdout: '', stderr: 'curl: (22) The requested URL returned error: 503'};
+  if (options.fetchTimeout === name) return {status: 28, stdout: '', stderr: 'curl: (28) fixture download timeout'};
   const body = name === options.tarball ? options.tarballBytes
     : name.endsWith('.sig') || name.endsWith('.asc') ? 'detached signature fixture' : options.sums;
-  return {ok: true, arrayBuffer: async () => Buffer.from(body)};
+  writeFileSync(args[args.indexOf('--output') + 1], body);
+  return {status: 0, stdout: '', stderr: ''};
 };
 cp.spawnSync = (file, args, spawnOptions = {}) => {
+  if (file === 'curl') return curl(args, spawnOptions);
   if (file !== 'gpg') throw new Error('unexpected executable ' + file);
   const home = args[args.indexOf('--homedir') + 1];
   log({kind: 'gpg', file, args, spawnOptions, homeExists: existsSync(home)});
@@ -146,8 +155,8 @@ for (const [name, options, error] of [
   ["wrong imported key", { importOutput: `[GNUPG:] IMPORT_OK 1 ${other}\n` }, /committed key imported/],
   ["extra imported primary key", { importOutput: `[GNUPG:] IMPORT_OK 1 ${fingerprint}\n[GNUPG:] IMPORT_OK 1 ${other}\n` }, /committed key imported/],
   ["spawn failure at verification", { verifySpawnError: true }, /fixture spawn error/],
-  ["checksum download HTTP error", { httpFailure: "SHA2-256SUMS" }, /HTTP 503/],
-  ["signature download HTTP error", { httpFailure: "SHA2-256SUMS.sig" }, /HTTP 503/],
+  ["checksum download HTTP error", { httpFailure: "SHA2-256SUMS" }, /returned error: 503/],
+  ["signature download HTTP error", { httpFailure: "SHA2-256SUMS.sig" }, /returned error: 503/],
   ["unsigned asset list", { sums: "" }, /not in the signed sums/],
   ["all signed hashes paired with wrong names", { sums: signedSums.replaceAll("yt-dlp", "wrong-name") }, /not in the signed sums/],
   ["correct names but incorrect hashes", { sums: signedSums.replace(/[0-9a-f]{64}/g, "0".repeat(64)) }, /signed sha256/],
@@ -211,9 +220,9 @@ for (const [name, options, error, gpgCalls] of [
   ["an ffmpeg signature gpg rejects", { ffmpegVerifyStatus: 1 }, /no valid signature by FCF986EA/, 4],
   ["an ffmpeg signature by another key", { ffmpegVerifyOutput: validStatus(other, other) }, /no valid signature by FCF986EA/, 4],
   ["a wrong ffmpeg key import", { ffmpegImportOutput: `[GNUPG:] IMPORT_OK 1 ${other}\n` }, /committed key imported/, 3],
-  ["an ffmpeg .asc download error", { httpFailure: `${tarball}.asc` }, /HTTP 503/, 2],
+  ["an ffmpeg .asc download error", { httpFailure: `${tarball}.asc` }, /returned error: 503/, 2],
   ["missing ffmpeg signing configuration", { missingFfmpegSigning: true }, /no ffmpeg.signing/, 0],
-  ["an ffmpeg tarball HTTP error", { httpFailure: tarball }, /HTTP 503/, 2],
+  ["an ffmpeg tarball HTTP error", { httpFailure: tarball }, /returned error: 503/, 2],
   ["an ffmpeg tarball download timeout", { fetchTimeout: tarball }, /fixture download timeout/, 2],
   ["an ffmpeg signature download timeout", { fetchTimeout: `${tarball}.asc` }, /fixture download timeout/, 2],
   ["an ffmpeg gpg subprocess timeout", { ffmpegVerifyTimeout: true }, /fixture gpg timeout/, 4],
@@ -232,6 +241,31 @@ for (const [name, options, error, gpgCalls] of [
     assert.equal(f.isolatedCalls.length, gpgCalls);
   });
 }
+
+test("#131: downloads use curl with retries, long timeouts, https only and no shell", t => {
+  const f = runFixture(t);
+  assert.equal(f.result.status, 0, f.result.stderr);
+  const downloads = f.events.filter(e => e.kind === "fetch");
+  assert.equal(downloads.length, 4);
+  for (const { args, spawnOptions } of downloads) {
+    const flag = name => args[args.indexOf(name) + 1];
+    assert.ok(args.includes("--fail") && args.includes("--location"));
+    assert.equal(flag("--retry"), "3");
+    assert.equal(flag("--connect-timeout"), "60");
+    assert.equal(flag("--max-time"), "120");
+    assert.equal(flag("--proto"), "=https");
+    assert.equal(flag("--proto-redir"), "=https");
+    assert.ok(flag("--output").startsWith(join(f.root, "queue-gpg-")), "downloads land in the throwaway home");
+    assert.equal(spawnOptions.shell, undefined, "the URL is argv, never shell input");
+  }
+});
+
+test("#131: missing curl fails loudly before gpg sees anything", t => {
+  const f = runFixture(t, { missingCurl: true });
+  assert.equal(f.result.status, 1);
+  assert.match(f.result.stderr, /curl is required for this mode/);
+  assert.equal(f.isolatedCalls.length, 0);
+});
 
 test("NFR/#86 QA: a hash mismatch stops before downloading the detached signature", t => {
   const f = runFixture(t, { ffmpegPin: "0".repeat(64) });

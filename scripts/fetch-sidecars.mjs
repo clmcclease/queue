@@ -15,7 +15,7 @@
 // --verify-signatures checks, with gpg, that yt-dlp's signed SHA2-256SUMS for the pinned version
 // pairs every pinned asset name with its pinned sha256 (#44), and that the pinned ffmpeg source
 // tarball carries FFmpeg's release signature (#86, D-035). CI's own `verify-signatures` job runs it
-// before any job builds or runs a sidecar; other modes never need gpg.
+// before any job builds or runs a sidecar; other modes never need gpg. It downloads with curl (#131).
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -64,12 +64,15 @@ async function verifySignatures() {
   }
   // gpg is checked first, so a machine without it fails before any download.
   if (spawnSync("gpg", ["--version"]).error?.code === "ENOENT") throw new Error(GPG_MISSING);
-  const fetchInto = async (home, src, name) => {
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`${src}: HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    writeFileSync(join(home, name), buf);
-    return buf;
+  // curl, not fetch: fetch gives up after 10 s of connect + TLS, and ffmpeg.org can take longer
+  // (#131). Same flags as build-ffmpeg.sh's download, plus limits so a stalled server still fails.
+  const fetchInto = (home, src, name) => {
+    const dest = join(home, name);
+    const run = spawnSync("curl", ["--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https",
+      "--retry", "3", "--connect-timeout", "60", "--max-time", "120", "--output", dest, src], { encoding: "utf8" });
+    if (run.error) throw new Error(`${src}: ${run.error.code === "ENOENT" ? "curl is required for this mode" : `curl: ${run.error.message}`}`);
+    if (run.status !== 0) throw new Error(`${src}: ${run.stderr.trim() || `curl exited with ${run.status}`}`);
+    return readFileSync(dest);
   };
   const inHome = async (work) => {
     const home = mkdtempSync(join(tmpdir(), "queue-gpg-"));
