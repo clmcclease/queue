@@ -4,7 +4,13 @@
 // PASS/FAIL line. macOS passed 9/9 on 2026-10-27; Windows and Linux are #71.
 (async () => {
   const violations = [];
-  const onViolation = (e) => violations.push(`${e.violatedDirective} ← ${e.blockedURI || "inline"}`);
+  const onViolation = (e) => violations.push({ directive: e.effectiveDirective || e.violatedDirective, uri: e.blockedURI || "inline" });
+  // A network check counts as blocked only with a matching CSP violation; any other failure
+  // (offline, a 404, a timeout) is inconclusive, not a pass.
+  const blockedBy = (directive, url) =>
+    violations.some((v) => v.directive.startsWith(directive) && v.uri.startsWith(url));
+  const verdict = (outcome, directive, url) =>
+    outcome === "failed" ? (blockedBy(directive, url) ? "blocked" : "inconclusive (failed without a CSP violation)") : outcome;
   document.addEventListener("securitypolicyviolation", onViolation);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const results = [];
@@ -32,16 +38,18 @@
     const s = document.createElement("script");
     s.src = "https://example.com/csp-probe.js";
     s.onload = () => resolve("loaded");
-    s.onerror = () => resolve("blocked");
+    s.onerror = () => resolve("failed");
     document.head.appendChild(s);
-    setTimeout(() => resolve("blocked (timeout)"), 5000);
+    setTimeout(() => resolve("failed"), 5000);
   });
-  check("remote <script>", "blocked", remote.startsWith("blocked") ? "blocked" : remote);
+  await wait(100);
+  check("remote <script>", "blocked", verdict(remote, "script-src", "https://example.com/csp-probe.js"));
 
   // 4. fetch to another origin must fail (connect-src).
   let fetched;
-  try { await fetch("https://example.com/", { mode: "no-cors" }); fetched = "allowed"; } catch { fetched = "blocked"; }
-  check("fetch https://example.com", "blocked", fetched);
+  try { await fetch("https://example.com/", { mode: "no-cors" }); fetched = "allowed"; } catch { fetched = "failed"; }
+  await wait(100);
+  check("fetch https://example.com", "blocked", verdict(fetched, "connect-src", "https://example.com/"));
 
   // 5. Inline <style> must not apply.
   const marker = document.createElement("div");
@@ -58,13 +66,14 @@
   const img = (src) => new Promise((resolve) => {
     const i = new Image();
     i.onload = () => resolve("loaded");
-    i.onerror = () => resolve("blocked");
+    i.onerror = () => resolve("failed");
     i.src = src;
-    setTimeout(() => resolve("blocked (timeout)"), 8000);
+    setTimeout(() => resolve("failed"), 8000);
   });
   check("https thumbnail (i.ytimg.com)", "loaded", await img("https://i.ytimg.com/vi/jNQXAC9IVRw/default.jpg"));
   const httpImg = await img("http://i.ytimg.com/vi/jNQXAC9IVRw/default.jpg");
-  check("http thumbnail", "blocked", httpImg.startsWith("blocked") ? "blocked" : httpImg);
+  await wait(100);
+  check("http thumbnail", "blocked", verdict(httpImg, "img-src", "http://i.ytimg.com/"));
 
   // 7. IPC to the backend still works (read-only command).
   let ipc;
@@ -76,7 +85,7 @@
   await wait(200);
   document.removeEventListener("securitypolicyviolation", onViolation);
   console.table(results);
-  console.log("Violations reported by the webview:\n" + (violations.join("\n") || "(none)"));
+  console.log("Violations reported by the webview:\n" + (violations.map((v) => `${v.directive} ← ${v.uri}`).join("\n") || "(none)"));
   const failed = results.filter((r) => r.ok !== "✔");
   console.log(failed.length ? `CSP PROBE: FAIL (${failed.map((r) => r.check).join(", ")})` : "CSP PROBE: PASS");
   return failed.length ? "FAIL" : "PASS";
