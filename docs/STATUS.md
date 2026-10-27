@@ -1,8 +1,24 @@
 # Status
 
-**Updated:** 2026-10-26 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** the owner is back; working through the morning list
+**Updated:** 2026-10-27 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** the owner is back; working through the morning list
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-10-27
+- **Merged:** #43's CSP, PR #118, as cc5758b. Rebased onto 9a95457 first, then CI passed on all three OSes. Claude merged it at the owner's request. Details are in #43's section below.
+  - The owner checked it on macOS, in the dev app and in a debug build with the release CSP, where `qa/manual/csp-probe-43.js` passed 9/9.
+  - The owner accepted one known limitation: with `TAURI_DEV_HOST` set, `devCsp` blocks Vite's HMR socket.
+  - All five #43 QA reports are in `qa/reports/`. The `wt43` worktree and the `infra/43-csp` branch are removed.
+- **Owner's preference:** Claude merges approved PRs. The owner only steps in when tooling blocks Claude. For example, the auto-mode classifier blocks Claude's `git push --force-with-lease`, branch deletes and `git worktree remove --force`, so the owner runs those with `!`.
+- **Filed:** #133, automating native webview checks on Linux and Windows with `tauri-driver`, linked from #71. Its tooling needs the owner's approval before it's built.
+- **#19 hand checks (owner):** paste with focus outside the URL field fills it, and Escape returns focus to it. Arrows and Delete on rows still haven't been reported.
+- **Next bounded action:** the owner's remaining list:
+  - the #19 arrows and Delete;
+  - confirm or revise D-035;
+  - branch protection on `main`;
+  - confirm the two key fingerprints;
+  - inputs for #86(c), #100 part 3, #103, #104, #18, #21 and #24;
+  - whether to start #133.
 
 ## 2026-10-26 (the owner is back)
 - **#19 hand check (owner):** ⌘/Ctrl+Enter starts Download all in the dev app. The other #19 shortcuts (paste routing, arrows and Delete on rows, Escape) haven't been reported yet.
@@ -42,7 +58,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - #84 part, `persist` never writes with saving off (900e757).
   - #122 codex-qa closes Codex's stdin (c0a3fa5).
 - **Closed:** #19, #44, #83, #85, #93, #120, #122. **Still open:** #84 (the command-level harness), #86 ((c), toolchain pinning, the owner's), #100 (part 3, the key slot, the owner's, and the larger CI test GGUF).
-- **Held for the owner:** #43's CSP, PR #118 (draft). The worktree stays at `…/scratchpad/wt43`.
+- **Held for the owner:** #43's CSP, PR #118 (draft). The worktree stays at `…/scratchpad/wt43`. (Merged 2026-10-27 as cc5758b; the worktree is removed.)
 - **Signatures, proven in CI:** `verify-signatures` printed `VALIDSIG AC0CBBE6848D6A873464AF4E57CF65933B5A7581` for yt-dlp 2026.08.19 and `VALIDSIG FCF986EA15E6E293A5644F10B4322F04D67658D8` for the ffmpeg 9.0.2 tarball. `ffmpeg` and `test` need that job.
 - **Incidents:**
   - **Codex launch hang:** two #86(a) gate runs hung for 25 minutes each, because Codex's stdin was an inherited open pipe. That's a launch defect, not a Codex failure (D-035). The fix is #122, merged.
@@ -208,7 +224,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Its 33 tests were added as `qa/tests/shortcuts-19-qa.test.mjs`; the 6 that failed pass now.
 - **Review round 1:** **FAIL** (`20261023-214533-review-7VKD`). P2: the arrow keys could land on a row still being removed. P3: a row whose removal failed stayed marked as leaving. Both fixed: the arrows skip leaving rows too, and the mark clears when the removal settles. Two tests were added. After the fix, on top of `main` with #93: `npm test` 377 passed, 0 failed.
 
-## #43: Content Security Policy (fourth run; branch `infra/43-csp`, draft PR; **merge held for the owner**, D-035)
+## #43: Content Security Policy (fourth run; checked by the owner and merged 2026-10-27 as cc5758b, PR #118)
 - **What changed:** `tauri.conf.json` sets `app.security.csp`:
   - `script-src` and `style-src` are `'self'` only, with no inline code and no eval.
   - `img-src 'self' https: data:`, so thumbnails from any https site load. Thumbnails served over plain http are blocked on purpose.
