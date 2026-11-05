@@ -21,10 +21,11 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **FFmpeg** `FCF986EA15E6E293A5644F10B4322F04D67658D8`: Debian's ffmpeg package (7:9.0.2-4, `debian/upstream/signing-key.asc`) carries the same key, an independent copy Debian uses to verify FFmpeg releases. ffmpeg.org's download page, keyserver.ubuntu.com and keys.openpgp.org also match.
   - **yt-dlp** `AC0CBBE6848D6A873464AF4E57CF65933B5A7581`: keys.openpgp.org shows it with the email-verified identity "Simon Sawicki (yt-dlp signing key) <contact@grub4k.xyz>"; Grub4K is a core yt-dlp maintainer who works on releases (`Maintainers.md`). `public.key` on yt-dlp's `master` and keyserver.ubuntu.com also match. No distribution carries this key and the maintainer's GitHub profile publishes none, so the email-verified identity is the independent link.
   - Fingerprints were computed without gpg, from each key's primary key packet.
+- **D-034 confirmed by the owner** as built (#108's request shape by host). OpenAI reasoning models reached through OpenRouter stay an untested, untracked gap; a failure there falls back to rule-based names.
+- **Merged:** this session's docs PR #138 as 0563652 (branch protection, fingerprints, #136); it was the first docs PR under the new ruleset.
 - **Next bounded action:** the owner's remaining list:
   - inputs for #100 part 3, #103, #104, #18, #21 and #24;
   - whether to start #133;
-  - D-034 (#108's request shape by host) is still Provisional.
 
 ## 2026-10-27
 - **Merged:** #43's CSP, PR #118, as cc5758b. Rebased onto 9a95457 first, then CI passed on all three OSes. Claude merged it at the owner's request. Details are in #43's section below.

@@ -253,7 +253,8 @@ The owner found this while testing #31 in the app, and chose to keep it:
 - **Result:** the 4B passes at 66% (in-repo runner with `QUEUE_EVAL_SET`, 100% valid JSON, warm p50 0.6 s). The 2B (28%) stays the small option for low-memory machines. #33 closes and M4 closes. Still open, not blocking: the CPU-only Windows/Linux runs of both models, now an M5 check.
 - **The runner** (`tests/naming_eval_33.rs`) asserts 65% and takes `QUEUE_EVAL_SET` to score a set outside the repo. The 54-title seed is a regression set; it scored lower (44% on the 4B, before the dash fix) because its labels are author-written.
 
-## D-034 OpenAI-compatible request shape by host (#108) — Provisional (2026-10-23, decided by the architect under D-028)
+## D-034 OpenAI-compatible request shape by host (#108) — Confirmed by the owner (2026-11-05; decided by the architect under D-028 on 2026-10-23)
+- **Owner's confirmation (2026-11-05):** confirmed as built. The OpenRouter gap below stays a known, untracked limitation: a failure there falls back to rule-based names.
 - `ai::chat_body` builds the chat request. When the base URL's host is exactly `api.openai.com` (case-insensitive), the body is `{model, messages, response_format, max_completion_tokens: 1024}`, with no `temperature` and no `max_tokens`. OpenAI's reasoning models refuse `max_tokens` and any non-default `temperature`, and reasoning tokens share the budget, as for Anthropic (D-029).
 - Every other host, including the bundled llama-server on loopback, Ollama, LM Studio and OpenRouter, keeps the unchanged body `{model, messages, response_format, temperature: 0, max_tokens: 128}` (D-016). Without `temperature: 0`, llama-server would sample at its default of 0.8.
 - **Not built:** a retry, reading the error body, `reasoning_effort`, a new `ApiKind`. Azure stays out of scope (D-029). OpenAI reasoning models reached through OpenRouter aren't covered by the host rule (unverified).
