@@ -57,7 +57,8 @@ after(async () => {
   delete globalThis.window;
   delete globalThis.document;
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
-  if (scratch) await rm(scratch, { recursive: true, force: true });
+  // Retries: on Windows, Vite's optimizer can still hold files in its deps_temp folder (#136).
+  if (scratch) await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test("#43 QA: release HTML loads existing same-origin scripts and styles without inline content", () => {
