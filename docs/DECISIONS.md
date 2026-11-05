@@ -264,7 +264,9 @@ The owner found this while testing #31 in the app, and chose to keep it:
   - The 4B on the held-out 100: 66/100, unchanged.
   - `QUEUE_QA_REAL_LLAMA`: the 4B answers `Ok("Me at the zoo")`.
 
-## D-035 Fourth-run scope and small rulings — Provisional (2026-10-23, decided by the architect under D-028)
+## D-035 Fourth-run scope and small rulings — Confirmed by the owner (2026-11-05; decided by the architect under D-028 on 2026-10-23–24)
+- **Owner's confirmation (2026-11-05):** each standing ruling is confirmed: #83, #85, #93, #19, the #44/#86(a)/#120 signature checks, #122 and the copy-reports-before-removing rule. The one-night rules (order of work, Codex pause, handoff deadlines, the round-4 exception) are confirmed as history.
+- **#86(c) (owner, 2026-11-05):** record, don't pin. #86(b)'s recorded toolchain in the cache key is enough: the source is signature-checked and built unmodified, and every build says what built it. Pinning Xcode and the apt packages was rejected as brittle (images drop old versions), and fully reproducible builds as too much upkeep before a public release; they come back as a new item if wide distribution needs them. #86 closes.
 - **#83:** a `queue.json` with a `version` other than 1 comes from a newer Queue; it isn't damaged. The queue starts empty, saving is off for the session with a warning that says why, and the file is never moved aside or written. Additive fields keep version 1; the number goes up only for an incompatible change.
 - **#85:** row ids are capped at 2^53 − 1, JavaScript's safe range. Saved rows above it are dropped like other impossible ids, and adding a row at the limit fails with D-025's message.
 - **#93:** an unreadable credential store counts as "no key" for an OpenAI-compatible endpoint. The row is asked (a 401 gets the Fallback tag), and the status note still shows. Anthropic still sends nothing without a key.

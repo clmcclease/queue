@@ -1,8 +1,20 @@
 # Status
 
-**Updated:** 2026-10-27 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** the owner is back; working through the morning list
+**Updated:** 2026-11-05 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** the owner is back; working through the morning list
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-05
+- **D-035 confirmed by the owner,** every standing ruling as written. The one-night rules are confirmed as history.
+- **#86(c) decided (owner): record, don't pin** (D-035). #86 closes; (a) and (b) are merged.
+- **Found: a Windows test flake on `main`.** The push run for #118's merge (cc5758b, run 40540773856) failed on Windows only. Every test in `qa/tests/csp-43-qa.test.mjs` passed, but its `after` hook's `rm` of the temp folder hit `ENOTEMPTY` on Vite's `deps_temp_*` cache folder. The next `main` run (#134) was green on all three OSes. The likely fix is retries on that `rm` (`maxRetries`, `retryDelay`); not filed or fixed yet.
+- **Next bounded action:** the owner's remaining list:
+  - the Windows cleanup flake above: file and fix it, if approved;
+  - branch protection on `main`;
+  - confirm the two key fingerprints;
+  - inputs for #100 part 3, #103, #104, #18, #21 and #24;
+  - whether to start #133;
+  - D-034 (#108's request shape by host) is still Provisional.
 
 ## 2026-10-27
 - **Merged:** #43's CSP, PR #118, as cc5758b. Rebased onto 9a95457 first, then CI passed on all three OSes. Claude merged it at the owner's request. Details are in #43's section below.
@@ -11,10 +23,12 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - All five #43 QA reports are in `qa/reports/`. The `wt43` worktree and the `infra/43-csp` branch are removed.
 - **Owner's preference:** Claude merges approved PRs. The owner only steps in when tooling blocks Claude. For example, the auto-mode classifier blocks Claude's `git push --force-with-lease`, branch deletes and `git worktree remove --force`, so the owner runs those with `!`.
 - **Filed:** #133, automating native webview checks on Linux and Windows with `tauri-driver`, linked from #71. Its tooling needs the owner's approval before it's built.
-- **#19 hand checks (owner):** paste with focus outside the URL field fills it, and Escape returns focus to it. Arrows and Delete on rows still haven't been reported.
+- **#19 hand checks (owner):** paste with focus outside the URL field fills it, and Escape returns focus to it.
+- **#19 arrows and Delete (owner, dev app on macOS at 882ed04):** pass. Every #19 shortcut has now been hand-checked on macOS; Windows and Linux are #71 (automation in #133).
+  - Tab reaches rows; Up/Down move between them. Delete removes the focused row and focus moves to the next one. A downloading row can't be removed. Keys inside a row's name field edit the text. The ✕ tooltip shows `⌫`.
+  - A quick double ⌫ removes two rows. A first report that it didn't work was the focus ring: the next row slides into the removed row's place, so the ring seems not to move. A key logger in Web Inspector showed each press handled and focus advancing row by row to the URL bar.
+  - The owner kept focus moving down (to the next row) after a delete, rather than up.
 - **Next bounded action:** the owner's remaining list:
-  - the #19 arrows and Delete;
-  - confirm or revise D-035;
   - branch protection on `main`;
   - confirm the two key fingerprints;
   - inputs for #86(c), #100 part 3, #103, #104, #18, #21 and #24;
