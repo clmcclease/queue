@@ -7,13 +7,21 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 ## 2026-11-05
 - **D-035 confirmed by the owner,** every standing ruling as written. The one-night rules are confirmed as history.
 - **#86(c) decided (owner): record, don't pin** (D-035). #86 closes; (a) and (b) are merged.
-- **#136 (filed and fixed, owner-approved):** a Windows-only test flake. The `main` run for cc5758b (run 40540773856) failed although every test passed: `qa/tests/csp-43-qa.test.mjs`'s `after` hook hit `ENOTEMPTY` removing Vite's `deps_temp_*` from its temp `cacheDir`. Seen once; the next `main` run was green.
+- **#136 (filed and fixed, owner-approved), merged as 66ad8a3 (PR #137):** a Windows-only test flake. The `main` run for cc5758b (run 40540773856) failed although every test passed: `qa/tests/csp-43-qa.test.mjs`'s `after` hook hit `ENOTEMPTY` removing Vite's `deps_temp_*` from its temp `cacheDir`. Seen once; the next `main` run was green.
   - **Fix:** that hook and `qa/tests/row-ids-q7-85-qa.test.mjs`'s, the only two with a temp Vite cache, now call `rm` with `maxRetries: 10, retryDelay: 100`. The new `qa/tests/vite-cache-cleanup-136.test.mjs` fails if any QA test with a temp Vite cache removes it without retries; it was checked to fail against the old file.
   - **QA:** `test "#136"`: **PASS WITH NOTES**, no bugs (`qa/reports/20261105-104246-test-clrE.md`). Codex's 18 tests were added as `qa/tests/vite-cache-cleanup-136-qa.test.mjs`: they run both real teardown hooks with injected `ENOTEMPTY`/`EBUSY`/`EPERM`, check exhausted retries and a no-retries negative control, and prove the guard catches a missing option. Some fault-inject Node's internal `fs.rmdir`, so a Node upgrade could break them without any change here.
   - **Checks (macOS arm64):** `npm test` 532 passed, 0 failed, 13 skipped. Whether the retries fix the race on a real Windows runner can't be shown here; CI runs it on Windows.
+- **Branch protection on `main` (owner-approved, applied by Claude):** ruleset "Protect main" (id 26633474, active, no bypass):
+  - a pull request is required, with 0 approvals (the owner is the only human reviewer);
+  - required checks: `verify-signatures`, `ffmpeg (macos)`, `ffmpeg (linux-windows)`, `test (linux)`, `test (macos)`, `test (windows)`; the branch need not be up to date with `main` first;
+  - force-pushes and deleting `main` are blocked.
+  - Repo settings: merged branches are deleted on GitHub automatically, and only squash merges are allowed. Local squash-merged branches still need `git branch -D`, which the owner runs.
+  - Read back from the API after applying. PR #137 was the first merge under it: held as blocked until `test (windows)` passed.
+- **Key fingerprints confirmed by the owner (2026-11-05)** against second sources (recorded in D-035), fetched by Claude and checked by eye by the owner:
+  - **FFmpeg** `FCF986EA15E6E293A5644F10B4322F04D67658D8`: Debian's ffmpeg package (7:9.0.2-4, `debian/upstream/signing-key.asc`) carries the same key, an independent copy Debian uses to verify FFmpeg releases. ffmpeg.org's download page, keyserver.ubuntu.com and keys.openpgp.org also match.
+  - **yt-dlp** `AC0CBBE6848D6A873464AF4E57CF65933B5A7581`: keys.openpgp.org shows it with the email-verified identity "Simon Sawicki (yt-dlp signing key) <contact@grub4k.xyz>"; Grub4K is a core yt-dlp maintainer who works on releases (`Maintainers.md`). `public.key` on yt-dlp's `master` and keyserver.ubuntu.com also match. No distribution carries this key and the maintainer's GitHub profile publishes none, so the email-verified identity is the independent link.
+  - Fingerprints were computed without gpg, from each key's primary key packet.
 - **Next bounded action:** the owner's remaining list:
-  - branch protection on `main`;
-  - confirm the two key fingerprints;
   - inputs for #100 part 3, #103, #104, #18, #21 and #24;
   - whether to start #133;
   - D-034 (#108's request shape by host) is still Provisional.
