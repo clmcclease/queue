@@ -24,7 +24,8 @@ before(async () => {
 afterEach(() => clearMocks());
 after(async () => {
   await server?.close();
-  if (cache) await rm(cache, { recursive: true, force: true });
+  // Retries: on Windows, Vite's optimizer can still hold files in its deps_temp folder (#136).
+  if (cache) await rm(cache, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   dom.window.close();
   delete globalThis.window;
 });
