@@ -23,9 +23,17 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - Fingerprints were computed without gpg, from each key's primary key packet.
 - **D-034 confirmed by the owner** as built (#108's request shape by host). OpenAI reasoning models reached through OpenRouter stay an untested, untracked gap; a failure there falls back to rule-based names.
 - **Merged:** this session's docs PR #138 as 0563652 (branch protection, fingerprints, #136); it was the first docs PR under the new ruleset.
+- **Merged:** #139 (D-034 confirmed) as e6cb553.
+- **The owner's inputs on six items (D-036):**
+  - #100 part 3: a key per service kind, labelled with where it's sent.
+  - #103: the 4B (default) and 2B; the 8B is dropped.
+  - #104: exact tag phrases from a starter list Claude drafts, editable by each user in Settings.
+  - #18: native-minimal, no accent color, an app icon of a dodo with a list.
+  - #21: verified downloads into Queue's data folder, falling back to the bundled copy; the OpenPGP library needs approval.
+  - #24: unsigned for now.
 - **Next bounded action:** the owner's remaining list:
-  - inputs for #100 part 3, #103, #104, #18, #21 and #24;
   - whether to start #133;
+  - which of the now-unblocked items to build first: #100 part 3, #103, #104 (starter list first), #18 (icon first), #21.
 
 ## 2026-10-27
 - **Merged:** #43's CSP, PR #118, as cc5758b. Rebased onto 9a95457 first, then CI passed on all three OSes. Claude merged it at the owner's request. Details are in #43's section below.

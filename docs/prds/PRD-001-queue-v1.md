@@ -115,7 +115,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 - **Cross-platform:** macOS (Apple Silicon and Intel), Windows 10/11 (x64), and Linux (x64; AppImage and .deb) from M1 on. CI builds all three for every push to `main` (and for PRs labelled `ci:bundle`), and runs the checks on every PR (D-011).
 - **Lightweight:** installer under 256 MB including yt-dlp, ffmpeg, deno, and the llama.cpp runtime (raised from ~80 MB on 2026-10-10 to fit bundled deno; D-013). The AI model (~2.5 GB default, ~1.4 GB small option; D-016) is a separate, optional first-run download. Cold launch under 1s. Idle memory under 150 MB with no model loaded. The model is only loaded while naming and unloaded after about 2 minutes idle.
 - **Polished UI:** a single window with a dark/light theme that follows the system, smooth animations, thumbnails, and keyboard-first use (⌘/Ctrl+V and Enter adds, ⌘/Ctrl+Enter starts, Delete removes the selected item). It follows each OS's conventions for window controls and menus.
-- **Resilient:** one item failing never stops the queue. yt-dlp self-updates (`yt-dlp -U`) at launch, at most once a day.
+- **Resilient:** one item failing never stops the queue. yt-dlp updates at launch, at most once a day: Queue downloads and verifies the new version into its data folder and falls back to the bundled one (D-036).
 - **Private:** no telemetry. With the default settings, the only network calls are yt-dlp itself, update checks, and the one-time model download. Item metadata is only sent to a third party if the user picks the API provider.
 
 ## 8. Technical approach
@@ -143,7 +143,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 2. **M2 – Real queue:** metadata preview, progress, sequential processing, retry and remove, folder picker, format presets, persistence.
 3. **M3 – Smart naming (rules):** Tier 1 engine, inline name editing, collision handling, templates.
 4. **M4 – AI naming:** local runtime + model manager (default), API providers, provider toggle, prompt + eval.
-5. **M5 – Polish & release:** visual design pass, keyboard shortcuts, notifications, history, yt-dlp auto-update, signed installers for all three OSes.
+5. **M5 – Polish & release:** visual design pass, keyboard shortcuts, notifications, history, yt-dlp auto-update, installers for all three OSes (unsigned for now; signing deferred by the owner, D-036).
 6. **Later:** subfolders, playlists, auto-start/concurrency, and the Future items.
 
 ## 11. Risks
@@ -157,7 +157,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 | Webview differences across OSes (WebKitGTK on Linux) | CI on all three, manual smoke test per release, conservative CSS |
 | ffmpeg licensing/size | Use an LGPL build of ffmpeg; it's only needed to merge video and audio streams |
 | ToS / copyright | Personal-use tool; no DRM circumvention; disclaimer in About |
-| Unsigned builds blocked (Gatekeeper, SmartScreen) | macOS notarization; Windows code signing (cost to be decided); Linux AppImage |
+| Unsigned builds blocked (Gatekeeper, SmartScreen) | Accepted for now (D-036): ship unsigned and document "Open Anyway" (macOS) and "Run anyway" (Windows); Tauri's ad-hoc signature lets it run on Apple Silicon. Notarization and Windows signing can be revisited later. |
 
 ## 12. Decisions made (2026-10-10)
 1. **Platform:** cross-platform (macOS, Windows, Linux) → Tauri v2.
@@ -167,7 +167,7 @@ A "Completed" section listing finished items with Show in folder, Copy source UR
 
 ## 13. Open questions
 1. ~~Default local model~~ Resolved 2026-10-22: **Qwen3-4B-Instruct-2507** (Q4_K_M, 2.5 GB) stays the default for now, with Qwen3.5-2B (1.4 GB) as the small option (D-016, confirmed). The N9 held-out result is 66% (D-031).
-2. Windows code signing: buy a certificate, or accept SmartScreen warnings for personal use?
+2. ~~Windows code signing~~ Resolved 2026-11-05: accept SmartScreen warnings for now; installers ship unsigned on every OS, and signing can be revisited later (D-036).
 
 ## 14. Future
 - Browser extension or share-menu item that sends the current tab to the queue.
