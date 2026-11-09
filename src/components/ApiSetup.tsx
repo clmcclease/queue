@@ -21,7 +21,8 @@ const button =
 /**
  * The API service (N8, #32, #91): OpenAI-compatible or Anthropic, a base URL and model, a key kept in the OS
  * credential store (write-only: it's never shown again), Test connection, and exactly what is
- * sent. `onStatus` gets the naming status after each change, so the banner and notes follow.
+ * sent. Each service kind has its own key, labelled with where it's sent (#100, D-036); the key
+ * buttons wait until a service change is saved, so a key always lands in the slot it's sent from. `onStatus` gets the naming status after each change, so the banner and notes follow.
  */
 export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatus) => void }) {
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -112,10 +113,13 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           disabled={setup === null || busy}
           onChange={(e) => {
             // Each service has its own address and model names; nothing is saved until Save.
+            // A key typed for the old service is dropped, so it can't be saved into the new
+            // service's slot (#100, D-036; Codex's review 20261109-130234-review-UgKq).
             const next = e.target.value as ApiKind;
             setKind(next);
             setBaseUrl(DEFAULT_BASE_URL[next]);
             setModel("");
+            setKey("");
           }}
         >
           <option value="openai_compatible">OpenAI-compatible</option>
@@ -159,6 +163,8 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
                 setKind(saved.kind);
                 setBaseUrl(saved.baseUrl);
                 setModel(saved.model);
+                // A key is only ever saved for the service shown when it was typed.
+                setKey("");
               },
             )
           }
@@ -181,16 +187,25 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
                 ? "Required for Anthropic"
                 : "Optional for Ollama and LM Studio"
           }
-          disabled={setup === null || busy}
+          disabled={setup === null || busy || unsaved}
           onChange={(e) => setKey(e.target.value)}
         />
       </label>
+      <p data-role="api-key-destination" className="text-xs text-neutral-500 dark:text-neutral-400">
+        {setup === null
+          ? ""
+          : unsaved
+            ? "Save the service first. Each service keeps its own key."
+            : setup.keyHost
+              ? `Sent to ${setup.keyHost}`
+              : "Not sent anywhere until a base URL is saved."}
+      </p>
       <div className="flex items-center gap-2">
         <button
           type="button"
           data-role="api-key-save"
           className={button}
-          disabled={setup === null || busy || key.trim() === ""}
+          disabled={setup === null || busy || unsaved || key.trim() === ""}
           onClick={() => run(() => setApiKey(key), () => setKey(""))}
         >
           Save key
@@ -199,7 +214,7 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           type="button"
           data-role="api-key-remove"
           className={button}
-          disabled={setup === null || busy || !setup.keySet}
+          disabled={setup === null || busy || unsaved || !setup.keySet}
           onClick={() => run(removeApiKey)}
         >
           Remove key
