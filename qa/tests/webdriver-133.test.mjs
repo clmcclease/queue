@@ -150,4 +150,10 @@ test("#133 CI: the webdriver job runs the probe on Linux and Windows with the pi
   assert.match(job, /csp-probe-133\.mjs --app src-tauri\/target\/debug\/queue\.exe --native-driver "\$RUNNER_TEMP\/msedgedriver\/msedgedriver\.exe"/);
   assert.match(job, /needs: \[ffmpeg, verify-signatures\]/);
   assert.match(job, /MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"/);
+  // The Windows diagnostics run only after the probe itself fails, and keep the job failed.
+  const diag = job.slice(job.indexOf("- name: Diagnose a failed WebView2 session"));
+  assert.match(job, /id: probe-windows/);
+  assert.match(diag, /if: failure\(\) && steps\.probe-windows\.outcome == 'failure'\n/);
+  assert.match(diag, /\n {10}exit 1\n?$/);
+  assert.match(diag, /MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"/);
 });

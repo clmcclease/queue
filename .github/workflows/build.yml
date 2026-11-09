@@ -246,11 +246,55 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a node qa/webdriver/csp-probe-133.mjs --app src-tauri/target/debug/queue
       - name: CSP probe in the real webview
+        id: probe-windows
         if: runner.os == 'Windows'
         shell: bash
         env:
           MSEDGEDRIVER_TELEMETRY_OPTOUT: "1" # msedgedriver otherwise reports New Session diagnostics (D-038)
         run: node qa/webdriver/csp-probe-133.mjs --app src-tauri/target/debug/queue.exe --native-driver "$RUNNER_TEMP/msedgedriver/msedgedriver.exe"
+      # Only when the probe fails on Windows: msedgedriver's own verbose log for a direct session
+      # (without tauri-driver), then the app on its own with WebView2 remote debugging on, to show
+      # whether it stays up and serves DevTools.
+      - name: Diagnose a failed WebView2 session
+        if: failure() && steps.probe-windows.outcome == 'failure'
+        shell: pwsh
+        env:
+          MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"
+        # Best effort: a diagnostic error mustn't skip the cleanup or the logs, and the job stays failed.
+        run: |
+          $ErrorActionPreference = "Continue"
+          $app = (Resolve-Path src-tauri\target\debug\queue.exe).Path
+          $log = "$env:RUNNER_TEMP\msedgedriver-verbose.log"
+          $driver = Start-Process -FilePath "$env:RUNNER_TEMP\msedgedriver\msedgedriver.exe" -ArgumentList "--port=9515", "--verbose", "--log-path=$log" -PassThru
+          Start-Sleep 3
+          $caps = @{ capabilities = @{ alwaysMatch = @{ browserName = "webview2"; "ms:edgeChromium" = $true; "ms:edgeOptions" = @{ binary = $app } } } } | ConvertTo-Json -Depth 6
+          try { (Invoke-WebRequest -Uri http://127.0.0.1:9515/session -Method Post -Body $caps -ContentType application/json -UseBasicParsing -TimeoutSec 90).Content } catch { "direct session failed: $_" }
+          "--- processes after the direct session ---"
+          Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime | Format-Table | Out-String
+          Stop-Process -Id $driver.Id -Force -ErrorAction SilentlyContinue
+          Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          "--- msedgedriver log (first 120 lines) ---"
+          Get-Content $log -TotalCount 120 -ErrorAction SilentlyContinue
+          "--- msedgedriver log (last 80 lines) ---"
+          Get-Content $log -Tail 80 -ErrorAction SilentlyContinue
+          "--- the app alone, remote debugging on 9222 ---"
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+          $env:TAURI_WEBVIEW_AUTOMATION = "true"
+          $p = Start-Process -FilePath $app -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\app-out.txt" -RedirectStandardError "$env:RUNNER_TEMP\app-err.txt"
+          try {
+            Start-Sleep 20
+            "app still running: $(-not $p.HasExited)"
+            if ($p.HasExited) { "app exit code: $($p.ExitCode)" }
+            try { (Invoke-WebRequest -Uri http://127.0.0.1:9222/json/version -UseBasicParsing -TimeoutSec 10).Content } catch { "no DevTools on 9222: $_" }
+            "--- processes with the app alone ---"
+            Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime | Format-Table | Out-String
+            Get-ChildItem -Path $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP -Recurse -Depth 6 -Filter DevToolsActivePort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName): $(Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue)" }
+          } finally {
+            if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          Get-Content "$env:RUNNER_TEMP\app-out.txt", "$env:RUNNER_TEMP\app-err.txt" -Tail 40 -ErrorAction SilentlyContinue
+          exit 1
 
   bundle:
     needs: test
