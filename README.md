@@ -35,7 +35,7 @@ npm run tauri dev                  # opens the app window
 npm run build && npm test          # frontend build + scaffold tests
 ```
 
-CI (`.github/workflows/build.yml`) runs the checks on Linux, Windows and macOS for every PR and every push to `main` (D-023). It builds unsigned bundles for all four targets on every push to `main` and on PRs labelled `ci:bundle` (D-011).
+CI (`.github/workflows/build.yml`) runs the checks on Linux, Windows and macOS for every PR and every push to `main` (D-023). It builds unsigned bundles for all four targets on every push to `main` and on PRs labelled `ci:bundle` (D-011). Its `webdriver` jobs run the real app under WebDriver on Linux (WebKitGTK) and Windows (WebView2) and require the release CSP probe to pass 9/9 (#133, D-037); on macOS the probe stays a manual check (`qa/manual/csp-probe-43.js`), since WKWebView has no WebDriver.
 
 Linux also needs the [Tauri system dependencies](https://tauri.app/start/prerequisites/) (WebKitGTK and friends). Windows needs WebView2 and the MSVC build tools. `build-ffmpeg.sh` runs on macOS and Linux only; it cross-compiles the Windows build with mingw-w64. On Windows, copy the `ffmpeg-*` artifact from a CI run into `src-tauri/binaries/` instead.
 

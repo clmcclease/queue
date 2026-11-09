@@ -59,6 +59,10 @@ Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. F
 - Models are never bundled. They're downloaded at runtime into the app-data directory.
 - **Planned (#21, M5; D-036):** at most once a day (configurable), download the latest yt-dlp into the app-data directory, never over the bundled copy, and verify it in-app the way CI does (D-035's key, fingerprint and signed sums). Use the newest verified copy, else the bundled one. The base argv keeps `--no-update`, so yt-dlp never replaces itself.
 
+## Startup
+
+- The main window is declared in `tauri.conf.json` with `"create": false` and built at the end of `setup`, after every command's state is managed, from that same config. On Windows debug builds it also passes `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to WebView2 itself, so Edge WebDriver can attach (D-039, #133).
+
 ## Persistence
 
 - `settings.json` in the app config folder (D-020) and `queue.json` in the app data folder (D-025), both written atomically (a temp file, then a rename). A damaged `queue.json` is moved aside, and a save failure shows a warning in the window.

@@ -330,4 +330,4 @@ PR #141's diagnostics (run 42671485896) showed that on the CI runner's WebView2 
 - The main window moves from automatic creation to `setup` (`"create": false` in `tauri.conf.json`, built from the same config with `WebviewWindowBuilder::from_config`), after all state is managed.
 - **Windows debug builds only** (`cfg!(all(windows, debug_assertions))`): when the variable is set, the window's WebView2 arguments are wry's defaults followed by the variable (`src-tauri/src/webview.rs`). Release builds never read it, and macOS and Linux are unchanged.
 - If a later WebView2 runtime appends the variable as documented, msedgedriver's switches appear twice on Windows debug runs; harmless, since the last instance of a switch wins and feature lists merge.
-- Validated by run <id> (Windows 9/9): filled in by #133's STATUS handoff commit.
+- Validated by run 42681647727 on ab6c3d8: `webdriver (windows)` passed the CSP probe 9/9 (session `webview2` 156.0.4314.58).
