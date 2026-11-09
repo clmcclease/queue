@@ -1,8 +1,24 @@
 # Status
 
-**Updated:** 2026-11-05 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** the owner is back; working through the morning list
+**Updated:** 2026-11-09 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #133 (branch `infra/133-webdriver`), then #100 part 3 → #104 → #21 → #103 → #18 (D-037)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-09
+- **The owner's order (D-037):** #133 → #100 part 3 → #104 → #21 → #103 → #18. **D-028 resumes:** the architect approves commits, PRs and merges; new dependencies the owner reserved (#21's OpenPGP library) and GitHub settings still go to the owner.
+- **Machine:** this session runs on the pre-2026-10-20 Mac; its checkout was synced from a stale `queue/74-cancel-download` to `main` (400114b). The Linux box (`chrisbeast`) timed out over SSH, so #133 is proven in CI instead (D-037).
+- **#133 (NFR) in progress, branch `infra/133-webdriver`:**
+  - `qa/webdriver/csp-probe-133.mjs` starts `tauri-driver`, opens a WebDriver session on the built app (`tauri:options.application`), runs `qa/manual/csp-probe-43.js` unchanged and requires all 9 checks to appear once and pass. Plain HTTP with Node's `fetch`, no client dependency. Every request has a deadline, and cleanup always kills `tauri-driver`.
+  - `scripts/fetch-msedgedriver.mjs` (Windows) reads the WebView2 runtime version from the registry, downloads that exact `msedgedriver` from `msedgedriver.microsoft.com`, logs its sha256 and checks `--version` matches.
+  - CI: a new `webdriver (linux|windows)` job (`tauri-driver` 2.1.0 via `cargo install --locked`; `webkit2gtk-driver` + `xvfb-run` on Linux) builds with `npm run tauri build -- --debug --no-bundle` (the release CSP) and runs the probe. It is **not** a required check; adding it to the "Protect main" ruleset is the owner's call.
+  - Tests: `qa/tests/webdriver-133.test.mjs` (9: the wrapper runs the real probe in a fake page, negative controls for inline script, eval and inline style, the report check, registry/URL validation, the workflow contract).
+  - `codex-qa test "#133"`: **FAIL**, then fixed (`qa/reports/20261109-095754-test-EjdQ.md`): a stalled WebDriver request could outlast the polling deadline and block `tauri-driver`'s cleanup (P2). Fixed with per-request abort deadlines. Codex's 23 tests are added as `qa/tests/webdriver-133-qa.test.mjs` (CLI runs with stubbed processes and HTTP: W3C request shapes, Unicode paths as argv, failures, stalls, cleanup, registry fallback, extraction, driver-version checks); stalls in `POST /session` and `execute/async` were added after the review.
+  - `codex-qa review`: **PASS WITH NOTES** (`qa/reports/20261109-100600-review-7vgv.md`): the stale STATUS (fixed here), and missing tests for negative controls and two more stalls (added).
+  - **Checks (macOS arm64):** `npm test` all pass (0 failed), the #133 files 34/34, actionlint (with shellcheck) clean, `git diff --check` clean. No Rust changed. **The real Linux and Windows runs haven't happened yet**; the PR's CI is the first.
+  - **Not done:** a native negative control (relaxing one CSP rule in CI to see the job fail), and #71's native checks (folder picker, Show in folder, multi-line paste), which stay on #71.
+- **Architect rulings (D-028, 2026-11-09):** the commit and a draft PR are approved (no `ci:bundle`: no native app code changed), on condition of `MSEDGEDRIVER_TELEMETRY_OPTOUT=1` on the Windows probe step (done) and D-038 (done). The native negative control is dropped (D-038). **Merge conditions:** both `webdriver` jobs green on the final head with `CSP PROBE (WebDriver): PASS, 9/9 checks` in the logs, plus the required checks; each first-run fix is its own reviewed, approved commit; the handoff commit adds the measured job durations here and in the PR body, and a sentence on the `webdriver` job to README's CI paragraph. The PR closes #133.
+- **For the owner:** remove Codex's test worktree with `! git worktree remove --force /var/folders/9n/d_r0cy3d3wd4gx1c3brwl7t00000gn/T//queue-qa-FPNg`; decide whether `webdriver (linux)`/`webdriver (windows)` become required checks once green.
+- **Next bounded action:** architect approval for #133's commit → draft PR → watch the `webdriver` jobs; fix until 9/9 on both OSes. Then #100 part 3.
 
 ## 2026-11-05
 - **D-035 confirmed by the owner,** every standing ruling as written. The one-night rules are confirmed as history.
