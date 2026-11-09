@@ -16,7 +16,8 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test` 618 passed / 0 failed / 32 ignored, `npm test` 579 passed / 0 failed / 13 skipped. The real-keyring round trip (ignored, by hand) wasn't run.
   - **For the owner:** your existing key (Keychain `dev.mcclease.queue` / `api-key`) is deleted the first time this build touches a key. Copy it out first if you don't have it elsewhere, then paste it under its service and check "Sent to <host>". Also remove Codex's second QA worktree: `git worktree remove --force /var/folders/9n/d_r0cy3d3wd4gx1c3brwl7t00000gn/T//queue-qa-MiVH`.
   - **Not done:** a command-level test of `api_key_set`/`settings_api` per kind (needs #84's harness); the larger-context CI test GGUF (still on #100).
-- **Next bounded action:** open the draft PR for `naming/100-keys-per-service`; CI green on all three OSes; the architect's squash approval under D-028; then #104 (D-037 order).
+  - **PR #142** (draft, "Part of #100"): run 42695541185 on dc83f8a green, every job: `verify-signatures`, both `ffmpeg`, `test (linux|macos|windows)` and both `webdriver` jobs; `bundle` skipped (no `ci:bundle`).
+- **Next bounded action:** the architect's squash approval for PR #142 once this handoff commit's CI is green; then #104 (D-037 order), starting with a starter list of ad-tag phrases for the owner to review (D-036).
 
 ## 2026-11-09
 - **The owner's order (D-037):** #133 → #100 part 3 → #104 → #21 → #103 → #18. **D-028 resumes:** the architect approves commits, PRs and merges; new dependencies the owner reserved (#21's OpenPGP library) and GitHub settings still go to the owner.
