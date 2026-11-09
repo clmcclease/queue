@@ -288,6 +288,16 @@ jobs:
             try { (Invoke-WebRequest -Uri http://127.0.0.1:9222/json/version -UseBasicParsing -TimeoutSec 10).Content } catch { "no DevTools on 9222: $_" }
             "--- processes with the app alone ---"
             Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime | Format-Table | Out-String
+            # Whether the remote-debugging switch reached the WebView2 browser process at all.
+            "--- msedgewebview2 command lines (first 700 chars) ---"
+            Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessId): $("$($_.CommandLine)".Substring(0, [Math]::Min(700, "$($_.CommandLine)".Length)))" }
+            "remote-debugging switch on a browser process: $([bool](Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match '--remote-debugging-port' }))"
+            # Edge/WebView2 policies on the runner image (e.g. RemoteDebuggingAllowed) and WebView2 overrides.
+            "--- Edge and WebView2 policies and overrides ---"
+            foreach ($key in "HKLM:\SOFTWARE\Policies\Microsoft\Edge", "HKCU:\SOFTWARE\Policies\Microsoft\Edge", "HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2", "HKCU:\SOFTWARE\Policies\Microsoft\Edge\WebView2", "HKLM:\SOFTWARE\WOW6432Node\Policies\Microsoft\Edge") {
+              if (Test-Path $key) { "[$key]"; Get-ItemProperty $key -ErrorAction SilentlyContinue | Out-String; Get-ChildItem $key -ErrorAction SilentlyContinue | ForEach-Object { "  subkey $($_.Name)" } } else { "[$key] absent" }
+            }
+            Get-ChildItem Env: | Where-Object { $_.Name -like "WEBVIEW2_*" } | ForEach-Object { "env $($_.Name)=$($_.Value)" }
             Get-ChildItem -Path $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP -Recurse -Depth 6 -Filter DevToolsActivePort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName): $(Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue)" }
           } finally {
             if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
