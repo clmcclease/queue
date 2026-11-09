@@ -11,6 +11,7 @@ pub mod reveal;
 pub mod secrets;
 pub mod settings;
 pub mod sidecar;
+pub mod webview;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1575,6 +1576,27 @@ pub fn run() {
                     save_queue(&handle);
                 }
             });
+            // The main window, from tauri.conf.json ("create": false), built last so every
+            // command's state is managed before the page can call one. On Windows debug builds
+            // it also takes WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, which WebView2 would otherwise
+            // drop, so Edge WebDriver can attach (#133, D-039).
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("tauri.conf.json has no main window")?;
+            let mut window = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
+            if cfg!(all(windows, debug_assertions))
+                && let Some(args) = webview::main_window_args(
+                    std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").ok().as_deref(),
+                )
+            {
+                window = window.additional_browser_args(&args);
+            }
+            window.build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -186,6 +186,126 @@ jobs:
           QUEUE_QA_TEST_GGUF="$RUNNER_TEMP/test-model/stories260K.gguf" QUEUE_QA_LLAMA_DIR=target/debug/llama \
             cargo test --locked --test local_real_30b -- --ignored --test-threads=1 the_real_server
 
+  # The real app under WebDriver (#133, D-037), with the release CSP: #43's probe must pass 9/9
+  # in WebKitGTK (Linux, under xvfb) and WebView2 (Windows). macOS has no WebDriver for
+  # WKWebView, so the probe stays a manual check there (qa/manual/csp-probe-43.js).
+  webdriver:
+    needs: [ffmpeg, verify-signatures]
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+    name: webdriver (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - name: Install Tauri system dependencies, WebKitWebDriver and xvfb
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ffmpeg-*
+          merge-multiple: true
+          path: ffmpeg-out
+      - name: Install sidecars
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          cp ffmpeg-out/${{ matrix.target }}/* src-tauri/binaries/
+          chmod +x src-tauri/binaries/queue-*
+          node scripts/fetch-sidecars.mjs --target ${{ matrix.target }}
+      - name: Install Rust (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          key: webdriver-${{ matrix.os }}
+      - name: Install tauri-driver 2.1.0 (pinned, D-037)
+        run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Fetch the msedgedriver matching WebView2
+        if: runner.os == 'Windows'
+        shell: bash
+        run: node scripts/fetch-msedgedriver.mjs "$RUNNER_TEMP/msedgedriver"
+      - run: npm ci
+      # A debug build gets the release `csp`, not `devCsp` (#43).
+      - run: npm run tauri build -- --debug --no-bundle
+      - name: CSP probe in the real webview
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node qa/webdriver/csp-probe-133.mjs --app src-tauri/target/debug/queue
+      - name: CSP probe in the real webview
+        id: probe-windows
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          MSEDGEDRIVER_TELEMETRY_OPTOUT: "1" # msedgedriver otherwise reports New Session diagnostics (D-038)
+        run: node qa/webdriver/csp-probe-133.mjs --app src-tauri/target/debug/queue.exe --native-driver "$RUNNER_TEMP/msedgedriver/msedgedriver.exe"
+      # Only when the probe fails on Windows: msedgedriver's own verbose log for a direct session
+      # (without tauri-driver), then the app on its own with WebView2 remote debugging on, to show
+      # whether it stays up and serves DevTools.
+      - name: Diagnose a failed WebView2 session
+        if: failure() && steps.probe-windows.outcome == 'failure'
+        shell: pwsh
+        env:
+          MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"
+        # Best effort: a diagnostic error mustn't skip the cleanup or the logs, and the job stays failed.
+        run: |
+          $ErrorActionPreference = "Continue"
+          $app = (Resolve-Path src-tauri\target\debug\queue.exe).Path
+          $log = "$env:RUNNER_TEMP\msedgedriver-verbose.log"
+          $driver = Start-Process -FilePath "$env:RUNNER_TEMP\msedgedriver\msedgedriver.exe" -ArgumentList "--port=9515", "--verbose", "--log-path=$log" -PassThru
+          Start-Sleep 3
+          $caps = @{ capabilities = @{ alwaysMatch = @{ browserName = "webview2"; "ms:edgeChromium" = $true; "ms:edgeOptions" = @{ binary = $app } } } } | ConvertTo-Json -Depth 6
+          try { (Invoke-WebRequest -Uri http://127.0.0.1:9515/session -Method Post -Body $caps -ContentType application/json -UseBasicParsing -TimeoutSec 90).Content } catch { "direct session failed: $_" }
+          "--- processes after the direct session ---"
+          Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime | Format-Table | Out-String
+          Stop-Process -Id $driver.Id -Force -ErrorAction SilentlyContinue
+          Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          "--- msedgedriver log (first 120 lines) ---"
+          Get-Content $log -TotalCount 120 -ErrorAction SilentlyContinue
+          "--- msedgedriver log (last 80 lines) ---"
+          Get-Content $log -Tail 80 -ErrorAction SilentlyContinue
+          "--- the app alone, remote debugging on 9222 ---"
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+          $env:TAURI_WEBVIEW_AUTOMATION = "true"
+          $p = Start-Process -FilePath $app -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\app-out.txt" -RedirectStandardError "$env:RUNNER_TEMP\app-err.txt"
+          try {
+            Start-Sleep 20
+            "app still running: $(-not $p.HasExited)"
+            if ($p.HasExited) { "app exit code: $($p.ExitCode)" }
+            try { (Invoke-WebRequest -Uri http://127.0.0.1:9222/json/version -UseBasicParsing -TimeoutSec 10).Content } catch { "no DevTools on 9222: $_" }
+            "--- processes with the app alone ---"
+            Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime | Format-Table | Out-String
+            # Whether the remote-debugging switch reached the WebView2 browser process at all.
+            "--- msedgewebview2 command lines (first 700 chars) ---"
+            Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessId): $("$($_.CommandLine)".Substring(0, [Math]::Min(700, "$($_.CommandLine)".Length)))" }
+            "remote-debugging switch on a browser process: $([bool](Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match '--remote-debugging-port' }))"
+            # Edge/WebView2 policies on the runner image (e.g. RemoteDebuggingAllowed) and WebView2 overrides.
+            "--- Edge and WebView2 policies and overrides ---"
+            foreach ($key in "HKLM:\SOFTWARE\Policies\Microsoft\Edge", "HKCU:\SOFTWARE\Policies\Microsoft\Edge", "HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2", "HKCU:\SOFTWARE\Policies\Microsoft\Edge\WebView2", "HKLM:\SOFTWARE\WOW6432Node\Policies\Microsoft\Edge") {
+              if (Test-Path $key) { "[$key]"; Get-ItemProperty $key -ErrorAction SilentlyContinue | Out-String; Get-ChildItem $key -ErrorAction SilentlyContinue | ForEach-Object { "  subkey $($_.Name)" } } else { "[$key] absent" }
+            }
+            Get-ChildItem Env: | Where-Object { $_.Name -like "WEBVIEW2_*" } | ForEach-Object { "env $($_.Name)=$($_.Value)" }
+            Get-ChildItem -Path $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP -Recurse -Depth 6 -Filter DevToolsActivePort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName): $(Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue)" }
+          } finally {
+            if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process queue, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          Get-Content "$env:RUNNER_TEMP\app-out.txt", "$env:RUNNER_TEMP\app-err.txt" -Tail 40 -ErrorAction SilentlyContinue
+          exit 1
+
   bundle:
     needs: test
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:bundle')
