@@ -407,6 +407,17 @@ fn api_set_up(settings: &Settings) -> bool {
     base_url(&settings.api_base_url).is_ok() && !settings.api_model.trim().is_empty()
 }
 
+/// Where a key is sent (#100, D-036): a saved base URL's host, with its port if it isn't the
+/// scheme's default, for "Sent to …" under the key field. `None` for a URL [`base_url`] refuses.
+pub fn key_host(saved: &str) -> Option<String> {
+    let url = chat_url(&base_url(saved).ok()?).ok()?;
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    })
+}
+
 /// A base URL as the user typed it, checked by the same rule as every request (https://, or
 /// http:// to this computer) and saved without a pasted `/chat/completions` or trailing `/`.
 /// A user name, password, query or fragment is refused: a key pasted into the URL would be
@@ -1200,6 +1211,38 @@ mod tests {
             serde_json::to_string(&Unavailable::ModelMissing).unwrap(),
             r#""model_missing""#
         );
+    }
+
+    #[test]
+    fn the_key_label_names_the_saved_host() {
+        assert_eq!(
+            key_host("https://api.openai.com/v1"),
+            Some("api.openai.com".into())
+        );
+        assert_eq!(
+            key_host("https://api.anthropic.com"),
+            Some("api.anthropic.com".into())
+        );
+        assert_eq!(
+            key_host("https://openrouter.ai/api/v1"),
+            Some("openrouter.ai".into())
+        );
+        assert_eq!(
+            key_host("http://localhost:11434/v1"),
+            Some("localhost:11434".into())
+        );
+        assert_eq!(
+            key_host("https://api.example.test:443/v1"),
+            Some("api.example.test".into())
+        );
+        assert_eq!(
+            key_host("https://api.example.test:8443/v1"),
+            Some("api.example.test:8443".into())
+        );
+        // Nothing saved, or a URL no request would go to: no label.
+        assert_eq!(key_host(""), None);
+        assert_eq!(key_host("http://example.com/v1"), None);
+        assert_eq!(key_host("https://user:secret@api.example.test/v1"), None);
     }
 
     #[test]

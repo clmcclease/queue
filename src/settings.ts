@@ -77,7 +77,10 @@ export interface ApiSetup {
   kind: ApiKind;
   baseUrl: string;
   model: string;
+  /** Whether the saved service kind's own key slot has a key (#100: each kind has its own). */
   keySet: boolean;
+  /** Where that key is sent: the saved base URL's host (D-036); null until one is saved. */
+  keyHost: string | null;
   /** Why the credential store couldn't be read, if it couldn't. */
   storeError: string | null;
 }
@@ -99,7 +102,7 @@ export const apiSetup = () => invoke<ApiSetup>("settings_api");
 /** Saves the service, base URL and model; the backend checks the URL (https://, or http:// on this computer). */
 export const setApi = (kind: ApiKind, baseUrl: string, model: string) =>
   invoke<ApiSetup>("settings_set_api", { kind, baseUrl, model });
-/** Stores the key in the OS credential store. */
+/** Stores the key in the OS credential store, in the saved service kind's slot (#100). */
 export const setApiKey = (key: string) => invoke<ApiSetup>("api_key_set", { key });
 export const removeApiKey = () => invoke<ApiSetup>("api_key_remove");
 /** Names a sample item with the saved service; the message never has the key or the reply in it. */

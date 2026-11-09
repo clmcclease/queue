@@ -67,4 +67,4 @@ Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. F
 
 - `settings.json` in the app config folder (D-020) and `queue.json` in the app data folder (D-025), both written atomically (a temp file, then a rename). A damaged `queue.json` is moved aside, and a save failure shows a warning in the window.
 - Download staging folders live in the app cache folder and are removed after each download, or at the next launch if Queue was interrupted (D-014, #45).
-- API keys (M4) go in the OS credential store via the `keyring` crate, never in these files. History (P1) is planned for M5.
+- API keys (M4) go in the OS credential store via the `keyring` crate, never in these files: one entry per service kind (`api-key-openai-compatible`, `api-key-anthropic`; #100, D-036), always read through the kind saved in settings, so switching kinds never sends one service's key to another. The pre-#100 `api-key` entry is deleted, never read, the first time a key is used (D-040). History (P1) is planned for M5.

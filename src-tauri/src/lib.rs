@@ -73,7 +73,15 @@ fn fetch_worker(app: AppHandle, jobs: Receiver<(u64, String)>) {
 struct Naming(Mutex<Sender<(u64, u64)>>);
 
 /// Where the API key is kept (#32): the OS credential store.
-struct Vault(Box<dyn secrets::Secrets>);
+/// The API keys, one slot per service kind (#100, D-036). Always read through the kind saved
+/// in settings, so a key is only ever sent to its own service.
+struct Vault(secrets::Keys);
+
+impl Vault {
+    fn key(&self, settings: &settings::Settings) -> &dyn secrets::Secrets {
+        self.0.for_kind(settings.api_kind)
+    }
+}
 
 /// Hands a row to the naming worker, if the chosen provider can be asked. Nothing is sent for
 /// an unavailable one (D-029): the row keeps its Tier-1 name with no tag. This check doesn't
@@ -129,7 +137,7 @@ fn naming_worker(app: AppHandle, jobs: Receiver<(u64, u64)>) {
                 }
                 local => local,
             };
-            match ai::endpoint(&settings, app.state::<Vault>().0.as_ref(), local) {
+            match ai::endpoint(&settings, app.state::<Vault>().key(&settings), local) {
                 Ok(endpoint) => ai::Ready::Ask(endpoint),
                 Err(_) => ai::Ready::Nothing,
             }
@@ -419,8 +427,8 @@ fn status_of_naming(app: &AppHandle) -> Result<NamingStatus, String> {
     let vault = app.state::<Vault>();
     Ok(NamingStatus {
         provider: settings.naming_provider,
-        unavailable: ai::unavailable(&settings, vault.0.as_ref(), local_model(app, &settings)),
-        store_unreachable: ai::store_unreachable(&settings, vault.0.as_ref()),
+        unavailable: ai::unavailable(&settings, vault.key(&settings), local_model(app, &settings)),
+        store_unreachable: ai::store_unreachable(&settings, vault.key(&settings)),
     })
 }
 
@@ -432,16 +440,21 @@ struct ApiSetup {
     kind: ai::ApiKind,
     base_url: String,
     model: String,
+    /// Whether the saved kind's slot has a key (#100: each kind has its own).
     key_set: bool,
+    /// Where that key is sent: the saved base URL's host (and port), for the label under the
+    /// key field (D-036). `None` until a valid base URL is saved.
+    key_host: Option<String>,
     /// Why the credential store couldn't be read, if it couldn't.
     store_error: Option<String>,
 }
 
 fn api_setup(app: &AppHandle) -> Result<ApiSetup, String> {
     let settings = current_settings(app)?;
-    let key = app.state::<Vault>().0.get();
+    let key = app.state::<Vault>().key(&settings).get();
     Ok(ApiSetup {
         kind: settings.api_kind,
+        key_host: ai::key_host(&settings.api_base_url),
         base_url: settings.api_base_url,
         model: settings.api_model,
         key_set: matches!(key, Ok(Some(_))),
@@ -511,8 +524,8 @@ fn set_api(
     api_setup(app)
 }
 
-/// Saves the API key in the OS credential store (#32). It's never written to a file, and never
-/// sent back to the window.
+/// Saves the API key in the OS credential store (#32), in the saved kind's slot (#100). It's
+/// never written to a file, and never sent back to the window.
 #[tauri::command]
 async fn api_key_set(app: AppHandle, key: String) -> Result<ApiSetup, String> {
     let key = key.trim().to_owned();
@@ -520,18 +533,21 @@ async fn api_key_set(app: AppHandle, key: String) -> Result<ApiSetup, String> {
         return Err("Paste the key first.".into());
     }
     off_main(app, move |app| {
-        app.state::<Vault>().0.set(&key)?;
+        let settings = current_settings(app)?;
+        app.state::<Vault>().key(&settings).set(&key)?;
         api_changed(app)?;
         api_setup(app)
     })
     .await
 }
 
-/// Removes the API key from the credential store (#32). A missing key isn't an error.
+/// Removes the saved kind's API key from the credential store (#32, #100). The pre-#100 entry,
+/// if any, is deleted unread at the first key operation (D-040). A missing key isn't an error.
 #[tauri::command]
 async fn api_key_remove(app: AppHandle) -> Result<ApiSetup, String> {
     off_main(app, |app| {
-        app.state::<Vault>().0.remove()?;
+        let settings = current_settings(app)?;
+        app.state::<Vault>().key(&settings).remove()?;
         api_changed(app)?;
         api_setup(app)
     })
@@ -545,7 +561,7 @@ async fn api_test_connection(app: AppHandle) -> Result<ai::Tested, String> {
         let settings = current_settings(&app)?;
         Ok(ai::test_connection(
             &settings,
-            app.state::<Vault>().0.as_ref(),
+            app.state::<Vault>().key(&settings),
         ))
     })
     .await
@@ -1538,7 +1554,7 @@ pub fn run() {
             // Managed before the fetch worker starts, since a finished fetch asks for a name.
             let (names, named) = mpsc::channel();
             app.manage(Naming(Mutex::new(names)));
-            app.manage(Vault(Box::new(secrets::Keyring::new())));
+            app.manage(Vault(secrets::Keys::keyring()));
             app.manage(Mutex::new(Downloads::default()));
             // The local model's server (#30): started by the naming worker, stopped by its own
             // idle timer, at quit, and before a model is deleted or switched.
