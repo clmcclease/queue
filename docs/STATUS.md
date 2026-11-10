@@ -78,7 +78,14 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - The measurement needs your set.
   - With the approved list, a song's "(Official Video)" and "(Official Audio)" uploads get the same AI name; the second gets " (2)" (N2) and nothing is overwritten.
   - `git worktree prune` clears a stale `queue-qa-MiVH` entry.
-- **Next bounded action:** commit, push, open the draft PR, watch CI; then the STATUS handoff and the squash request to the architect; then #21 (D-037).
+- **Committed** as 68f9984 on `naming/104-ad-tags`. **PR #144** (draft, "Closes #104", no label) is open. #71 has a comment with the editor's Windows and Linux checks.
+- **CI run 42874947205 on 68f9984** was green on every job:
+  - `verify-signatures`, `ffmpeg (macos)` and `ffmpeg (linux-windows)` passed (cached);
+  - `test (linux)` passed in 7 min, `test (macos)` in 8 min and `test (windows)` in 11 min;
+  - `webdriver (linux)` and `webdriver (windows)` passed in 2 min each;
+  - `bundle` was skipped (no `ci:bundle`).
+  - No untouched test failed.
+- **Next bounded action:** the architect's squash approval for PR #144 once this handoff commit's CI is green; then #21 (D-037): yt-dlp auto-update, whose OpenPGP library needs the owner's approval (D-036).
 
 ## 2026-11-09 (afternoon): #133 merged; #100 part 3
 - **#133 merged** as 2c95b51 (PR #141, the architect's approval under D-028); #133 is closed. The owner removed Codex's QA worktree. Still the owner's: whether `webdriver (linux)`/`webdriver (windows)` become required checks, and `git branch -D infra/133-webdriver`. FYI (the architect): D-039 is an app change made under D-028; Windows **debug** builds append `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` themselves, and release builds never read it.
