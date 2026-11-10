@@ -1,8 +1,91 @@
 # Status
 
-**Updated:** 2026-11-09 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #100 part 3 (branch `naming/100-keys-per-service`), then #104 → #21 → #103 → #18 (D-037)
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #104 (branch `naming/104-ad-tags`), then #21 → #103 → #18 (D-037)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-10: #104
+- **#100 part 3 merged** as 0474a58 (PR #142); #100 stays open for the larger-context CI test GGUF.
+- **#104 (N9) in progress, branch `naming/104-ad-tags`.** The owner approved the starter list and chose whole-bracket matching only (D-041).
+  - `src-tauri/src/adtags.rs`: the 57-phrase starter list and `AdTags`. `strip` removes a phrase only where it fills a whole `( )`, `[ ]`, `（ ）`, `［ ］` or `【 】`, ignoring case and spacing, and compared in the form sanitizing gives an answer (`naming::replace_illegal`, split out of `sanitize`). A media extension a removed tag exposed goes too; a title that would be left empty stays whole.
+  - Phrases are tidied on save: trimmed, single spaces, one surrounding bracket pair dropped, no empty phrases or duplicates (ignoring case), at most 100 characters and 300 phrases. The settings.json key is `adTags`; a missing or unreadable value means the starter list, and an empty list is kept.
+  - The queue keeps each AI title as answered and applies the list when it makes the name (`ai_named`, `templated`, `refresh_name`). `Queue::set_ad_tags` renames Queued AI rows (not hand-edited or running ones), like a template change, and runs at startup.
+  - Commands: see review round 2 below.
+  - UI: `AdTagEditor`, a collapsed "Advertising removed from AI names (n)" section under AI naming: edit (Enter or the row's ✓; clearing a phrase removes it), remove, add, and reset to the default list. A refused edit or add keeps its text to retry. The save design is described below, after review rounds 2–4.
+  - **Tests:** `adtags.rs` (9), `queue.rs` (1), `settings.rs` (1), `qa/tests/ad-tags-n9-104.test.mjs` (5 UI). Codex's tests are added: `src-tauri/tests/ad_tags_n9_104_qa.rs` (12) and `qa/tests/ad-tags-n9-104-qa.test.mjs` (7).
+  - **QA:** `codex-qa test "#104"` **FAIL** (`qa/reports/20261110-101404-test-b0bc.md`), with three bugs, all fixed:
+    - removing a tag could expose a model-added extension (`Song.mp4 (Official Video)`);
+    - a phrase with a timestamp (`Promo 01:02`) didn't match the sanitized answer (`01_02`);
+    - a Remove click made while an edited field's blur-save was running was lost.
+  - Two of Codex's UI tests assumed every control is disabled during any save. They pass with the final design: only a reset disables the editor, and a failed edit keeps its draft.
+  - `codex-qa review` round 1 **FAIL** (`qa/reports/20261110-102826-review-NEXY.md`), with two P2s in the editor, both fixed:
+    - queued changes named rows by position, so two quick Removes, or clearing a phrase and then clicking its Remove, could delete a neighbour;
+    - a save's reply cleared text typed after the save started.
+  - The editor now gives each row a stable id that it keeps across saves (`adopt` matches each saved phrase to the row it was sent as). A change to a row that's gone by then does nothing. Drafts carry a revision, and a save clears only the one it was made for. 5 UI tests were added for the review's missing cases (10 in `ad-tags-n9-104.test.mjs`).
+  - `codex-qa review` round 2 **FAIL** (`qa/reports/20261110-103345-review-u5bL.md`), two P2s:
+    - saves still pending from a closed Settings could bring removed phrases back;
+    - the backend's tidying (`((Clip))` → `(Clip)`) broke the row's identity, so a queued Remove did nothing.
+  - **Redesigned rather than patched** (the #33(b) lesson). Each change is its own command naming its phrase: `settings_add_ad_tag`, `settings_edit_ad_tag(old, new)`, `settings_remove_ad_tag` and `settings_reset_ad_tags`. The backend applies it to the list as saved (`AdTags::with_added`, `with_edited` and `without`), and a phrase that's gone by then changes nothing. `settings_set_ad_tags` (the whole list) is gone.
+  - Changes are serialized by `AdTagChanges`, a lock taken before the settings and queue locks and used only here. Replies carry a version, and Settings shows only the newest.
+  - The editor runs one change at a time and is disabled meanwhile, so there's no client-side queue, ids or draft revisions. (Its blur-save, kept at this point, was removed after round 4; see below.)
+  - **Tests:**
+    - `adtags.rs` +1 (changes by phrase).
+    - `qa/tests/ad-tags-n9-104.test.mjs`, rewritten (11). It covers round 2's missing cases: reopening Settings mid-save, a tidied edit then ✕, and a late reply.
+    - Codex's 7 UI tests are adapted, not weakened, to the new commands.
+    - `qa/tests/ad-tags-mock.mjs` is a shared stand-in for the commands.
+  - `codex-qa review` round 3 **FAIL** (`qa/reports/20261110-104426-review-ULi6.md`), three P2s, all fixed:
+    - commands unwrapped the stored phrase they named again, so removing "(Clip)" looked for "Clip";
+    - stored phrases were re-tidied on unrelated changes and at load, so a stored "(Clip)" became "Clip";
+    - on WebKit a clicked ✕ isn't focused, so leaving the field saved the edit, the save disabled the ✕, and the Remove was lost.
+  - Only typed text (`with_added`, `with_edited`'s new text) loses a surrounding bracket pair now; `AdTags::new`, loading and lookups keep phrases exactly (D-041 updated). The ✕ marked the removal on mouse press, and tabbing past a ✕ saved its row's edit. Both were removed with blur-save after round 4.
+  - Tests: `adtags.rs` +1 (stored bracketed phrase), and the settings and round-trip tests now expect exact phrases. Codex's `limits_count_unicode_characters…` now tidies through `with_added`; its intent (typed text) is unchanged. The mock looks phrases up exactly. 4 UI tests were added (15 in `ad-tags-n9-104.test.mjs`): a stored bracketed phrase's ✕, ✕ with focus going nowhere, a press dragged away, and tabbing past ✕.
+  - `codex-qa review` round 4 **FAIL** (`qa/reports/20261110-105728-review-Hwqv.md`), three P2s in the editor: Reset swallowed by blur-save; a reopened Settings stale until the next change; phrases like `constructor` colliding with object properties.
+  - **Architect's ruling (D-028, 2026-11-10 11:10):** option (A). Edits save only on Enter or ✓, never on blur; the newest versioned list lives in `App`; drafts are a `Map`; Enter ignores input-method composition. Patching Reset like the ✕ was refused. The failed-save command test goes to #84.
+  - **Stop rule (D-028):** round 5 is the last round for inline edit. If it FAILs only on inline edit, #104 is split: add/remove/reset ship after one final review ("Part of #104"), and inline edit waits for the owner. Any other FAIL, or a FAIL of that final review, goes back to the architect with no fix; expect the branch to be parked as a draft PR. No round 7.
+  - **Built per the ruling:** `AdTagEditor` has no `onBlur`, `relatedTarget`, mousedown marking or `data-removes`/`data-edits`. A change starts only from Enter, ✓, ✕, Add or Reset. The ✓ sits between the field and the ✕ and shows only while the field's text differs from the phrase. Drafts are a `Map<string, string>`. `useAdTagList` (in `AdTagEditor.tsx`) holds the newest list in `App` and is passed through `SettingsPanel`; standalone, the editor keeps its own. No backend change.
+  - **Tests (rewritten, not dropped, as D-040 did):** in `ad-tags-n9-104.test.mjs`, the four blur-save tests are inverted:
+    - "…saves on Enter or leaving the field" became "an edit saves on Enter or ✓, never on leaving the field…";
+    - "pressing ✕ after an edit…focus goes nowhere" became "✕ after an edit sends one removal and no edit…";
+    - "a press on ✕ that's dragged away…" became "leaving an edited field to Add or nowhere sends nothing…";
+    - "tabbing past a ✕…saves" became "tabbing from an edited field to its ✕ and on sends nothing…".
+  - Added: Reset after an edit (held reply), Add after an edit, Enter while composing (`isComposing` and `keyCode` 229), reopening Settings during a pending change (both reply orders), and the `constructor`/`__proto__`/`toString`/`hasOwnProperty` phrases. That makes 21 tests in `ad-tags-n9-104.test.mjs`. Codex's 7 pass with their assertions unchanged.
+  - `codex-qa review` round 5: **PASS WITH NOTES**, no findings (`qa/reports/20261110-111248-review-21Dx.md`). Its missing tests:
+    - the failed-save command test (already carried to #84);
+    - overlapping changes through the real backend commands (the UI tests mock them), also command-level, so it goes to #84;
+    - native IME candidate confirmation in each webview (the hand check below, and #71).
+  - **Checks on the final diff (macOS arm64 only):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 643 passed / 0 failed / 32 ignored, `npm run build`, `npm test` 607 passed / 0 failed / 13 skipped, and `git diff --check`. One earlier `cargo test` run failed `local_n6_30b_qa::stalled_health_headers_time_out…` (a timing test of the local server, untouched here); it passed alone and in every run since, including the architect's two. Not run in the live app; Windows and Linux run in CI.
+  - **Final test counts for #104:** `adtags.rs` 11, `queue.rs` 1, `settings.rs` 1, UI 21 (`qa/tests/ad-tags-n9-104.test.mjs`); Codex's 12 Rust (`src-tauri/tests/ad_tags_n9_104_qa.rs`) and 7 UI (`qa/tests/ad-tags-n9-104-qa.test.mjs`).
+  - **For the owner (from the architect):**
+    - An edit now needs Enter or ✓, and an unsaved edit is dropped when Settings closes. Say if you want blur-save back.
+    - D-041's Settings details are marked as architect additions, for you to confirm.
+    - Reset has no confirmation. Say if you want a two-step one, like model delete.
+    - If the split triggers, you decide whether inline edit is built later.
+    - Hand check in the dev app (macOS): edit a phrase, then click Reset, ✕ and Add in turn; Enter and ✓ both save; Enter while a Japanese or Chinese input method is composing doesn't save, in a phrase field and in the Add field; add `constructor`; close and reopen Settings right after a remove. The Windows and Linux checks go to #71.
+  - **Not covered:** a command-level test of a failed settings save (settings, queue names and events unchanged); it needs #84's harness, so it's carried there.
+  - **Not measured:** the gain on the owner's held-out set (the general-rule version gave about 5 points; whole-bracket matching will give the same or less).
+  - **For the owner:** remove Codex's QA worktree with `! git worktree remove --force /var/folders/9n/d_r0cy3d3wd4gx1c3brwl7t00000gn/T//queue-qa-tIUJ`.
+- **Architect's ruling (D-028, 2026-11-10):** the commit and a draft PR that closes #104 (no `ci:bundle`) are approved, with these conditions:
+  - these STATUS fixes;
+  - #104's Windows and Linux editor checks added to #71;
+  - follow-up **#143** (measure the gain on the owner's held-out set; revisit bare trailing tags) filed and recorded in D-041;
+  - exactly the 17 paths staged.
+  - The PR body carries all six QA runs, the checks (macOS arm64 only), the limitations, the hand check and #143.
+  - CI is watched by run ID. If an untouched test fails in CI, report it and file an `[NFR]` issue rather than re-running it silently.
+  - The squash request needs every job green on the final head (`verify-signatures`, both `ffmpeg`, `test (linux|macos|windows)`, both `webdriver`), with the run ID, plus the STATUS handoff.
+  - Any code or test change voids the approval.
+- **For the owner (architect):**
+  - Confirm D-041's additions, including that #104 closes with the measurement moved to #143.
+  - The measurement needs your set.
+  - With the approved list, a song's "(Official Video)" and "(Official Audio)" uploads get the same AI name; the second gets " (2)" (N2) and nothing is overwritten.
+  - `git worktree prune` clears a stale `queue-qa-MiVH` entry.
+- **Committed** as 68f9984 on `naming/104-ad-tags`. **PR #144** (draft, "Closes #104", no label) is open. #71 has a comment with the editor's Windows and Linux checks.
+- **CI run 42874947205 on 68f9984** was green on every job:
+  - `verify-signatures`, `ffmpeg (macos)` and `ffmpeg (linux-windows)` passed (cached);
+  - `test (linux)` passed in 7 min, `test (macos)` in 8 min and `test (windows)` in 11 min;
+  - `webdriver (linux)` and `webdriver (windows)` passed in 2 min each;
+  - `bundle` was skipped (no `ci:bundle`).
+  - No untouched test failed.
+- **Next bounded action:** the architect's squash approval for PR #144 once this handoff commit's CI is green; then #21 (D-037): yt-dlp auto-update, whose OpenPGP library needs the owner's approval (D-036).
 
 ## 2026-11-09 (afternoon): #133 merged; #100 part 3
 - **#133 merged** as 2c95b51 (PR #141, the architect's approval under D-028); #133 is closed. The owner removed Codex's QA worktree. Still the owner's: whether `webdriver (linux)`/`webdriver (windows)` become required checks, and `git branch -D infra/133-webdriver`. FYI (the architect): D-039 is an app change made under D-028; Windows **debug** builds append `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` themselves, and release builds never read it.

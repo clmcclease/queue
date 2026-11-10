@@ -29,6 +29,7 @@ import {
 } from "./queue";
 import { namingStatus, type NamingStatus } from "./settings";
 import { useModelStatus } from "./models";
+import { useAdTagList } from "./components/AdTagEditor";
 import { useDownloadFolder } from "./useDownloadFolder";
 
 import { DOWNLOAD_ALL_SHORTCUT, FILE_MANAGER, os, SETTINGS_SHORTCUT } from "./platform";
@@ -75,6 +76,8 @@ export default function App() {
     setNaming(status);
   }
   // N7 (#31): the local model's download; a finished download or a delete changes the banner.
+  // The newest advertising-tag list (#104): kept here so a reply after Settings closed still shows.
+  const [adTagList, showAdTags] = useAdTagList();
   const [models, trackModels] = useModelStatus(() => {
     const asked = namingSaves.current;
     namingStatus().then(
@@ -476,7 +479,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {settingsOpen && <SettingsPanel folder={folder} downloading={anyActive} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={savedNaming} models={models} onModels={trackModels} />}
+      {settingsOpen && <SettingsPanel folder={folder} downloading={anyActive} onClose={() => setSettingsOpen(false)} namingStatus={naming} onNamingStatus={savedNaming} models={models} onModels={trackModels} adTags={adTagList} onAdTags={showAdTags} />}
     </main>
   );
 }

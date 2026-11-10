@@ -107,3 +107,21 @@ export const setApiKey = (key: string) => invoke<ApiSetup>("api_key_set", { key 
 export const removeApiKey = () => invoke<ApiSetup>("api_key_remove");
 /** Names a sample item with the saved service; the message never has the key or the reply in it. */
 export const testConnection = () => invoke<{ ok: boolean; message: string }>("api_test_connection");
+
+/** Longest tag phrase kept, in characters; matches src-tauri's `adtags::MAX_CHARS`. */
+export const AD_TAG_MAX_CHARS = 100;
+/** Tag phrases taken out of AI names when they fill a whole bracket (N9, #104), with the list's version. */
+export interface AdTagList {
+  /** Bumped by every saved change; a reply with an older version than the one shown is stale. */
+  version: number;
+  tags: string[];
+}
+export const adTags = () => invoke<AdTagList>("settings_ad_tags");
+/** Each change names its phrase; the backend applies it to the list as saved and returns the result. */
+export const addAdTag = (phrase: string) => invoke<AdTagList>("settings_add_ad_tag", { phrase });
+/** Replaces `old` with `new` (empty removes it); nothing changes if `old` is gone. */
+export const editAdTag = (old: string, next: string) => invoke<AdTagList>("settings_edit_ad_tag", { old, new: next });
+/** Removes a phrase; nothing changes if it's gone. */
+export const removeAdTag = (phrase: string) => invoke<AdTagList>("settings_remove_ad_tag", { phrase });
+/** Puts the starter list back. */
+export const resetAdTags = () => invoke<AdTagList>("settings_reset_ad_tags");

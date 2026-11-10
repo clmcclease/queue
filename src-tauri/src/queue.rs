@@ -2,6 +2,7 @@
 //! unit-testable and the UI only sees it through commands and events.
 use serde::{Deserialize, Serialize};
 
+use crate::adtags::AdTags;
 use crate::link;
 use crate::meta::Meta;
 use crate::naming::{self, Template};
@@ -141,6 +142,9 @@ pub struct Queue {
     changes: u64,
     /// The naming template new names use (N3, #17 sets it).
     template: Template,
+    /// Tag phrases taken out of AI titles (N9, #104). AI titles are kept as answered and
+    /// cleaned when a name is made, so a changed list applies to Queued rows too.
+    ad_tags: AdTags,
     /// Bumped when the naming provider or template changes, so an AI answer asked for before
     /// then is dropped (#25).
     naming_generation: u64,
@@ -231,12 +235,24 @@ impl Queue {
     /// rows that changed, to show.
     pub fn set_template(&mut self, template: Template) -> Vec<Item> {
         self.template = template;
+        self.rename_queued()
+    }
+
+    /// Sets the tag phrases taken out of AI titles (N9, #104), and renames the Queued rows on an
+    /// AI name, like [`Queue::set_template`]. Returns the rows that changed, to show.
+    pub fn set_ad_tags(&mut self, tags: AdTags) -> Vec<Item> {
+        self.ad_tags = tags;
+        self.rename_queued()
+    }
+
+    /// Names every Queued row not renamed by hand afresh, under the current template and tags.
+    fn rename_queued(&mut self) -> Vec<Item> {
         let mut changed = Vec::new();
         for item in &mut self.items {
             if item.status != Status::Queued || item.name_source == Some(NameSource::Edited) {
                 continue;
             }
-            let Some((name, source)) = templated(item, template) else {
+            let Some((name, source)) = templated(item, self.template, &self.ad_tags) else {
                 continue;
             };
             if item.name.as_deref() != Some(name.as_str()) || item.name_source != Some(source) {
@@ -284,7 +300,11 @@ impl Queue {
         let meta = item.meta.as_ref()?;
         match answer {
             Ok(title) => {
-                item.name = Some(naming::with_title(meta, template, &title));
+                item.name = Some(naming::with_title(
+                    meta,
+                    template,
+                    &self.ad_tags.strip(&title),
+                ));
                 item.name_source = Some(NameSource::Ai);
                 item.ai_title = Some(title);
             }
@@ -491,7 +511,7 @@ impl Queue {
             Status::Fetching
         };
         // A template chosen while it was Failed applies now (#17 review).
-        refresh_name(item, template);
+        refresh_name(item, template, &self.ad_tags);
         item.progress = None;
         item.attempt = 0;
         item.rev += 1;
@@ -544,7 +564,7 @@ impl Queue {
         }
         item.status = Status::Queued;
         // A template chosen while it was downloading applies now (#17 review).
-        refresh_name(item, template);
+        refresh_name(item, template, &self.ad_tags);
         item.progress = None;
         item.attempt = 0;
         item.notice = Some(CANCELLED.to_string());
@@ -579,26 +599,27 @@ pub const INTERRUPTED: &str = "Interrupted when Queue closed. Download it again 
 /// The note on a row whose download was cancelled (#74).
 pub const CANCELLED: &str = "Cancelled. Download it again when you're ready.";
 
-/// A row back in the queue (retried, or cancelled) takes the current template, unless its name
-/// was typed by hand.
-fn refresh_name(item: &mut Item, template: Template) {
+/// A row back in the queue (retried, or cancelled) takes the current template and tags, unless
+/// its name was typed by hand.
+fn refresh_name(item: &mut Item, template: Template, tags: &AdTags) {
     if item.status == Status::Queued
         && item.name_source != Some(NameSource::Edited)
-        && let Some((name, source)) = templated(item, template)
+        && let Some((name, source)) = templated(item, template, tags)
     {
         item.name = Some(name);
         item.name_source = Some(source);
     }
 }
 
-/// A row's name under `template`, and its tag: an AI name keeps its AI title (#25), a Fallback
-/// stays tagged Fallback, and anything else is a rules name. `None` without metadata.
-fn templated(item: &Item, template: Template) -> Option<(String, NameSource)> {
+/// A row's name under `template`, and its tag: an AI name keeps its AI title (#25), without
+/// `tags` (#104), a Fallback stays tagged Fallback, and anything else is a rules name. `None` without metadata.
+fn templated(item: &Item, template: Template, tags: &AdTags) -> Option<(String, NameSource)> {
     let meta = item.meta.as_ref()?;
     Some(match (item.name_source, &item.ai_title) {
-        (Some(NameSource::Ai), Some(title)) => {
-            (naming::with_title(meta, template, title), NameSource::Ai)
-        }
+        (Some(NameSource::Ai), Some(title)) => (
+            naming::with_title(meta, template, &tags.strip(title)),
+            NameSource::Ai,
+        ),
         (Some(NameSource::Fallback), _) => (naming::name(meta, template), NameSource::Fallback),
         _ => (naming::name(meta, template), NameSource::Rules),
     })
@@ -1149,6 +1170,72 @@ mod tests {
             got(loaded.items(), ai),
             got(q.items(), ai),
             "survives a restart"
+        );
+    }
+
+    /// N9 (#104): tag phrases come out of AI titles when the name is made; the title itself is
+    /// kept as answered, so a changed list renames Queued AI rows (not edited or running ones),
+    /// and a row coming back to the queue follows the list current then.
+    #[test]
+    fn ad_tags_come_out_of_ai_names_and_follow_the_list() {
+        let mut q = Queue::default();
+        let (ai, edited, running) = (
+            ready(&mut q, "https://e.test/a"),
+            ready(&mut q, "https://e.test/b"),
+            ready(&mut q, "https://e.test/c"),
+        );
+        let generation = q.naming_job(ai).unwrap().1;
+        let named = q
+            .ai_named(
+                ai,
+                generation,
+                Ok("Artist – Song (Official Video) [4K]".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            named.name.as_deref(),
+            Some("Artist – Song"),
+            "the default list"
+        );
+        assert_eq!(named.name_source, Some(NameSource::Ai));
+        q.ai_named(edited, generation, Ok("Song (MV)".into()))
+            .unwrap();
+        q.rename(edited, "Mine (MV)").unwrap();
+        q.ai_named(running, generation, Ok("Run (MV)".into()))
+            .unwrap();
+        q.start(running).unwrap();
+
+        let changed = q.set_ad_tags(AdTags::new(["4K"]));
+        assert_eq!(changed.len(), 1, "only the Queued, unedited AI row");
+        assert_eq!(
+            changed[0].name.as_deref(),
+            Some("Artist – Song (Official Video)")
+        );
+        assert!(q.set_ad_tags(AdTags::new(["4k"])).is_empty(), "nothing new");
+        let edited_row = q.items().iter().find(|i| i.id == edited).unwrap();
+        assert_eq!(edited_row.name.as_deref(), Some("Mine (MV)"));
+
+        let back = q.cancelled(running).unwrap();
+        assert_eq!(
+            back.name.as_deref(),
+            Some("Run (MV)"),
+            "the list current now"
+        );
+        q.set_ad_tags(AdTags::new(Vec::<String>::new()));
+        let row = q.items().iter().find(|i| i.id == ai).unwrap();
+        assert_eq!(
+            row.name.as_deref(),
+            Some("Artist – Song (Official Video) [4K]"),
+            "an empty list keeps the answer whole"
+        );
+        let loaded = Queue::from_json(&q.to_json()).unwrap();
+        let mut loaded = loaded;
+        let restored = loaded.set_ad_tags(AdTags::default());
+        assert!(
+            restored
+                .iter()
+                .any(|i| i.id == ai && i.name.as_deref() == Some("Artist – Song")),
+            "the answer survives a restart as answered"
         );
     }
 
