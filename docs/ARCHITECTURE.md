@@ -58,7 +58,14 @@ Today: `Fetching → Queued → Downloading → Processing → Done | Failed`. F
   - **Built (#30(a)):** the same script installs llama.cpp's official `llama-server` (b11669; CPU builds, Metal on macOS arm64) with exactly the shared libraries it loads, into one folder, `src-tauri/binaries/llama/`, with a `target.txt` naming its triple. It's bundled as a resource (`bundle.resources`: `binaries/llama/` → `llama/`), not an `externalBin`, because upstream's `@loader_path`/`$ORIGIN` rpath and ggml's backend search look beside the executable. `--check` (and `--check-llama <dir>` in CI, on the copy tauri-build makes) runs `--version` and `--list-devices` from that folder. `src-tauri/src/local.rs` finds and runs it (#30(b), above). CI also fetches a pinned 1.2 MB test GGUF (`testModel` in `sidecars.json`, `--test-model <dir>`; never bundled) and runs the real server's lifecycle test on each OS.
 - Tauri copies them next to the app binary and strips the triple. `src-tauri/src/sidecar.rs` resolves them there and builds the base yt-dlp argv (`--ignore-config --no-update --ffmpeg-location … --js-runtimes deno:…`).
 - Models are never bundled. They're downloaded at runtime into the app-data directory.
-- **Planned (#21, M5; D-036):** at most once a day (configurable), download the latest yt-dlp into the app-data directory, never over the bundled copy, and verify it in-app the way CI does (D-035's key, fingerprint and signed sums). Use the newest verified copy, else the bundled one. The base argv keeps `--no-update`, so yt-dlp never replaces itself.
+- **Built (#21, D-036, D-042):** `ytdlp_update.rs`.
+  - **Where:** newer yt-dlp releases go into `app_local_data_dir()/yt-dlp/<version>/` (binary, `SHA2-256SUMS`, `.sig`, and a `verified.json` marker written last), never over the bundled copy.
+  - **When:** at most once a day, wall-clock gated by `yt-dlp/state.json`, from a thread started by the copy that owns the queue lock.
+  - **How the tag is found:** from the redirect of `releases/latest/download/SHA2-256SUMS`, which must have exactly the expected shape. The GitHub API isn't used.
+  - **Verification**, before a copy is adopted: rPGP verifies the sums' detached signature with the committed key and the fingerprint pinned in `scripts/sidecars.json`, under Queue's own policy (binary-document signature, SHA-256/384/512, primary key only, no time checks). Then the asset's line in the sums must match the file's sha256, and the binary's `--version` must report the tag, strictly newer than both the bundled and the current version.
+  - **At launch:** the chain is re-verified from the stored files, and only the newest copy that verifies and beats the bundled version is kept.
+  - **Use:** `Resolver` hands yt-dlp runs that copy while the setting `ytdlpAutoUpdate` (on by default) is on and its file is unchanged; otherwise they get the bundled one. Off means no requests.
+  - The base argv keeps `--no-update`, so yt-dlp never replaces itself.
 
 ## Startup
 

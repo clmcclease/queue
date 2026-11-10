@@ -5,6 +5,7 @@ import FormatPicker from "./FormatPicker";
 import TemplatePicker from "./TemplatePicker";
 import ProviderPicker from "./ProviderPicker";
 import AdTagEditor from "./AdTagEditor";
+import YtdlpUpdates from "./YtdlpUpdates";
 import type { ModelStatus, Track } from "../models";
 import type { AdTagList, NamingStatus } from "../settings";
 
@@ -84,6 +85,7 @@ export default function SettingsPanel({ folder, downloading, onClose, namingStat
             Downloads in progress keep the folder they started in.
           </p>
         )}
+        <YtdlpUpdates />
       </section>
       <section aria-labelledby="settings-format" className="mt-6">
         <h3 id="settings-format" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">

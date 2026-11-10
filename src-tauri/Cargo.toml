@@ -35,6 +35,8 @@ ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "js
 keyring = { version = "=4.2.0", default-features = false, features = ["v1"] }
 # Checks a downloaded model's sha256 (#31, D-029); already in the lock via Tauri.
 sha2 = "=0.10.9"
+# Verifies yt-dlp updates' signed SHA2-256SUMS (#21, D-042); the owner approved this library (D-036).
+pgp = { version = "=0.21.0", default-features = false }
 # The local model server's per-launch key (#30(b)); already in the lock via Tauri.
 getrandom = "=0.3.4"
 
@@ -48,6 +50,10 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Secu
 # Windows use Queue's own launchers in reveal.rs (D-022).
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 tauri-plugin-opener = "=2.7.0"
+
+[dev-dependencies]
+# Generates throwaway signing keys in #21's tests (D-042); already in the lock via pgp.
+rand = "=0.8.8"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

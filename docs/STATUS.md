@@ -1,8 +1,133 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #104 (branch `naming/104-ad-tags`), then #21 → #103 → #18 (D-037)
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #21 (branch `infra/21-ytdlp-update`), then #103 → #18 (D-037)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-10 (afternoon): #104 merged; #21 started
+- **Architect's ruling (D-028, 2026-11-10 11:55):** the squash merge of PR #144 is approved at head 87c955c (run 42877202995 green on every job; code and tests unchanged since review round 5), merged with `--match-head-commit`. #104 closes; #143 carries the measurement and the bare-tag revisit. Starting #21 is approved (D-037) with a design brief to the architect first; no OpenPGP crate is added until the owner approves the library (D-036). The `local_n6_30b_qa::stalled_health_headers_time_out…` flake gets an `[NFR]` issue on a second occurrence.
+- **#104 merged** as 74e5c24 (PR #144). #104 is closed and #143 is open. `main`'s run 42879659716 on 74e5c24 was green on its first attempt, every job including the four bundles. The branch is deleted locally and on GitHub.
+- **#21 (yt-dlp auto-update), branch `infra/21-ytdlp-update`:**
+  - **Library (owner, 2026-11-10):** "Approve rPGP (Recommended)". That is `pgp = { version = "=0.21.0", default-features = false }`, approved after the whole-tree advisory check: `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387) are secret-data timing leaks, not applicable to verify-only use.
+  - **Evaluation:** in throwaway projects outside the repo, rPGP and Sequoia both verified the committed fixture `qa/fixtures/signatures/yt-dlp-2026.08.19/SHA2-256SUMS.sig` with `scripts/keys/yt-dlp.asc`, and both rejected tampered sums. Neither has C build dependencies (Sequoia only with its experimental RustCrypto flags).
+  - **Design (D-042, decided by the architect under D-028):**
+    - the tag is found from the `releases/latest/download/SHA2-256SUMS` redirect, not the API;
+    - the version is proved by running the new binary's `--version`;
+    - Queue's own signature policy applies;
+    - copies are stored in `app_local_data_dir()/yt-dlp/<version>/`, with the signature chain re-verified at launch and newest-only retention pruned at launch;
+    - off means the bundled copy and no requests.
+  - **Process:**
+    - The gates run once, on the complete item.
+    - After two FAIL review rounds, the findings go back to the architect.
+    - The squash needs `ci:bundle` with installer sizes, the live macOS test's output, the advisory check, the owner's approval quoted, and the docs (ARCHITECTURE, SECURITY.md, README, BACKLOG, D-042, #21's issue body).
+- **BACKLOG:** the stale #104, #133 and #100 rows are updated (merged as 74e5c24, 2c95b51 and 0474a58).
+- **#21 built (uncommitted):**
+  - **`src-tauri/src/ytdlp_update.rs`:**
+    - `Version` (typed `YYYY.MM.DD[.N]`);
+    - pins parsed from the embedded `scripts/sidecars.json` (the pin stays there) and the committed key embedded;
+    - `verify_sums` with D-042's policy, `asset_sha256`, `tag_from_location`, `verify_chain`;
+    - `Updater::check` (saves the attempt time first, then the redirect, sums, signature, the asset into a `.part` with a cap, the hash, then `--version` via `proc::spawn_tree` within 60 s, and the marker written last; a mismatched version is remembered in `rejected`);
+    - `Updater::launch` (re-verifies the chain and prunes everything else) and `tick`;
+    - `Resolver`, which gives the adopted copy only while on and its file is unchanged.
+  - **Wiring:**
+    - `download.rs` and `meta.rs` start yt-dlp via `ytdlp_update::global().resolve(…)`;
+    - `lib.rs` starts the updater thread only in the copy that owns the queue lock (an hourly wall-clock wake, or on a setting change), and adds `settings_ytdlp` and `settings_set_ytdlp`;
+    - settings.json `ytdlpAutoUpdate` (`AutoUpdate`, on by default);
+    - Settings → Downloads has `YtdlpUpdates.tsx` (one checkbox and one status line).
+  - **Dependencies:**
+    - `pgp = { version = "=0.21.0", default-features = false }`, owner-approved;
+    - `rand = "=0.8.8"` as the only dev-dependency, already in the lock via pgp, for test keys (for the architect to confirm).
+  - **Tests:**
+    - `ytdlp_update.rs` 8 unit tests;
+    - `settings.rs` +1;
+    - `src-tauri/tests/ytdlp_update_21.rs`: 10 tests against a loopback server with throwaway Ed25519 keys (signature policy; adoption; the rollback case; not-newer tags; bad signature, hash, size cap, http redirect and first-hop shape; a failed state write sends nothing; launch pruning; a swapped binary with a rewritten marker; on and off via `tick`; a stored copy not newer than bundled), plus 1 `#[ignore]` live test;
+    - `qa/tests/ytdlp-updates-21.test.mjs` 5 UI tests.
+  - **Live test (macOS arm64, by hand):** `cargo test --test ytdlp_update_21 live_update_from_github -- --ignored --nocapture` downloaded `yt-dlp_macos` 2026.10.26 (37,466,304 bytes) from GitHub, verified it, ran it (`--version: 2026.10.26`), adopted it, and found it again at launch.
+  - **Docs:** ARCHITECTURE (#21 built), SECURITY.md (an updates section, including the two advisories), and a README line.
+  - **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 662 passed / 0 failed / 33 ignored, `npm run build`, `npm test` 612 passed / 0 failed / 13 skipped, `git diff --check`. Not run in the live app.
+- **`codex-qa test "#21"`: FAIL** (`qa/reports/20261110-123143-test-mNLM.md`), one P2: an adopted copy that lost its execute permission (0755 → 0644) kept its size and modified time, so `Resolver` still chose it. **Fixed:** `Stamp` now includes the permissions (the Unix mode; read-only on Windows) and `runnable()`, so a changed mode means the bundled copy, and launch rejects a stored copy whose owner can't execute it. Codex's 10 tests are added to `src-tauri/tests/ytdlp_update_21.rs` (now 20 + 1 ignored): throttling, fallback, malformed checksums, redirects, subprocess arguments, output limits, timeout cleanup, and the execute-permission case. One waits out the 60 s `--version` limit, so that file takes about 60 s. Codex's live run failed in its sandbox (`semctl: Operation not permitted` running yt-dlp); the live test passed here (above).
+- **Checks after the fix (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 672 passed / 0 failed / 33 ignored, `npm test` 612 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 1: FAIL** (`qa/reports/20261110-124659-review-sgUb.md`), two P2s, both fixed:
+  - **Switching off didn't stop a running check.** The worker read the setting once per wake and passed it to `tick`, which overwrote the resolver, so a stale "on" could win; and a check under way went on to fetch the sums, signature and binary. Now the resolver's on/off is the one source of truth: the setting command sets it under the settings lock (only in the copy that runs the updater), the worker no longer reads settings, and `tick(up, launched, resolver)` reads it live. `Updater::check_while(current, go)` asks `go()` before every request, on every write of the download, before running the binary and before the marker. A stopped attempt leaves nothing and reports "updates were turned off".
+  - **A transient `--version` failure rejected the release forever.** Now only a run that answered with another version sets `rejected`; a spawn error, a timeout or a quit deletes the copy and just uses up the day.
+- **Tests after round 1:**
+  - Codex's `tick(&u, on, …)` calls go through a `tick_with` helper that sets the resolver first; that's mechanical, and their assertions are unchanged.
+  - Added to `ytdlp_update_21.rs`: off after each of the four requests (no further request, nothing left), off before anything, a stale "on" can't switch updates back on, and a binary that couldn't run is retried rather than rejected (23 tests + 1 ignored).
+  - New `src-tauri/tests/ytdlp_resolve_21.rs` (Unix, one test in its own binary because the resolver is process-wide): `meta::fetch` runs the adopted copy while on, a failed item doesn't stop the next one, and it falls back to bundled when off and after a mode change, for the rest of the session. `download::run_in` starts yt-dlp the same way and isn't separately tested.
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 676 passed / 0 failed / 33 ignored, `npm test` 612 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 2: FAIL** (`qa/reports/20261110-125836-review-6vip.md`), one P2: `get_into` followed redirect hops without reading `go()`, so a hop could still be requested after off.
+- **Architect's ruling (D-028, 2026-11-10 13:10):** the fix is approved (one send point, red-first tests, nothing else changed); the `download::run_in` test is added; the failed-save command test goes to #84; round 3 is the last off-path round. D-042 now has "Off, precisely", the review cap, the tests, and `rand` confirmed.
+  - On a round-3 FAIL only on the off path: if the finding is a limit written into D-042, it goes to the architect with no code change; otherwise a park request (a draft "Part of #21" PR, not for merge), then #103.
+  - Any other FAIL goes back to the architect before any fix.
+  - A known cosmetic limit to list in the commit request: after switching off mid-check, the Settings line can read "Checking…" until Settings is reopened.
+- **Fix:** `send()` is the one place a request goes out (exactly one `.call()` outside the tests). It reads `go()` immediately before each send; `redirect_of`, `get_into` (every hop) and `get_bytes` take `go`. `stop()?` now comes before `remove(&dir)`, and a duplicated comment is gone. `Resolver`, `tick`, `lib.rs` and the UI are unchanged.
+- **Red first:** `off_during_the_sums_redirect_sends_no_hop`, `off_during_the_signature_redirect_sends_no_hop` and `off_during_the_binary_redirect_sends_no_hop` were written before the fix. On the round-2 code each failed with "the hop was requested after off"; with the fix all three pass.
+- **(b):** `tests/ytdlp_resolve_21.rs` now also drives `download::run_with_retries_events`. With updates on, a `bad` item fails with "Unsupported URL", and the next finishes with the adopted fake's file and at least one progress event. With updates off, the bundled fake's file. It's the same single test, serialized because the resolver is process-wide.
+- **Live test on the final diff (macOS arm64, by hand):** adopted 2026.10.26 from GitHub (37,466,304 bytes, mode 0755), `--version: 2026.10.26`, "Updated to 2026.10.26.".
+- **Checks on the final diff (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 679 passed / 0 failed / 33 ignored, `npm run build`, `npm test` 612 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 3: PASS WITH NOTES** (`qa/reports/20261110-131456-review-ooDz.md`), no P1/P2. Its one P3 is the "Checking…" status line that stays until Settings reopens (the known cosmetic limit).
+  - Missing tests it listed:
+    - the `settings_set_ytdlp` failed-save test (already in #84);
+    - switching off inside the `--version` run (no marker, the candidate removed, a previously adopted copy kept);
+    - Windows adopted/bundled selection through real subprocesses (the resolver integration test is Unix-only).
+  - The last two aren't added: any change after a PASS needs a fresh review (D-032). They're listed for the architect in the commit request.
+- **Architect's ruling (D-028, 2026-11-10):** the commit and a draft PR that closes #21, labelled `ci:bundle`, are approved with conditions:
+  - stage exactly 19 paths (14 changed and 5 new; my request had miscounted them as 15 and 6);
+  - no code or test edits before the commit;
+  - the commit message notes the two new dependencies;
+  - round 3's two missing tests go to follow-up **#145** (P3, M5), not #84, along with the "Checking…" line, which also stays in `state.json` if Queue quits mid-check;
+  - #71 gains "an update adopted and used from each installer on Windows and Linux";
+  - D-042 gains the round-3 notes;
+  - updating #21's issue body is approved.
+  - **If CI is red** on Windows or Linux: no fix without a ruling, and an off-path failure parks the PR.
+  - **The squash needs:** green CI on every job (the four bundles and both `webdriver` jobs), installer sizes per OS against D-013 with the change from `main`'s run 42879659716, the advisory check, the docs handoff, and whether any real adoption was seen on Windows or Linux.
+- **For the owner (architect):**
+  - Hand check in the real app (the first launch downloads about 37 MB into the real data folder): Settings → Downloads shows "Keep yt-dlp up to date" ticked; the status line moves from "2026.08.19 (came with Queue)" to "2026.10.26 (updated)"; one download works; switching off returns it to the bundled copy.
+  - D-042's parts you haven't seen: "Off, precisely", the review cap, `rand`, the round-3 notes.
+  - Dependabot and `cargo audit` will flag RUSTSEC-2023-0071 and RUSTSEC-2026-0387; dismissing the alerts is a repo setting.
+  - `ytdlp_update_21` adds about 60 s to each `test` job.
+- **Committed** as f2b43db on `infra/21-ytdlp-update`.
+  - **PR #146** is a draft ("Closes #21", labelled `ci:bundle`).
+  - **Follow-up #145** is filed.
+  - **#21's issue body** now describes D-036 and D-042 and points to #146.
+- **CI run 42894824949 on f2b43db: green on every job, first attempt.** (The run started when the PR opened was cancelled by the label's run, as usual.)
+  - `verify-signatures` and both `ffmpeg` jobs: passed (cached).
+  - `test`: Windows 14 min, macOS 17 min, Linux 11 min on this first run, which included a cold build of the new crates. On the final head (run 42900497102) they took Linux 9:21, macOS 11:18 and Windows 11:38, against `main`'s 7:33, 10:22 and 11:15 (run 42879659716). The steady-state cost is about 0.5–2 min per OS (the architect's measurement).
+  - `webdriver`: Linux and Windows, 2 min each.
+  - `bundle`: Linux x64 10 min, macOS x64 9 min, Windows x64 12 min, macOS arm64 13 min.
+- **Installer sizes** (GitHub artifact sizes, so zip-compressed), against `main`'s run 42879659716. All are well under D-013's 256 MB; the largest is the AppImage at 181.7 MB.
+
+  | Artifact | Before: `main`, run 42879659716 (bytes) | After: run 42894824949 on f2b43db (bytes) | Change |
+  |---|---|---|---|
+  | macOS arm64 .dmg | 94,574,680 | 95,275,497 | +0.70 MB |
+  | macOS x64 .dmg | 98,107,272 | 98,895,991 | +0.79 MB |
+  | Windows .msi | 85,713,060 | 86,507,684 | +0.79 MB |
+  | Windows NSIS | 62,877,460 | 63,458,825 | +0.58 MB |
+  | Linux .deb | 108,336,548 | 109,135,548 | +0.80 MB |
+  | Linux .rpm | 108,346,231 | 109,135,690 | +0.79 MB |
+  | Linux AppImage | 180,980,382 | 181,705,374 | +0.72 MB |
+- **Real adoption on Windows or Linux:** not seen.
+  - The `webdriver` logs show only the bundled 2026.08.19 sidecar being installed.
+  - The app doesn't log update activity, and the probe runs for seconds.
+  - This stays a #71 hand check.
+- **Advisory check (corrected; the earlier line here overstated what was checked):**
+  - **Before the owner approved rPGP**, the check covered only the dependency trees of two throwaway projects in the session scratchpad. One depended only on `pgp` 0.21.0 (default features off); the other only on `sequoia-openpgp` 2.4.2. It was **not Queue's own `Cargo.lock`**. In those trees the only hits were `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387), the two D-042 accepts.
+  - **At the squash request**, OSV was run against the real `src-tauri/Cargo.lock` at 227a709: 618 packages, 99 new against `main` (74e5c24), none changed or removed. The 99 new entries carry exactly those two advisories.
+  - **The same lock has seven more advisories, already on `main` at 74e5c24 at the same versions:**
+    - `ctutils` 0.4.3 (RUSTSEC-2026-0385)
+    - `glib` 0.18.5 (RUSTSEC-2024-0429)
+    - `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370)
+    - `tokio` 1.53.2 (RUSTSEC-2026-0386)
+    - `zbus_names` 4.3.4 (RUSTSEC-2026-0371)
+    - `zvariant` 5.15.0 (RUSTSEC-2026-0370)
+    - `zvariant_derive` 5.15.0 (RUSTSEC-2026-0372)
+  - #21 didn't introduce or change any of the seven, and no crate it adds depends on them. They are not triaged and not accepted; they're tracked in **#147** (`[NFR]`, P2, M5, after #18 unless the owner moves it).
+- **Architect's ruling (D-028, 2026-11-10):**
+  - The squash of PR #146 is approved once this STATUS-only correction is green. The merge is pinned to its head; the approval is void if anything but `docs/STATUS.md` differs from 227a709.
+  - #147 was filed for the seven pre-existing advisories.
+  - #103 is approved to start after the merge, with a design brief first and no code before a ruling.
+  - #147's BACKLOG row and D-043 (what's accepted in the lock, and the standing rule that a PR changing `Cargo.lock` brings a real-lock advisory check, reporting new and pre-existing hits separately) land with #103's first docs edit.
+- **Next bounded action:** once this correction's CI is green, squash-merge PR #146 (pinned head), sync `main` and watch its run; then #103's design brief to the architect (D-037).
 
 ## 2026-11-10: #104
 - **#100 part 3 merged** as 0474a58 (PR #142); #100 stays open for the larger-context CI test GGUF.

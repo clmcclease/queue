@@ -125,3 +125,17 @@ export const editAdTag = (old: string, next: string) => invoke<AdTagList>("setti
 export const removeAdTag = (phrase: string) => invoke<AdTagList>("settings_remove_ad_tag", { phrase });
 /** Puts the starter list back. */
 export const resetAdTags = () => invoke<AdTagList>("settings_reset_ad_tags");
+
+/** The yt-dlp update setting and what's in use (#21, D-042). */
+export interface YtdlpStatus {
+  enabled: boolean;
+  /** The version new downloads use. */
+  version: string;
+  /** Whether that's an update rather than the copy that came with Queue. */
+  updated: boolean;
+  /** The last update attempt (seconds since 1970) and what it came to. */
+  lastCheck: number | null;
+  lastResult: string | null;
+}
+export const ytdlpStatus = () => invoke<YtdlpStatus>("settings_ytdlp");
+export const setYtdlpUpdates = (enabled: boolean) => invoke<YtdlpStatus>("settings_set_ytdlp", { enabled });

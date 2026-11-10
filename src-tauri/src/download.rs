@@ -1207,7 +1207,8 @@ fn run_in(
 ) -> Result<Saved, Failure> {
     let _ = fs::remove_file(work_dir.join(REPORT)); // a previous attempt's report
     let _ = fs::remove_file(work_dir.join(CODECS));
-    let mut cmd = Command::new(Sidecar::YtDlp.path_in(sidecar_dir));
+    let mut cmd =
+        Command::new(crate::ytdlp_update::global().resolve(Sidecar::YtDlp.path_in(sidecar_dir)));
     cmd.args(args_named(sidecar_dir, work_dir, source, format, name))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
