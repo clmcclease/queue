@@ -92,12 +92,12 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **#21's issue body** now describes D-036 and D-042 and points to #146.
 - **CI run 42894824949 on f2b43db: green on every job, first attempt.** (The run started when the PR opened was cancelled by the label's run, as usual.)
   - `verify-signatures` and both `ffmpeg` jobs: passed (cached).
-  - `test`: Windows 14 min, macOS 17 min, Linux 11 min. That's about 3–6 min more than PR #144's run (8–11 min), more than `ytdlp_update_21`'s 60 s alone explains; runner variance and the new crates' build are likely, not measured.
+  - `test`: Windows 14 min, macOS 17 min, Linux 11 min on this first run, which included a cold build of the new crates. On the final head (run 42900497102) they took Linux 9:21, macOS 11:18 and Windows 11:38, against `main`'s 7:33, 10:22 and 11:15 (run 42879659716). The steady-state cost is about 0.5–2 min per OS (the architect's measurement).
   - `webdriver`: Linux and Windows, 2 min each.
   - `bundle`: Linux x64 10 min, macOS x64 9 min, Windows x64 12 min, macOS arm64 13 min.
 - **Installer sizes** (GitHub artifact sizes, so zip-compressed), against `main`'s run 42879659716. All are well under D-013's 256 MB; the largest is the AppImage at 181.7 MB.
 
-  | Artifact | Before (bytes) | After (bytes) | Change |
+  | Artifact | Before: `main`, run 42879659716 (bytes) | After: run 42894824949 on f2b43db (bytes) | Change |
   |---|---|---|---|
   | macOS arm64 .dmg | 94,574,680 | 95,275,497 | +0.70 MB |
   | macOS x64 .dmg | 98,107,272 | 98,895,991 | +0.79 MB |
@@ -110,8 +110,24 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - The `webdriver` logs show only the bundled 2026.08.19 sidecar being installed.
   - The app doesn't log update activity, and the probe runs for seconds.
   - This stays a #71 hand check.
-- **Advisory check (unchanged since the owner's approval):** the whole tree was checked on OSV on 2026-11-10; the only hits were `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387), both accepted in D-042.
-- **Next bounded action:** the architect's squash approval for PR #146 once this handoff commit's CI is green; then #103 (D-037).
+- **Advisory check (corrected; the earlier line here overstated what was checked):**
+  - **Before the owner approved rPGP**, the check covered only the dependency trees of two throwaway projects in the session scratchpad. One depended only on `pgp` 0.21.0 (default features off); the other only on `sequoia-openpgp` 2.4.2. It was **not Queue's own `Cargo.lock`**. In those trees the only hits were `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387), the two D-042 accepts.
+  - **At the squash request**, OSV was run against the real `src-tauri/Cargo.lock` at 227a709: 618 packages, 99 new against `main` (74e5c24), none changed or removed. The 99 new entries carry exactly those two advisories.
+  - **The same lock has seven more advisories, already on `main` at 74e5c24 at the same versions:**
+    - `ctutils` 0.4.3 (RUSTSEC-2026-0385)
+    - `glib` 0.18.5 (RUSTSEC-2024-0429)
+    - `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370)
+    - `tokio` 1.53.2 (RUSTSEC-2026-0386)
+    - `zbus_names` 4.3.4 (RUSTSEC-2026-0371)
+    - `zvariant` 5.15.0 (RUSTSEC-2026-0370)
+    - `zvariant_derive` 5.15.0 (RUSTSEC-2026-0372)
+  - #21 didn't introduce or change any of the seven, and no crate it adds depends on them. They are not triaged and not accepted; they're tracked in **#147** (`[NFR]`, P2, M5, after #18 unless the owner moves it).
+- **Architect's ruling (D-028, 2026-11-10):**
+  - The squash of PR #146 is approved once this STATUS-only correction is green. The merge is pinned to its head; the approval is void if anything but `docs/STATUS.md` differs from 227a709.
+  - #147 was filed for the seven pre-existing advisories.
+  - #103 is approved to start after the merge, with a design brief first and no code before a ruling.
+  - #147's BACKLOG row and D-043 (what's accepted in the lock, and the standing rule that a PR changing `Cargo.lock` brings a real-lock advisory check, reporting new and pre-existing hits separately) land with #103's first docs edit.
+- **Next bounded action:** once this correction's CI is green, squash-merge PR #146 (pinned head), sync `main` and watch its run; then #103's design brief to the architect (D-037).
 
 ## 2026-11-10: #104
 - **#100 part 3 merged** as 0474a58 (PR #142); #100 stays open for the larger-context CI test GGUF.
