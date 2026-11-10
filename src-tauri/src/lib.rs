@@ -587,12 +587,10 @@ fn models_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|_| "Queue couldn't find its data folder.".to_string())
 }
 
-/// The model in use: the user's choice, else this computer's suggestion, else the default.
+/// The model in use: the user's choice, else the default, the 4B, on every machine (D-044). The
+/// suggestion only marks the 4B as recommended; it doesn't pick the model.
 fn chosen_model(settings: &settings::Settings) -> models::ModelId {
-    settings
-        .local_model
-        .or_else(|| models::suggested(models::total_memory(), models::GPU))
-        .unwrap_or_default()
+    settings.local_model.unwrap_or_default()
 }
 
 /// Whether the chosen local model is downloaded and checked, and this build can run it. Reads
@@ -664,7 +662,7 @@ struct ModelStatus {
     /// newest, whether it came as an event or a reply (#31 review).
     rev: u64,
     chosen: models::ModelId,
-    /// Whether the user picked it (else it's the suggestion or the default).
+    /// Whether the user picked it (else it's the default, the 4B; D-044).
     picked: bool,
     suggested: Option<models::ModelId>,
     dir: String,
@@ -1896,6 +1894,27 @@ mod tests {
     use super::*;
     use meta::Meta;
     use queue::Status;
+
+    /// D-044 (#103): with nothing saved the model is the 4B on every machine; a saved choice wins.
+    #[test]
+    fn the_chosen_model_is_the_saved_one_else_the_4b() {
+        let with = |local_model| settings::Settings {
+            local_model,
+            ..Default::default()
+        };
+        assert_eq!(
+            chosen_model(&with(None)),
+            models::ModelId::Qwen3_4bInstruct2507
+        );
+        assert_eq!(
+            chosen_model(&with(Some(models::ModelId::Qwen3_5_2b))),
+            models::ModelId::Qwen3_5_2b
+        );
+        assert_eq!(
+            chosen_model(&with(Some(models::ModelId::Qwen3_4bInstruct2507))),
+            models::ModelId::Qwen3_4bInstruct2507
+        );
+    }
 
     /// #30(b) review: a model download finishing, or a model switch, asks rows again only when
     /// Local is the provider and that model is the chosen one, so API-named rows aren't resent.

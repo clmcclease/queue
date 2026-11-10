@@ -25,7 +25,7 @@ export interface ModelStatus {
   /** Rises with every snapshot the backend takes; only a newer one replaces what's shown. */
   rev: number;
   chosen: ModelId;
-  /** Whether the user picked it, rather than the suggestion or the default. */
+  /** Whether the user picked it, rather than the default (the 4B, D-044). */
   picked: boolean;
   suggested: ModelId | null;
   dir: string;
@@ -107,3 +107,22 @@ export function useModelStatus(onChange?: () => void) {
   };
   return [status, track] as const;
 }
+
+/**
+ * Whether Queue can't recommend a local model on this computer (D-044): no GPU build, under 8 GB
+ * of memory, or memory unknown. Settings then points to the API or Off, and the banner's offer
+ * says it may be slow. A status not yet loaded isn't "no recommendation".
+ */
+export const noRecommendation = (status: ModelStatus | null) => status !== null && status.suggested === null;
+
+/**
+ * One line per model from Queue's own tests (D-044), rounded and from one Mac, never "on this
+ * computer". Sources: D-031 and D-033 (the owner's held-out titles); the shipped tag list's gain is
+ * unmeasured (#143).
+ */
+export const MODEL_NOTES: Record<ModelId, string> = {
+  qwen3_4b_instruct_2507:
+    "In Queue's tests it gave the expected name for about 2 in 3 titles, in about 0.7 s each on one Apple-silicon Mac.",
+  qwen3_5_2b:
+    "Smaller and faster, but much less accurate: the expected name for about 1 in 3 titles in the same tests, in about 0.45 s each.",
+};

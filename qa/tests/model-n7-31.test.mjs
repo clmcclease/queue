@@ -151,12 +151,15 @@ test("N7: a model event refreshes the naming status, and a finished download kee
 
 test("N7: Settings shows the models, the suggestion, the path and the source, and switches on a click", async () => {
   const calls = await mount({
-    model_status: () => status({}, {}, { suggested: "qwen3_5_2b" }),
-    settings_set_local_model: ({ model }) => status({}, {}, { chosen: model, picked: true, suggested: "qwen3_5_2b" }),
+    model_status: () => status({}, {}, { suggested: "qwen3_4b_instruct_2507" }),
+    settings_set_local_model: ({ model }) =>
+      status({}, {}, { chosen: model, picked: true, suggested: "qwen3_4b_instruct_2507" }),
   });
   await openSettings();
   assert.ok(el("model-manager"));
-  assert.match(el("model-suggested").textContent, /no GPU, or under 8 GB/);
+  // D-044 (#103): only the 4B is ever recommended; the 2B's "no GPU, or under 8 GB" suggestion
+  // is gone.
+  assert.equal(el("model-suggested").textContent, "Recommended for this computer.");
   assert.equal(
     el("model-path").textContent,
     "/Users/me/Library/Application Support/dev.mcclease.queue/models/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",

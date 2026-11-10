@@ -83,7 +83,7 @@ D-007's default (yt-dlp decides) often yields `.webm` (AV1/VP9 + Opus), which Qu
 ## D-016 Default local naming model: Qwen3-4B-Instruct-2507 — Confirmed (2026-10-22; first set 2026-10-11)
 Research of current small GGUF models (sources in the #33 issue). The owner accepted the size; the N9 eval (#33) confirms the choice on the pinned files.
 - **Default:** Qwen3-4B-Instruct-2507 Q4_K_M (2.50 GB, Apache-2.0; reputable GGUFs from bartowski, unsloth, and lmstudio-community; no official Qwen GGUF). It has the best instruction following without a thinking mode in this size range (IFEval 83.4) and strong multilingual scores. About 2.5 s per item on a base M1 (estimate), but 5–6 s on CPU-only machines.
-- **Small option:** Qwen3.5-2B Q4_K_M (1.28 GB, Apache-2.0; bartowski's pinned file is 1.40 GB, #31). Suggested automatically when there's no GPU backend or under 8 GB of RAM; the user can switch either way (#31).
+- **Small option:** Qwen3.5-2B Q4_K_M (1.28 GB, Apache-2.0; bartowski's pinned file is 1.40 GB, #31). Suggested automatically when there's no GPU backend or under 8 GB of RAM; the user can switch either way (#31). Superseded on the automatic suggestion by D-036 and D-044.
 - **Rejected:** Llama 3.2 (branding and AUP pass-through), Gemma 3 (restrictive terms; Gemma 4 E2B is 3.1 GB), Qwen2.5-3B (non-commercial `qwen-research` license), and weaker multilingual options.
 - **Runtime notes for #30/#33:**
   - llama-server on `127.0.0.1` with a random port and a per-launch `--api-key`; `-c 2048 --parallel 1`, `-ngl 99` on GPU, and `--sleep-idle-seconds 120` (N6).
@@ -380,4 +380,36 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
 - **Tests:** `download::run_in` through an adopted copy is tested on Unix. `settings_set_ytdlp`'s failed-save test is carried to #84.
 - **`rand = "=0.8.8"`** is a dev-dependency for throwaway test keys, already in the lock through `pgp`. Confirmed by the architect under D-028.
 - **Round-3 notes (decided by the architect under D-028, 2026-11-10; not yet seen by the owner):** review round 3 passed with notes (`qa/reports/20261110-131456-review-ooDz.md`). Two tests it listed go to follow-up #145 (P3, M5), not #84: switching off inside the `--version` run, and Windows adopted/bundled selection through real subprocesses. The same issue carries the "Checking…" status line: it is stale until Settings reopens, and it stays in `state.json` until the next daily attempt if Queue quits mid-check. That is accepted as cosmetic. `settings_set_ytdlp`'s failed-save test stays on #84. A real update adopted on Windows and Linux is a #71 hand check.
+- D-036 is unchanged.
+
+## D-043 Advisories in `Cargo.lock`: what's accepted, and the check a lock change brings — decided by the architect under D-028 (2026-11-10); not yet seen by the owner
+- **Accepted:** only `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387), for verify-only use (D-042; the owner approved rPGP with both in view). The check the owner saw before approving covered the dependency trees of two throwaway projects, one depending only on `pgp` 0.21.0 (default features off) and one only on `sequoia-openpgp` 2.4.2, not Queue's own `Cargo.lock`.
+- At #21's squash the real lock was checked on OSV at 227a709: 618 packages, 99 new against `main` (74e5c24), none changed or removed. The new entries carry exactly those two.
+- **Not accepted and not triaged:** seven advisories already on `main` at 74e5c24, at the same versions. No crate #21 adds depends on them. #147 (P2, M5, after #18 unless the owner moves it) triages them.
+  - `ctutils` 0.4.3 (RUSTSEC-2026-0385)
+  - `glib` 0.18.5 (RUSTSEC-2024-0429)
+  - `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370)
+  - `tokio` 1.53.2 (RUSTSEC-2026-0386)
+  - `zbus_names` 4.3.4 (RUSTSEC-2026-0371)
+  - `zvariant` 5.15.0 (RUSTSEC-2026-0370)
+  - `zvariant_derive` 5.15.0 (RUSTSEC-2026-0372)
+- **Standing rule:** a PR that changes `src-tauri/Cargo.lock` brings an advisory check of that real lock file, not of a throwaway project's tree, in its commit or squash request. It states the tool, the commit checked and the package count, and lists hits new with the PR separately from those already on `main`. A new hit not accepted here goes to the architect before the request.
+- **Not decided:** whether CI runs an advisory check (#147(d)), whether the release waits on #147, and dismissing Dependabot alerts (a repo setting, the owner's).
+
+## D-044 #103: which machines get a recommended local model, and what Settings says — decided by the architect under D-028 (2026-11-10); not yet seen by the owner
+- **"Runs the 4B well" (D-036)** means a GPU build and at least 7.5 GiB of memory: today, an Apple-silicon Mac with 8 GB or more. It is a static rule from the pinned builds (`models::GPU`) and total memory; nothing is benchmarked. Unknown memory counts as not running it well. Every Windows, Linux and Intel-Mac install falls on the other side because the CPU builds have never been measured (D-033), not because they were measured as slow.
+- **`models::suggested`** returns the 4B on those machines and nothing elsewhere. It never returns the 2B. This replaces the automatic 2B suggestion in D-016 and D-029, as D-036 directs.
+- **With no saved choice the model is the 4B on every machine.** The suggestion no longer picks the model; it only puts "Recommended for this computer." on the 4B. A saved choice always wins and is never changed.
+- **Where nothing is suggested,** Settings shows one note above the model list under Local, pointing to the API and Off choices. The banner's download offer adds the same caveat after its size-and-source sentence. The default provider stays Local on every OS (AGENTS.md, PRD N4), and a download is still only the user's click (D-029).
+- **Copy:** each model shows its size and one line from Queue's own tests, as rounded figures from one Mac: the 4B about 2 in 3 titles at about 0.7 s each, the 2B about 1 in 3 at about 0.45 s. Exact percentages aren't shown: 71% and 34% were measured with the parked general stripping (D-031), not the list that shipped (D-041), and #143 hasn't run. Nothing claims a speed or quality "on this computer".
+- **Not built:**
+  - a fallback to an already-downloaded model when nothing is saved (no release has been published, so only pre-release test installs can be in that state; one click on the 2B restores it);
+  - a per-OS default provider (the owner's call);
+  - benchmarking or a runtime probe;
+  - separate wording for low memory and no GPU;
+  - hiding the note once a model is in use;
+  - a banner without Download;
+  - new pins, settings keys or dependencies.
+- **Measurement:** the first CPU timing comes from #71's Local naming ask on Windows and Linux (D-033's open M5 check), not from #143, which measures #104's tag-list gain.
+- **Revisit** when #71 gives that timing, or when #97 ships a GPU build there.
 - D-036 is unchanged.
