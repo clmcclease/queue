@@ -189,7 +189,8 @@ pub fn fetch_raw(
             limit.as_secs()
         )
     };
-    let mut cmd = Command::new(Sidecar::YtDlp.path_in(sidecar_dir));
+    let mut cmd =
+        Command::new(crate::ytdlp_update::global().resolve(Sidecar::YtDlp.path_in(sidecar_dir)));
     cmd.args(args(sidecar_dir, url))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

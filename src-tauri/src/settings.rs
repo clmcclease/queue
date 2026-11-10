@@ -44,6 +44,10 @@ pub struct Settings {
     /// An empty list is kept: it means the user removed every phrase.
     #[serde(deserialize_with = "or_default")]
     pub ad_tags: crate::adtags::AdTags,
+    /// Whether Queue keeps yt-dlp up to date (#21, D-042); on by default. Off means the
+    /// bundled copy and no requests.
+    #[serde(deserialize_with = "or_default")]
+    pub ytdlp_auto_update: crate::ytdlp_update::AutoUpdate,
 }
 
 /// Reads one setting, or its default if it can't be understood (e.g. a format from a newer
@@ -158,6 +162,41 @@ mod tests {
             Some(PathBuf::from("/x")),
             "unknown keys are ignored"
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #21 (D-042): yt-dlp updates are on by default, off is remembered, and a value that isn't
+    /// a boolean means on.
+    #[test]
+    fn ytdlp_updates_are_on_by_default_and_off_is_remembered() {
+        use crate::ytdlp_update::AutoUpdate;
+        let dir = temp("ytdlp");
+        let path = dir.join(FILE);
+        assert_eq!(Settings::default().ytdlp_auto_update, AutoUpdate(true));
+        let off = Settings {
+            ytdlp_auto_update: AutoUpdate(false),
+            ..Default::default()
+        };
+        off.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), off);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains(r#""ytdlpAutoUpdate": false"#)
+        );
+        for file in [
+            &br#"{"format": "audio"}"#[..],
+            br#"{"format": "audio", "ytdlpAutoUpdate": "no"}"#,
+        ] {
+            fs::write(&path, file).unwrap();
+            let loaded = Settings::load(&path);
+            assert_eq!(loaded.ytdlp_auto_update, AutoUpdate(true));
+            assert_eq!(
+                loaded.format,
+                crate::download::Format::Audio,
+                "the rest is kept"
+            );
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

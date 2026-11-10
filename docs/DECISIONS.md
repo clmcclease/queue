@@ -354,3 +354,30 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
   - The command-level failed-save test is carried to #84, with `settings_set_api`'s.
   - D-036 is unchanged: add, edit, remove and reset are all offered.
 - **Closing #104 (decided by the architect under D-028, 2026-11-10; not yet seen by the owner):** #104 closes when its PR merges, because D-036's and D-041's scope is built. Measuring the gain on the owner's held-out set, and the bare-trailing-tag revisit above, move to follow-up #143. Nothing more is built for bare tags until that measurement.
+
+## D-042 #21: how the yt-dlp update is verified, stored and switched off — decided by the architect under D-028 (2026-11-10); the OpenPGP library approved by the owner (2026-11-10)
+- **The library (owner, 2026-11-10, D-036):** rPGP, `pgp = { version = "=0.21.0", default-features = false }`, no other features. The owner approved it after seeing the whole-tree advisory check: `rsa` 0.9.10 (RUSTSEC-2023-0071, Marvin) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387) are timing leaks of secret data (a private key, secret integers). Queue only verifies a public signature over public data, so neither applies, though `cargo audit` and Dependabot flag them. Sequoia's tree has the same two. Sequoia (LGPL-2.0-or-later, compiled into Queue's binary) was the alternative. rPGP adds about 90 crates, all permissive (`unicode-ident`'s Unicode-3.0 is build-time only), and about 1.9 MB to the binary (measured without LTO or stripping). Queue needs one RSA-4096 / SHA-512 detached-signature verification; rPGP's verify is raw crypto with no policy engine, so Queue enforces its own policy (below).
+- **Finding a release:** the redirect from `github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS` names the tag; the GitHub API isn't used (a shared 60 per hour per IP limit). The Location must have exactly that shape. Redirects are https only with no host allow-list (GitHub's asset host has changed before), and no custom User-Agent is sent.
+- **The tag is a hint, not proof.** The signed sums carry no version, so after the signature, the asset's line and the hash pass, Queue runs the new binary with `--version`. It must report the tag's version, strictly newer than the bundled and current ones. Only then is the copy adopted.
+- **Signature policy:** a binary-document signature with SHA-256, SHA-384 or SHA-512, by the pinned primary key, using the committed key embedded in the app. The pin stays in `scripts/sidecars.json`. There are no time-based checks. If upstream changes its key, updates stop until a Queue release carries the new one.
+- **Storage:** `app_local_data_dir()/yt-dlp/<version>/` holds the binary, the sums, the signature and a marker written last. `state.json` there holds the last check, its result and a rejected version. Only `ytdlpAutoUpdate` is in settings.json.
+- **Use:** at launch the signature chain is checked again from the stored sums and signature. The newest copy that verifies and is strictly newer than the bundled version is used; everything else in the folder is deleted, at launch only. Until that check finishes, and whenever the file later changes or vanishes, runs use the bundled copy.
+- **Off** means the bundled copy and no requests; the stored copy is kept untouched.
+- **Limits accepted:**
+  - a failed attempt uses up the day;
+  - a too-slow connection fails rather than resumes;
+  - a same-user process can swap in another genuine release;
+  - CI's `webdriver` jobs make one real, verified update check per run.
+- **Not built:** "Check now", progress, resume, a channel picker, nightlies, rollback in the UI, updating deno or ffmpeg, keeping a previous copy.
+- **Off, precisely (decided by the architect under D-028, 2026-11-10, after review rounds 1–2; not yet seen by the owner):**
+  - The updater reads the on/off setting in the one function that sends its requests, immediately before each one, redirect hops included. A request whose read saw "off" is never sent.
+  - A request already sent, or whose read saw "on", isn't interrupted. Its answer is discarded, no hop or further request follows, nothing is adopted, and the attempt's own version folder is removed.
+  - An asset body being received stops at its next write; a stalled one ends at its time limit.
+  - The attempt reports "updates were turned off" and uses up the day.
+  - If the settings file can't be written, the switch fails with an error and nothing changes.
+  - Not built: interrupting a request in flight (a helper thread per request, as #31's download has), or a lock held across a send.
+- **Review cap (architect, D-028):** round 3 is #21's last review round on the off path. A new off-path failure parks the branch as a draft PR for the owner.
+- **Tests:** `download::run_in` through an adopted copy is tested on Unix. `settings_set_ytdlp`'s failed-save test is carried to #84.
+- **`rand = "=0.8.8"`** is a dev-dependency for throwaway test keys, already in the lock through `pgp`. Confirmed by the architect under D-028.
+- **Round-3 notes (decided by the architect under D-028, 2026-11-10; not yet seen by the owner):** review round 3 passed with notes (`qa/reports/20261110-131456-review-ooDz.md`). Two tests it listed go to follow-up #145 (P3, M5), not #84: switching off inside the `--version` run, and Windows adopted/bundled selection through real subprocesses. The same issue carries the "Checking…" status line: it is stale until Settings reopens, and it stays in `state.json` until the next daily attempt if Queue quits mid-check. That is accepted as cosmetic. `settings_set_ytdlp`'s failed-save test stays on #84. A real update adopted on Windows and Linux is a #71 hand check.
+- D-036 is unchanged.

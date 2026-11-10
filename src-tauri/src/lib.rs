@@ -13,6 +13,7 @@ pub mod secrets;
 pub mod settings;
 pub mod sidecar;
 pub mod webview;
+pub mod ytdlp_update;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1061,6 +1062,119 @@ fn change_ad_tags(
     Ok(list)
 }
 
+/// Wakes the yt-dlp updater thread when its setting changes (#21); `None` without one (another
+/// copy of Queue owns the data folder, or this target has no updater).
+#[derive(Default)]
+struct YtdlpWake(Mutex<Option<std::sync::mpsc::Sender<()>>>);
+
+/// Where yt-dlp updates live: the local (not roaming) app-data folder (D-042).
+fn ytdlp_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .ok()
+        .map(|d| d.join("yt-dlp"))
+}
+
+/// The yt-dlp updater thread (#21, D-042): wakes about hourly, or when its setting changes,
+/// and compares wall-clock time with the last check, so system sleep can't stall it. Not a
+/// `proc::job`: it never delays quitting, and it stops once Queue is quitting.
+fn start_ytdlp_updater(app: &AppHandle) {
+    let Some(updater) = ytdlp_dir(app).and_then(ytdlp_update::Updater::real) else {
+        return;
+    };
+    let (wake, woken) = std::sync::mpsc::channel();
+    if let Ok(mut w) = app.state::<YtdlpWake>().0.lock() {
+        *w = Some(wake);
+    }
+    // The resolver's on/off is the one source of truth from here; the setting command changes
+    // it under the settings lock (#21 review).
+    if let Ok(settings) = app.state::<Settings>().current.lock() {
+        ytdlp_update::global().set_enabled(settings.ytdlp_auto_update.0);
+    }
+    std::thread::spawn(move || {
+        let resolver = ytdlp_update::global();
+        let mut launched = false;
+        loop {
+            if proc::stopping() {
+                return;
+            }
+            ytdlp_update::tick(&updater, &mut launched, resolver);
+            match woken.recv_timeout(Duration::from_secs(60 * 60)) {
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    });
+}
+
+/// What Settings shows about yt-dlp (#21).
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YtdlpStatus {
+    enabled: bool,
+    /// The version new runs use.
+    version: String,
+    /// Whether that's an update rather than the bundled copy.
+    updated: bool,
+    /// The last update attempt, in seconds since 1970, and what it came to.
+    last_check: Option<u64>,
+    last_result: Option<String>,
+}
+
+fn ytdlp_status(app: &AppHandle) -> Result<YtdlpStatus, String> {
+    let enabled = current_settings(app)?.ytdlp_auto_update.0;
+    let in_use = ytdlp_update::global().in_use();
+    let state = ytdlp_dir(app)
+        .and_then(ytdlp_update::Updater::real)
+        .map(|u| u.state())
+        .unwrap_or_default();
+    Ok(YtdlpStatus {
+        enabled,
+        version: in_use.unwrap_or(ytdlp_update::pins().bundled).to_string(),
+        updated: in_use.is_some(),
+        last_check: state.last_check,
+        last_result: state.last_result,
+    })
+}
+
+/// The yt-dlp update setting and what's in use (#21).
+#[tauri::command]
+fn settings_ytdlp(app: AppHandle) -> Result<YtdlpStatus, String> {
+    ytdlp_status(&app)
+}
+
+/// Turns yt-dlp updates on or off (#21, D-042). Off: new runs use the bundled copy at once and
+/// nothing is requested; on: a stored copy is used once verified, and the next check waits for
+/// the daily gate.
+#[tauri::command]
+fn settings_set_ytdlp(app: AppHandle, enabled: bool) -> Result<YtdlpStatus, String> {
+    {
+        let state = app.state::<Settings>();
+        let mut current = state
+            .current
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        let mut next = current.clone();
+        next.ytdlp_auto_update = ytdlp_update::AutoUpdate(enabled);
+        if let Some(file) = &state.file {
+            next.save(file)
+                .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+        }
+        *current = next;
+        // Only the copy that runs the updater uses an updated yt-dlp; the others stay on the
+        // bundled one whatever the setting.
+        if app.state::<YtdlpWake>().0.lock().is_ok_and(|w| w.is_some()) {
+            ytdlp_update::global().set_enabled(enabled);
+        }
+    }
+    if let Ok(w) = app.state::<YtdlpWake>().0.lock()
+        && let Some(wake) = w.as_ref()
+    {
+        let _ = wake.send(());
+    }
+    ytdlp_status(&app)
+}
+
 /// Each template's name for a fixed sample item: the live preview in Settings (N3, #17).
 #[tauri::command]
 fn naming_previews() -> Vec<(naming::Template, String)> {
@@ -1593,6 +1707,7 @@ pub fn run() {
             let template = current.naming_template;
             let ad_tags = current.ad_tags.clone();
             app.manage(AdTagChanges::default());
+            app.manage(YtdlpWake::default());
             app.manage(Settings {
                 file,
                 current: Mutex::new(current),
@@ -1620,6 +1735,11 @@ pub fn run() {
                         }
                     });
                 }
+            }
+            // yt-dlp updates (#21): only the copy that owns the queue runs the updater, as with
+            // the cleanup above, so two copies never write the same folder.
+            if lock.is_some() {
+                start_ytdlp_updater(app.handle());
             }
             let (mut queue, saving) = queue_file
                 .as_deref()
@@ -1731,6 +1851,8 @@ pub fn run() {
             settings_naming_template,
             settings_set_naming_template,
             settings_ad_tags,
+            settings_ytdlp,
+            settings_set_ytdlp,
             settings_add_ad_tag,
             settings_edit_ad_tag,
             settings_remove_ad_tag,
