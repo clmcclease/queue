@@ -1,8 +1,52 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #21 (branch `infra/21-ytdlp-update`), then #103 → #18 (D-037)
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #103 (branch `naming/103-model-picker`), then #18 (D-037)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-10 (evening): #21 merged; #103
+- **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.
+- **Architect's #103 ruling (D-028, 2026-11-10):**
+  - **Design:** approved with conditions. `suggested()` returns the 4B or nothing, never the 2B. `chosen_model` is the saved choice or the 4B. There's no `weak` field: the UI derives it from `suggested === null`. The "ready-model" fallback is refused.
+  - **Copy:** rounded ("about 2 in 3", "about 1 in 3"), because 71%/34% were measured with the parked stripping (D-031), not the shipped list.
+  - **Docs:** D-043 (advisories) and D-044 (#103) are recorded. D-016's small-option bullet points to them. #147's row is added, and #71's row gains #103's installer checks.
+  - **Corrections and branch:** my brief's "#143 owns measurement" was wrong; D-044 now says the first CPU timing comes from #71's Local ask (D-033). Branch `naming/103-model-picker`, no `ci:bundle`.
+  - **Gates:** `test`, then `review`; after two FAIL review rounds the findings go to the architect.
+- **#103 built (uncommitted):**
+  - `models::suggested` returns the 4B only on a GPU build with at least 7.5 GiB, else `None`. `lib.rs` `chosen_model` = saved choice, else the 4B.
+  - `src/models.ts`: `noRecommendation()` and the `MODEL_NOTES` copy table.
+  - `ModelManager.tsx`: one quality line per model, "Recommended for this computer." on the suggested model, and a plain note above the list when nothing is suggested.
+  - `ModelBanner.tsx`: the caveat on the download offer only.
+  - `Cargo.lock`, `package-lock.json` and the `settings.json` schema are untouched.
+- **Tests:**
+  - Rust: `models.rs` `only_gpu_machines_with_enough_memory_get_the_4b_recommended`, which replaces `the_small_model_is_suggested_for_small_or_gpu_less_machines` on purpose under D-036; `lib.rs` `the_chosen_model_is_the_saved_one_else_the_4b`.
+  - UI: the `/no GPU, or under 8 GB/` assertion in `qa/tests/model-n7-31.test.mjs` now expects "Recommended for this computer." (on purpose); new `qa/tests/model-picker-103.test.mjs` (5).
+- **Checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 680 passed / 0 failed / 33 ignored, `npm run build`, `npm test` 617 passed / 0 failed / 13 skipped, `git diff --check`. No lock file changed.
+- **`codex-qa test "#103"`: PASS WITH NOTES**, no bugs (`qa/reports/20261110-151220-test-QEf7.md`). Its only untested item is Windows/Linux installer guidance and real CPU timing, which is on #71.
+- **Codex's tests added** (without its STATUS edit):
+  - `qa/tests/model-picker-103-qa.test.mjs` (8): saved choices, consent, status races, provider visibility, switching.
+  - `src-tauri/tests/model_picker_103_qa.rs` (3): memory boundaries, malformed saved choices, settings round trips.
+  - All pass here.
+- **`main`'s run 42910056441 on b5173f9:** green on every job, first attempt, including the four bundles.
+- **`codex-qa review` round 1: PASS WITH NOTES**, no findings (`qa/reports/20261110-151849-review-Jbis.md`). Its missing tests are #71's native checks (the note and caveat on Windows and Linux; 4B CPU timing).
+- **Checks on the final diff (macOS arm64):** `cargo test --no-fail-fast` 683 passed / 0 failed / 33 ignored, `npm test` 625 passed / 0 failed / 13 skipped (plus the earlier fmt, clippy, build and `git diff --check`). No lock file changed.
+- **Architect's ruling (D-028, 2026-11-10):**
+  - **The commit and draft PR:** a draft PR closing #103, without `ci:bundle`, is approved, staging the 12 paths by name. The message's "Also records…" sentence is reworded.
+  - **A bounded tidy commit** is pre-approved on the same PR. It makes exactly five edits:
+    - three comments that still describe the old suggestion (`settings.rs:37`, `lib.rs:665`, `src/models.ts:28`);
+    - `lib.rs`'s new test moved below the `use` lines;
+    - `models.rs`'s new test's doc comment moved above `#[test]`.
+  - **That tidy commit's gates:**
+    - the full checks;
+    - a fresh `codex-qa review` round 2, committing only on PASS, or on PASS WITH NOTES with no findings (a FAIL or any finding goes to the architect with no fix; Codex failing twice also goes to the architect);
+    - pushed together with the STATUS handoff after the first CI run is green.
+  - **Before the squash:**
+    - green on every job at the final head;
+    - the round-2 report path;
+    - STATUS and #103's BACKLOG row updated;
+    - #71's issue body updated to carry its BACKLOG list;
+    - #103's issue body updated to D-036/D-044.
+- **Next bounded action:** commit, push, open the draft PR, and watch CI; then the tidy commit through its gates.
 
 ## 2026-11-10 (afternoon): #104 merged; #21 started
 - **Architect's ruling (D-028, 2026-11-10 11:55):** the squash merge of PR #144 is approved at head 87c955c (run 42877202995 green on every job; code and tests unchanged since review round 5), merged with `--match-head-commit`. #104 closes; #143 carries the measurement and the bare-tag revisit. Starting #21 is approved (D-037) with a design brief to the architect first; no OpenPGP crate is added until the owner approves the library (D-036). The `local_n6_30b_qa::stalled_health_headers_time_out…` flake gets an `[NFR]` issue on a second occurrence.

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cancelModel, chosenModel, downloadModel, gb, percent, type ModelStatus, type Track } from "../models";
+import { cancelModel, chosenModel, downloadModel, gb, noRecommendation, percent, type ModelStatus, type Track } from "../models";
 
 const button =
   "ml-2 rounded-md border border-neutral-300 px-2 py-0.5 text-xs text-neutral-800 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-200";
@@ -71,7 +71,10 @@ export default function ModelBanner({
   } else if (m.state === "ready") {
     text = "The local model is downloaded, but this copy of Queue is missing the part that runs it, so names come from the rules. Reinstalling Queue fixes this.";
   } else {
+    // The first sentence is the download's consent (D-029): model, size and source stay in it.
     text = `AI naming uses a local model that isn't downloaded yet (${m.name}, ${gb(m.size)} from huggingface.co). Names come from the rules for now.`;
+    // Where Queue can't recommend a local model (D-044), the offer says so.
+    if (noRecommendation(status)) text += " It may be slow on this computer; API or Off in Settings may suit it better.";
     actions = (
       <>
         {download("Download")}

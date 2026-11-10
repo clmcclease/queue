@@ -586,16 +586,14 @@ fn is_local(url: &url::Url) -> bool {
     }
 }
 
-/// Which model suits this computer (D-016): the small one with under 7.5 GiB of memory (so an
-/// 8 GB machine reporting a little less still counts) or without a GPU backend.
+/// The local model recommended for this computer (D-036, D-044): the 4B where it runs well, a
+/// GPU build with at least 7.5 GiB of memory (so an 8 GB machine reporting a little less still
+/// counts). `None` means Queue can't say a local model runs well here: no GPU build, less
+/// memory, or memory unknown. It never recommends the 2B; Settings points such machines to the
+/// API or Off instead. It doesn't pick the model: with nothing saved that's the 4B everywhere.
 pub fn suggested(memory: Option<u64>, gpu: bool) -> Option<ModelId> {
-    let small = memory.is_some_and(|m| m < 7 * 1024 * 1024 * 1024 + 512 * 1024 * 1024);
-    match (memory, gpu) {
-        (_, false) => Some(ModelId::Qwen3_5_2b),
-        (Some(_), true) if small => Some(ModelId::Qwen3_5_2b),
-        (Some(_), true) => Some(ModelId::Qwen3_4bInstruct2507),
-        (None, true) => None,
-    }
+    let enough = memory.is_some_and(|m| m >= 7 * 1024 * 1024 * 1024 + 512 * 1024 * 1024);
+    (gpu && enough).then_some(ModelId::Qwen3_4bInstruct2507)
 }
 
 /// Whether llama.cpp gets a GPU backend here. It follows the pinned builds (#30(a), D-029):
@@ -772,20 +770,28 @@ mod tests {
     }
 
     #[test]
-    fn the_small_model_is_suggested_for_small_or_gpu_less_machines() {
+    /// D-044 (#103): only a GPU build with at least 7.5 GiB gets a recommendation, and it's the
+    /// 4B; the 2B is never recommended (D-036). Replaces #31's small-model suggestion.
+    fn only_gpu_machines_with_enough_memory_get_the_4b_recommended() {
         let gib = 1024 * 1024 * 1024;
+        let four = Some(ModelId::Qwen3_4bInstruct2507);
+        assert_eq!(suggested(Some(16 * gib), true), four);
+        assert_eq!(suggested(Some(8 * gib), true), four);
         assert_eq!(
-            suggested(Some(16 * gib), true),
-            Some(ModelId::Qwen3_4bInstruct2507)
+            suggested(Some(7 * gib + gib / 2), true),
+            four,
+            "exactly 7.5 GiB"
         );
-        assert_eq!(
-            suggested(Some(8 * gib), true),
-            Some(ModelId::Qwen3_4bInstruct2507)
-        );
-        assert_eq!(suggested(Some(7 * gib), true), Some(ModelId::Qwen3_5_2b));
-        assert_eq!(suggested(Some(32 * gib), false), Some(ModelId::Qwen3_5_2b));
-        assert_eq!(suggested(None, false), Some(ModelId::Qwen3_5_2b));
-        assert_eq!(suggested(None, true), None, "unknown memory: no suggestion");
+        assert_eq!(suggested(Some(7 * gib + gib / 2 - 1), true), None);
+        assert_eq!(suggested(Some(7 * gib), true), None);
+        assert_eq!(suggested(Some(32 * gib), false), None, "no GPU build");
+        assert_eq!(suggested(None, true), None, "unknown memory");
+        assert_eq!(suggested(None, false), None);
+        for memory in [None, Some(gib), Some(7 * gib), Some(64 * gib)] {
+            for gpu in [false, true] {
+                assert_ne!(suggested(memory, gpu), Some(ModelId::Qwen3_5_2b));
+            }
+        }
     }
 
     #[test]

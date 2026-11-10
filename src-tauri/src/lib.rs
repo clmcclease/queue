@@ -587,12 +587,10 @@ fn models_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|_| "Queue couldn't find its data folder.".to_string())
 }
 
-/// The model in use: the user's choice, else this computer's suggestion, else the default.
+/// The model in use: the user's choice, else the default, the 4B, on every machine (D-044). The
+/// suggestion only marks the 4B as recommended; it doesn't pick the model.
 fn chosen_model(settings: &settings::Settings) -> models::ModelId {
-    settings
-        .local_model
-        .or_else(|| models::suggested(models::total_memory(), models::GPU))
-        .unwrap_or_default()
+    settings.local_model.unwrap_or_default()
 }
 
 /// Whether the chosen local model is downloaded and checked, and this build can run it. Reads
@@ -1893,6 +1891,26 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    /// D-044 (#103): with nothing saved the model is the 4B on every machine; a saved choice wins.
+    #[test]
+    fn the_chosen_model_is_the_saved_one_else_the_4b() {
+        let with = |local_model| settings::Settings {
+            local_model,
+            ..Default::default()
+        };
+        assert_eq!(
+            chosen_model(&with(None)),
+            models::ModelId::Qwen3_4bInstruct2507
+        );
+        assert_eq!(
+            chosen_model(&with(Some(models::ModelId::Qwen3_5_2b))),
+            models::ModelId::Qwen3_5_2b
+        );
+        assert_eq!(
+            chosen_model(&with(Some(models::ModelId::Qwen3_4bInstruct2507))),
+            models::ModelId::Qwen3_4bInstruct2507
+        );
+    }
     use super::*;
     use meta::Meta;
     use queue::Status;

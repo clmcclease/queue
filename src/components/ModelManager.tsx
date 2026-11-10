@@ -5,6 +5,8 @@ import {
   deleteModel,
   downloadModel,
   gb,
+  MODEL_NOTES,
+  noRecommendation,
   percent,
   setLocalModel,
   type ModelId,
@@ -62,6 +64,11 @@ export default function ModelManager({
 
   return (
     <div data-role="model-manager" className="mt-2 flex flex-col gap-2 border-l-2 border-neutral-200 pl-3 text-xs dark:border-neutral-700">
+      {noRecommendation(status) && (
+        <p data-role="model-note" className="text-neutral-500 dark:text-neutral-400">
+          Local naming may be slow on this computer. The API or Off choices above may suit it better.
+        </p>
+      )}
       <div role="radiogroup" aria-label="Local model" className="flex flex-col gap-1">
         {status.models.map((x) => (
           <label key={x.id} className="flex cursor-pointer items-start gap-2">
@@ -78,11 +85,12 @@ export default function ModelManager({
               <span className="text-neutral-900 dark:text-neutral-100">
                 {x.name}, {gb(x.size)}
               </span>
+              <span data-role="model-quality" className="block text-neutral-500 dark:text-neutral-400">
+                {MODEL_NOTES[x.id]}
+              </span>
               {status.suggested === x.id && (
                 <span data-role="model-suggested" className="block text-neutral-500 dark:text-neutral-400">
-                  {x.id === "qwen3_5_2b"
-                    ? "Suggested for this computer: no GPU, or under 8 GB of memory."
-                    : "Suggested for this computer."}
+                  Recommended for this computer.
                 </span>
               )}
             </span>
