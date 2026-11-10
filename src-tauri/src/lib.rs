@@ -1,3 +1,4 @@
+pub mod adtags;
 pub mod ai;
 pub mod download;
 pub mod link;
@@ -966,6 +967,100 @@ fn settings_set_naming_template(
     Ok(template)
 }
 
+/// The tag phrases taken out of AI names (N9, #104), with the version of the list they are:
+/// every saved change bumps it, so Settings shows the newest reply and ignores one that arrives
+/// late (#104 review).
+#[derive(Clone, Debug, serde::Serialize)]
+struct AdTagList {
+    version: u64,
+    tags: Vec<String>,
+}
+
+/// Serializes changes to the tag list, from reading it to renaming the queue, and holds the
+/// list's version. Taken before the settings and queue locks, and only here.
+#[derive(Default)]
+struct AdTagChanges(Mutex<u64>);
+
+#[tauri::command]
+fn settings_ad_tags(app: AppHandle) -> Result<AdTagList, String> {
+    // Read under the changes lock, so the version and the list belong together.
+    let changes = app.state::<AdTagChanges>();
+    let version = changes
+        .0
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?;
+    Ok(AdTagList {
+        version: *version,
+        tags: current_settings(&app)?.ad_tags.list().to_vec(),
+    })
+}
+
+/// Adds a phrase (#104). Each change names its phrase and is applied by the backend to the list
+/// as saved, so changes from Settings windows or saves that overlap never undo one another.
+#[tauri::command]
+fn settings_add_ad_tag(app: AppHandle, phrase: String) -> Result<AdTagList, String> {
+    change_ad_tags(&app, |tags| tags.with_added(&phrase))
+}
+
+/// Replaces `old` with `new` (empty removes it); nothing changes if `old` is gone by then.
+#[tauri::command]
+fn settings_edit_ad_tag(app: AppHandle, old: String, new: String) -> Result<AdTagList, String> {
+    change_ad_tags(&app, |tags| tags.with_edited(&old, &new))
+}
+
+/// Removes a phrase; nothing changes if it's gone by then.
+#[tauri::command]
+fn settings_remove_ad_tag(app: AppHandle, phrase: String) -> Result<AdTagList, String> {
+    change_ad_tags(&app, |tags| tags.without(&phrase))
+}
+
+/// Puts the starter list back (#104).
+#[tauri::command]
+fn settings_reset_ad_tags(app: AppHandle) -> Result<AdTagList, String> {
+    change_ad_tags(&app, |_| adtags::AdTags::default())
+}
+
+/// Applies `change` to the saved list and saves it, then renames the Queued rows on an AI name
+/// and sends them as [`ITEM_EVENT`]s. A failed save changes nothing.
+fn change_ad_tags(
+    app: &AppHandle,
+    change: impl FnOnce(&adtags::AdTags) -> adtags::AdTags,
+) -> Result<AdTagList, String> {
+    let changes = app.state::<AdTagChanges>();
+    let mut version = changes
+        .0
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?;
+    let tags = {
+        let state = app.state::<Settings>();
+        let mut current = state
+            .current
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        let tags = change(&current.ad_tags);
+        if tags != current.ad_tags {
+            let mut next = current.clone();
+            next.ad_tags = tags.clone();
+            if let Some(file) = &state.file {
+                next.save(file)
+                    .map_err(|e| format!("Couldn't save your settings: {e}"))?;
+            }
+            *current = next;
+        }
+        tags
+    };
+    *version += 1;
+    let list = AdTagList {
+        version: *version,
+        tags: tags.list().to_vec(),
+    };
+    let changed = lock(&app.state::<Mutex<Queue>>())?.set_ad_tags(tags);
+    for item in changed {
+        let _ = app.emit(ITEM_EVENT, item);
+    }
+    Ok(list)
+}
+
 /// Each template's name for a fixed sample item: the live preview in Settings (N3, #17).
 #[tauri::command]
 fn naming_previews() -> Vec<(naming::Template, String)> {
@@ -1496,6 +1591,8 @@ pub fn run() {
                 .map(settings::Settings::load)
                 .unwrap_or_default();
             let template = current.naming_template;
+            let ad_tags = current.ad_tags.clone();
+            app.manage(AdTagChanges::default());
             app.manage(Settings {
                 file,
                 current: Mutex::new(current),
@@ -1530,6 +1627,7 @@ pub fn run() {
                 .unwrap_or((Queue::default(), queue::Saving::Safe));
             // Names follow the saved template (#17); hand-edited ones are kept.
             queue.set_template(template);
+            queue.set_ad_tags(ad_tags);
             let problem = match (&queue_file, lock.is_some(), saving) {
                 (None, ..) => Some("Queue couldn't find its data folder, so this list won't be saved.".to_string()),
                 (Some(_), false, _) => Some("Another copy of Queue is still using the saved list, so changes made now won't be saved. Quit and reopen Queue.".to_string()),
@@ -1632,6 +1730,11 @@ pub fn run() {
             settings_set_format,
             settings_naming_template,
             settings_set_naming_template,
+            settings_ad_tags,
+            settings_add_ad_tag,
+            settings_edit_ad_tag,
+            settings_remove_ad_tag,
+            settings_reset_ad_tags,
             naming_previews,
             settings_naming_provider,
             settings_set_naming_provider,

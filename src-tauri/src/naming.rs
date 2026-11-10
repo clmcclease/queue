@@ -85,6 +85,22 @@ fn apply(meta: &Meta, template: Template, subject: String) -> String {
 /// device name (`CON`, `nul.txt`, `COM¹` get a `_`). Bidirectional overrides, which can
 /// disguise a name (`…\u{202E}4pm.exe`), are removed. Empty input gives [`UNTITLED`].
 pub fn sanitize(text: &str) -> String {
+    let out = replace_illegal(text);
+    // A leading dot would hide the file on macOS and Linux.
+    let mut name = unreserved(collapse(&out).trim_start_matches(['.', ' ']).to_owned());
+    cap(&mut name);
+    let name = name.trim_end_matches(['.', ' ']);
+    if name.is_empty() {
+        UNTITLED.to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
+/// [`sanitize`]'s character replacements alone: illegal characters in their fullwidth forms, a
+/// timestamp's `01:02` as `01_02`, control characters as spaces, bidirectional overrides removed.
+/// Ad-tag phrases are compared in this form, the one an AI title has by then (#104).
+pub(crate) fn replace_illegal(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     for (i, &c) in chars.iter().enumerate() {
@@ -99,15 +115,7 @@ pub fn sanitize(text: &str) -> String {
             c => out.push(fullwidth(c).unwrap_or(c)),
         }
     }
-    // A leading dot would hide the file on macOS and Linux.
-    let mut name = unreserved(collapse(&out).trim_start_matches(['.', ' ']).to_owned());
-    cap(&mut name);
-    let name = name.trim_end_matches(['.', ' ']);
-    if name.is_empty() {
-        UNTITLED.to_owned()
-    } else {
-        name.to_owned()
-    }
+    out
 }
 
 /// What the name is about. Structured fields win when the site has them (PRD §6.3).

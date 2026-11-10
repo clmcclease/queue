@@ -40,6 +40,10 @@ pub struct Settings {
         skip_serializing_if = "Option::is_none"
     )]
     pub local_model: Option<crate::models::ModelId>,
+    /// Tag phrases taken out of AI names (N9, #104); the starter list until the user edits it.
+    /// An empty list is kept: it means the user removed every phrase.
+    #[serde(deserialize_with = "or_default")]
+    pub ad_tags: crate::adtags::AdTags,
 }
 
 /// Reads one setting, or its default if it can't be understood (e.g. a format from a newer
@@ -153,6 +157,51 @@ mod tests {
             Settings::load(&path).download_dir,
             Some(PathBuf::from("/x")),
             "unknown keys are ignored"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// N9 (#104): the tag list is remembered as edited, an empty list included; a file from
+    /// before #104, or with a list that isn't one, means the starter list.
+    #[test]
+    fn the_ad_tag_list_is_remembered_and_missing_means_the_defaults() {
+        use crate::adtags::AdTags;
+        let dir = temp("adtags");
+        let path = dir.join(FILE);
+        for tags in [
+            AdTags::new(["Official Video", "Clip"]),
+            AdTags::new(Vec::<String>::new()),
+        ] {
+            let saved = Settings {
+                ad_tags: tags,
+                ..Default::default()
+            };
+            saved.save(&path).unwrap();
+            assert_eq!(Settings::load(&path), saved);
+        }
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains(r#""adTags": []"#)
+        );
+        for file in [
+            &br#"{"format": "audio"}"#[..],
+            br#"{"format": "audio", "adTags": "4K"}"#,
+        ] {
+            fs::write(&path, file).unwrap();
+            let loaded = Settings::load(&path);
+            assert_eq!(loaded.ad_tags, AdTags::default());
+            assert_eq!(
+                loaded.format,
+                crate::download::Format::Audio,
+                "the rest is kept"
+            );
+        }
+        fs::write(&path, br#"{"adTags": ["  (MV) ", "(mv)", "MV", "Lyrics"]}"#).unwrap();
+        assert_eq!(
+            Settings::load(&path).ad_tags.list(),
+            ["(MV)".to_string(), "MV".into(), "Lyrics".into()],
+            "a stored phrase loads exactly as saved (#104 review round 3)"
         );
         fs::remove_dir_all(dir).unwrap();
     }

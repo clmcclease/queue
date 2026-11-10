@@ -4,8 +4,9 @@ import FolderPicker from "./FolderPicker";
 import FormatPicker from "./FormatPicker";
 import TemplatePicker from "./TemplatePicker";
 import ProviderPicker from "./ProviderPicker";
+import AdTagEditor from "./AdTagEditor";
 import type { ModelStatus, Track } from "../models";
-import type { NamingStatus } from "../settings";
+import type { AdTagList, NamingStatus } from "../settings";
 
 interface Props {
   folder: DownloadFolderState;
@@ -18,6 +19,9 @@ interface Props {
   /** The local model's download (#31). */
   models?: ModelStatus | null;
   onModels?: Track;
+  /** The window's newest advertising-tag list (#104), kept while Settings is closed. */
+  adTags?: AdTagList | null;
+  onAdTags?: (reply: AdTagList) => void;
 }
 
 /**
@@ -25,7 +29,7 @@ interface Props {
  * closes it. Later items add their sections here (AI #25/#31/#32,
  * yt-dlp updates #21, notifications #20). Every change is saved by the backend as it's made.
  */
-export default function SettingsPanel({ folder, downloading, onClose, namingStatus, onNamingStatus, models, onModels }: Props) {
+export default function SettingsPanel({ folder, downloading, onClose, namingStatus, onNamingStatus, models, onModels, adTags, onAdTags }: Props) {
   const close = useRef<HTMLButtonElement>(null);
 
   // Focus moves into the panel; App puts it back on the opener once the queue isn't inert.
@@ -98,6 +102,7 @@ export default function SettingsPanel({ folder, downloading, onClose, namingStat
           AI naming
         </h3>
         <ProviderPicker status={namingStatus} onStatus={onNamingStatus} models={models} onModels={onModels} />
+        <AdTagEditor list={adTags} onList={onAdTags} />
       </section>
     </div>
   );
