@@ -25,7 +25,7 @@ export interface ModelStatus {
   /** Rises with every snapshot the backend takes; only a newer one replaces what's shown. */
   rev: number;
   chosen: ModelId;
-  /** Whether the user picked it, rather than the suggestion or the default. */
+  /** Whether the user picked it, rather than the default (the 4B, D-044). */
   picked: boolean;
   suggested: ModelId | null;
   dir: string;

@@ -34,7 +34,7 @@ pub struct Settings {
     pub api_base_url: String,
     #[serde(deserialize_with = "or_default")]
     pub api_model: String,
-    /// The local model the user chose (N7, #31); `None` follows this computer's suggestion.
+    /// The local model the user chose (N7, #31); `None` means the default, the 4B (D-044).
     #[serde(
         deserialize_with = "or_default",
         skip_serializing_if = "Option::is_none"

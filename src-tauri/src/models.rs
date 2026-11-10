@@ -769,9 +769,9 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
-    #[test]
     /// D-044 (#103): only a GPU build with at least 7.5 GiB gets a recommendation, and it's the
     /// 4B; the 2B is never recommended (D-036). Replaces #31's small-model suggestion.
+    #[test]
     fn only_gpu_machines_with_enough_memory_get_the_4b_recommended() {
         let gib = 1024 * 1024 * 1024;
         let four = Some(ModelId::Qwen3_4bInstruct2507);

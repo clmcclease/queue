@@ -662,7 +662,7 @@ struct ModelStatus {
     /// newest, whether it came as an event or a reply (#31 review).
     rev: u64,
     chosen: models::ModelId,
-    /// Whether the user picked it (else it's the suggestion or the default).
+    /// Whether the user picked it (else it's the default, the 4B; D-044).
     picked: bool,
     suggested: Option<models::ModelId>,
     dir: String,
@@ -1891,6 +1891,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use meta::Meta;
+    use queue::Status;
+
     /// D-044 (#103): with nothing saved the model is the 4B on every machine; a saved choice wins.
     #[test]
     fn the_chosen_model_is_the_saved_one_else_the_4b() {
@@ -1911,9 +1915,6 @@ mod tests {
             models::ModelId::Qwen3_4bInstruct2507
         );
     }
-    use super::*;
-    use meta::Meta;
-    use queue::Status;
 
     /// #30(b) review: a model download finishing, or a model switch, asks rows again only when
     /// Local is the provider and that model is the chosen one, so API-named rows aren't resent.
