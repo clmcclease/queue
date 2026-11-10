@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": 1,
+      "url": "https://example.com/watch/queued",
+      "status": { "state": "queued" },
+      "meta": { "title": "A queued video", "channel": "Queue CI", "duration": 61.0, "thumbnail": null, "site": "Generic" },
+      "notice": "Interrupted when Queue closed. Download it again when you're ready.",
+      "name": "A queued video",
+      "name_source": "rules"
+    },
+    {
+      "id": 2,
+      "url": "https://example.com/watch/done",
+      "status": { "state": "done", "path": "Downloads/A finished video.mp4" },
+      "meta": { "title": "A finished video", "channel": "Queue CI", "duration": 245.0, "thumbnail": null, "site": "Generic" },
+      "notice": null,
+      "name": "A finished video",
+      "name_source": "rules"
+    },
+    {
+      "id": 3,
+      "url": "https://example.com/watch/failed",
+      "status": { "state": "failed", "reason": "Unsupported URL" },
+      "meta": null,
+      "notice": null
+    }
+  ]
+}
