@@ -46,7 +46,12 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - STATUS and #103's BACKLOG row updated;
     - #71's issue body updated to carry its BACKLOG list;
     - #103's issue body updated to D-036/D-044.
-- **Next bounded action:** commit, push, open the draft PR, and watch CI; then the tidy commit through its gates.
+- **Committed** as dd72416. **PR #148** is a draft ("Closes #103", no label). Run 42916172974 on dd72416 was green on every job on the first attempt (`bundle` skipped, no `ci:bundle`).
+- **The tidy commit** da743f2 makes exactly the five approved edits: three comments, two test layouts, no behaviour change.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 683 passed / 0 failed / 33 ignored, `npm run build`, `npm test` 625 passed / 0 failed / 13 skipped, `git diff --check`.
+  - `codex-qa review` round 2: **PASS**, no findings (`qa/reports/20261110-154323-review-wGYM.md`).
+  - Pushed together with this handoff.
+- **Next bounded action:** once this push's CI is green, update #71's and #103's issue bodies, then the squash request for PR #148 to the architect; then #18 (D-037).
 
 ## 2026-11-10 (afternoon): #104 merged; #21 started
 - **Architect's ruling (D-028, 2026-11-10 11:55):** the squash merge of PR #144 is approved at head 87c955c (run 42877202995 green on every job; code and tests unchanged since review round 5), merged with `--match-head-commit`. #104 closes; #143 carries the measurement and the bare-tag revisit. Starting #21 is approved (D-037) with a design brief to the architect first; no OpenPGP crate is added until the owner approves the library (D-036). The `local_n6_30b_qa::stalled_health_headers_time_out…` flake gets an `[NFR]` issue on a second occurrence.
