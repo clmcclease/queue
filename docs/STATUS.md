@@ -86,7 +86,32 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - D-042's parts you haven't seen: "Off, precisely", the review cap, `rand`, the round-3 notes.
   - Dependabot and `cargo audit` will flag RUSTSEC-2023-0071 and RUSTSEC-2026-0387; dismissing the alerts is a repo setting.
   - `ytdlp_update_21` adds about 60 s to each `test` job.
-- **Next bounded action:** commit, push, open the draft PR with `ci:bundle`, and watch CI; then the docs handoff and the squash request.
+- **Committed** as f2b43db on `infra/21-ytdlp-update`.
+  - **PR #146** is a draft ("Closes #21", labelled `ci:bundle`).
+  - **Follow-up #145** is filed.
+  - **#21's issue body** now describes D-036 and D-042 and points to #146.
+- **CI run 42894824949 on f2b43db: green on every job, first attempt.** (The run started when the PR opened was cancelled by the label's run, as usual.)
+  - `verify-signatures` and both `ffmpeg` jobs: passed (cached).
+  - `test`: Windows 14 min, macOS 17 min, Linux 11 min. That's about 3–6 min more than PR #144's run (8–11 min), more than `ytdlp_update_21`'s 60 s alone explains; runner variance and the new crates' build are likely, not measured.
+  - `webdriver`: Linux and Windows, 2 min each.
+  - `bundle`: Linux x64 10 min, macOS x64 9 min, Windows x64 12 min, macOS arm64 13 min.
+- **Installer sizes** (GitHub artifact sizes, so zip-compressed), against `main`'s run 42879659716. All are well under D-013's 256 MB; the largest is the AppImage at 181.7 MB.
+
+  | Artifact | Before (bytes) | After (bytes) | Change |
+  |---|---|---|---|
+  | macOS arm64 .dmg | 94,574,680 | 95,275,497 | +0.70 MB |
+  | macOS x64 .dmg | 98,107,272 | 98,895,991 | +0.79 MB |
+  | Windows .msi | 85,713,060 | 86,507,684 | +0.79 MB |
+  | Windows NSIS | 62,877,460 | 63,458,825 | +0.58 MB |
+  | Linux .deb | 108,336,548 | 109,135,548 | +0.80 MB |
+  | Linux .rpm | 108,346,231 | 109,135,690 | +0.79 MB |
+  | Linux AppImage | 180,980,382 | 181,705,374 | +0.72 MB |
+- **Real adoption on Windows or Linux:** not seen.
+  - The `webdriver` logs show only the bundled 2026.08.19 sidecar being installed.
+  - The app doesn't log update activity, and the probe runs for seconds.
+  - This stays a #71 hand check.
+- **Advisory check (unchanged since the owner's approval):** the whole tree was checked on OSV on 2026-11-10; the only hits were `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.5.5 (RUSTSEC-2026-0387), both accepted in D-042.
+- **Next bounded action:** the architect's squash approval for PR #146 once this handoff commit's CI is green; then #103 (D-037).
 
 ## 2026-11-10: #104
 - **#100 part 3 merged** as 0474a58 (PR #142); #100 stays open for the larger-context CI test GGUF.
