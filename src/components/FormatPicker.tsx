@@ -49,12 +49,12 @@ export default function FormatPicker() {
           />
           <span>
             <span className="text-neutral-900 dark:text-neutral-100">{f.label}</span>
-            <span className="block text-xs text-neutral-500 dark:text-neutral-400">{f.detail}</span>
+            <span className="block text-xs text-neutral-600 dark:text-neutral-400">{f.detail}</span>
           </span>
         </label>
       ))}
       {error && (
-        <p role="alert" data-role="format-error" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" data-role="format-error" className="text-xs text-red-700 dark:text-red-400">
           {error}
         </p>
       )}

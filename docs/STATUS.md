@@ -1,8 +1,25 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR B on `infra/18-screenshots`, then A), the last item in D-037's order; #147 after it unless the owner moves it
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR B merged; PR A on `ui/18-design`, merged with `main` after #154), the last item in D-037's order; #147 after it unless the owner moves it
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-10 (night, later): #154 merged; PR A takes `main`
+- **Architect's PR #156 squash ruling (D-028, 2026-11-10):** approved pinned to d21726b after a PR-body refresh; merge commit and single push for PR A pre-approved on docs-only conflicts, identical non-doc diff and green local checks. D-047 gains the merge record and the merge-from-`main` review rule.
+- **PR #156's CI:** run 42951012690 on d21726b, attempt 1, every job green (`bundle` skipped). `test (linux)` job 130295335584 was the first Linux run of Codex's `timeout_154_qa` tests (all passed). CI counts: macOS 687 / 0 / 33, Linux 688 / 0 / 33, Windows 582 / 0 / 27.
+- **#154 merged** as 5cb4da8 (PR #156). `git diff d21726b 5cb4da8` is empty. #154 is closed; #155 is open; the remote branch is deleted. Local `main` was fast-forwarded.
+- **`main`'s run 42953350991 on 5cb4da8:** attempt 1, every job green, including all four bundles (`test (macos)` job 130302884073, `test (linux)` job 130302884049).
+- **PR A's merge from `main`:** `git merge origin/main` as a merge commit; no conflicts (the three docs files auto-merged).
+  - **Non-doc diff unchanged:** `git diff 9c70174 063a263 -- . ':(exclude)docs'` and `git diff origin/main HEAD -- . ':(exclude)docs'` are byte-identical (`cmp`; both SHA-256 `aa985a17…7f40`). So no fresh `codex-qa review` (D-047's merge-from-`main` rule).
+  - **Checks on the merge (macOS arm64):** `cargo fmt --check`; `cargo clippy --locked --all-targets -- -D warnings`; `cargo test --locked --no-fail-fast` **687 passed / 0 failed / 33 ignored**; `npm run build`; `npm test` 663 passed / 0 failed / 13 skipped; `git diff --check`.
+- **Pushed once** (0a48944). **PR A's run 42955958197:** attempt 1, every job green (`bundle` skipped). Artifacts `screenshots-linux` 13827092752, `screenshots-windows` 13826917980.
+- **The ring, measured in pixels (URL bar; Close button in settings):**
+  - **Windows dark:** 1 px `#101010` edge, then 2 px `#f5f5f5`: 16.44:1 on `#171717`, 13.88:1 on the field `#262626`. Same on Settings' Close button. The fix works on WebView2.
+  - **Windows light:** 2 px `#101010` on white (19.03:1). `empty` and `rows` light frames are pixel-identical to run 42940821285; `settings` differs only at the yt-dlp "Last check" line.
+  - **Linux dark:** 2 px `#164783`: 1.93:1 on `#171717`, 1.63:1 on the field. **Linux light:** 2 px `#5d9de9`, 2.81:1 on white. The Linux `empty` and `rows` frames are byte-identical to run 42940821285, so WebKitGTK ignores the dark ring rule and draws the GTK theme's colour.
+- **Architect's ruling (D-028, 2026-11-10; D-045 amended):** option (a), keep WebKitGTK's own ring, recorded as a measured limitation, not a pass. `outline-style: solid` refused. A Linux-only ring of Queue's own is the owner's choice: **#157** (P2, `area:ui`, `accessibility`, M5; after #152, before #150). The 3:1 squash condition is corrected to bind the colour Queue sets. Cost: the queue rows on Linux dark go from Queue's ~7:1 ring to the theme's 1.93:1. One docs-only commit and its push pre-approved.
+- **#71** gains #18's hand checks: Tab-through on Linux (light and dark, recording the theme and ring) and Windows dark, a theme switch while focused, and Linux's dark radios. These include Codex's native checks from `4U2u`.
+- **Next bounded action:** this docs-only commit's run green on every job at attempt 1 (D-047 no re-runs; D-046 for downloads), PR #153's body refreshed, then PR A's squash request to the architect pinned to the new head.
 
 ## 2026-11-10 (night): PR A's macOS failures; #154 first
 - **PR A committed** as 2a1ed62. **Draft PR #153** ("Part of #18").
@@ -45,7 +62,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Linux:** `scripts/test-linux.sh` wasn't run. `chrisbeast` (192.168.4.83) still times out over SSH, so CI's `test (linux)` is the first Linux run of Codex's tests.
 - **`codex-qa review` of #154's final diff: PASS WITH NOTES**, no findings and no missing tests (`qa/reports/20261110-200834-review-2aBA.md`).
 - **Committed and pushed** under the architect's pre-approval (exactly six paths), with a draft PR "Closes #154".
-- **Next bounded action:** #154's CI (every job green on the first attempt; no re-runs), then the squash request to the architect; then PR A's ring fix and its merge from `main`.
+- **Next bounded action (done; superseded by the section above):** #154's CI, the squash request, then PR A's merge from `main`.
 
 ## 2026-11-10 (late): #103 merged; #18
 - **Architect's PR #148 ruling (D-028, 2026-11-10):** the squash was approved pinned to 1fed203, after refreshing the PR body (the tidy commit landed, review round 2, the final run, the squash approval). #18 could start with a design brief first.
@@ -159,9 +176,68 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     | Windows | 20,821 / 21,018 | 35,258 / 35,717 | 38,560 / 38,905 |
 
   - **All four settings frames opened:** each shows the template previews ("Me at the zoo", "jawed - Me at the zoo", "2005-04-23 Me at the zoo") and the ticked "Keep yt-dlp up to date" box with its status line ("yt-dlp 2026.10.26 (updated)"). Linux still shows #152's folder error.
-  - **A note for PR A:** in Linux dark, GTK draws unselected radio buttons as solid white dots. That's the OS's own control rendering under `color-scheme`.
+  - **A note for PR A (corrected by the architect):** in dark, native controls (radios, the scrollbar) are drawn in their light scheme on both OSes, because Queue didn't declare `color-scheme` yet. PR A adds it (D-045), and A's dark frames must show it.
   - **`webdriver` job durations:** Linux 239 s and Windows 141 s, against 168 s and 112 s on `main`'s run 42920549944. That's about +71 s and +29 s for two app sessions per theme.
-- **Next bounded action:** once this handoff's CI is green, refresh PR #151's body and send PR B's squash request to the architect; then PR A's brief items (the surfaces no frame shows).
+- **Architect's PR #151 squash ruling (D-028, 2026-11-10):** approved, pinned to 4a17059, after four PR-body edits (`npm test` 640; the final-head run 42931547839; the radios line; the approval line). The architect read the 12 measurement lines in runs 42929571270 and 42931547839, opened the frames, and ran `npm test` (640 / 0 / 13) and the screenshot tests (15/15) on macOS arm64. D-046's self-service re-run doesn't apply to `main`'s run on this squash, because it changes `build.yml`. Correction: `color-scheme` isn't declared yet, so the light-scheme radios and scrollbar in dark are A's to fix, not OS rendering. A's "before" set is `main`'s push-run artifacts. A's brief gains the `⚙` colour emoji on Windows.
+- **PR B merged** as 9c70174 (PR #151); #18 stays open.
+- **`main`'s run 42934342176 on 9c70174:** green on every job on the first attempt, the four bundles included. Both `webdriver` jobs saved 6 frames each, with no "DARK NOT CAPTURED".
+- **PR A's "before" set** is that run's artifacts: `screenshots-linux` (artifact 13818336412) and `screenshots-windows` (artifact 13818126563). The scratchpad copies are session-only.
+- **PR A in progress (`ui/18-design`, "Part of #18", no `ci:bundle`):**
+  - **Colour (D-045's table):**
+    - `text-neutral-500` → `neutral-600`, `text-red-600` → `red-700` and `text-amber-700` → `amber-800`; the dark shades stay.
+    - Green is gone: Done's "✓ name" and Test connection's pass are neutral. A pass adds an `aria-hidden` ✓ beside the unchanged message.
+    - The duplicate highlight is `neutral-200` / `neutral-800`.
+    - The URL line's `opacity-60` and the AI/rules chip's `neutral-500` are now `neutral-600` / `neutral-400`.
+  - **Focus:** `outline-none`, `focus:border-neutral-500`, `focus-visible:ring-2` and `ring-neutral-400` are removed, so the OS's ring shows. The queue list has `px-1 pb-1` and each row `scroll-my-1`, so the scroll area doesn't clip a focused row's ring on any side.
+  - **Fields:** the URL bar, the API fields, the rename field and the ad-tag fields have `border-neutral-500` in both themes and explicit placeholder colours (`neutral-600` / `neutral-400`).
+  - **Type and controls:** `@theme { --font-sans: system-ui, … }` keeps Tailwind's emoji tail, and `:root { color-scheme: light dark; }`.
+  - **Motion:** one `aria-hidden` spinner on Fetching and Processing rows. It and the two existing transitions stop under `motion-reduce`.
+  - **Empty state:** `<p>Queue is empty.</p>` is unchanged, plus a hint, "Add links above, then press Download all (shortcut).", with `DOWNLOAD_ALL_SHORTCUT`.
+  - **Thumbnails:** a failed thumbnail falls back to the neutral box.
+  - **The ⚙:** a drawn SVG gear in `currentColor` (WebView2 showed a colour emoji).
+  - **Surfaces no CI frame shows**, and how each is covered:
+    - Settings below the fold: the AI naming section (provider, the API setup and Test connection, the model manager, the ad-tag editor);
+    - the AI/rules chip;
+    - the Downloading and Processing rows and the progress bar;
+    - the toast;
+    - the duplicate highlight;
+    - the rename field.
+    - All of them fall under the contrast test (every colour class in `src/` against the table) and the owner's macOS hand check in light and dark.
+  - **Tests:**
+    - `qa/tests/design-18.test.mjs` (9): contrast computed from the pinned `theme.css` (text 4.5:1 across every text surface in each theme, the inverted pair, field borders and the progress fill 3:1); every colour class known; only the exact red and amber status classes; no alpha or opacity except `disabled:`; no focus-ring overrides or `accent-color`; every field's border and placeholder; motion with `motion-reduce`; the spinner's rows; the font, `color-scheme` and no `@font-face`; no `⚙`.
+    - `qa/tests/design-18-ui.test.mjs` (5): the empty hint, the thumbnail fallback, the spinner rows, Done neutral with ✓, Test connection's ✓.
+    - No existing test changed.
+  - **Checks (macOS arm64):** `npm run build`, `npm test` 654 passed / 0 failed / 13 skipped. No Rust changed.
+- **`codex-qa test "#18"`: PASS WITH NOTES**, no functional bugs (`qa/reports/20261110-181949-test-TOG1.md`).
+  - Its one hygiene finding, a blank line at the end of `design-18-ui.test.mjs`, is fixed.
+  - Codex's `qa/tests/design-18-qa.test.mjs` (9 tests) is added, without its STATUS edit. It covers hostile and Unicode text, collision basenames, thumbnail isolation, state transitions, missing progress, badges, notices, focus, and the API timeout's presentation.
+  - Codex also ran `cargo test` (684 / 0 / 33), clippy and fmt on macOS arm64.
+  - Its untested items are native rendering on all three OSes (this PR's CI frames, and the owner's macOS check).
+- **Checks after adding them (macOS arm64):** `npm test` 663 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 1: PASS WITH NOTES**, no findings (`qa/reports/20261110-182913-review-93qa.md`). Codex ran 282 selected tests.
+  - Its remaining checks are native, for this PR's CI frames and the owner's macOS hand check:
+    - focus visible and unclipped on rows and fields in both themes;
+    - dark native controls and live theme switching;
+    - reduced motion stopping the spinner and both transitions;
+    - the surfaces no frame shows.
+- **Architect's PR A commit ruling (D-028, 2026-11-10):** approved after two fixes and a fresh review. Pre-approved on PASS with no findings, as exactly 20 paths (the 19 plus `docs/DECISIONS.md`); 663 / 0 / 13 expected.
+  - **Fix 1, the focus ring:** `pb-1` on the list and `scroll-my-1` on rows. `px-1` only protected the sides, so the scroll area clipped a focused row's ring top and bottom (the last row, and Up/Down past the fold in WebView2).
+  - **Fix 2, the hint:** it now reads "Add links above…", because a single pasted link still needs Enter or +.
+  - Both are tested inside existing tests, and D-045 gains "Build, refined (PR A)".
+  - **The squash request needs:** the 12 after frames beside the before set, with dark per OS, calling out dark native controls, the one-colour gear, neutral Done, Linux's font and the hint; and whether the URL bar's ring shows.
+- **Checks after the fixes (macOS arm64):** `npm run build`, `npm test` 663 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 2: PASS WITH NOTES**, no findings (`qa/reports/20261110-183946-review-tasB.md`). Its notes are native checks: first and last rows past the scroll edge, live theme switching, reduced motion, and the unseen surfaces.
+- **Committed and pushed** under the architect's pre-approval: exactly 20 paths.
+- **PR A committed** as 2a1ed62, with draft PR #153. Its run 42940821285 failed on macOS twice, in #21's timeout test. That's fixed first in #154 (see the 2026-11-10 (night) section, which arrives with the merge from `main`).
+- **PR A's ring fix (the architect, D-028, 2026-11-10; D-045 amended):**
+  - In Windows dark, WebView2's focus ring is `#101010`, 1.06:1 on `neutral-900`, covering a field's border: a regression from removing Queue's ring overrides. `index.css`'s dark media query gains `:focus-visible { outline-color: var(--color-neutral-100); }`: colour only, nothing in light, no style, width or offset. The comment above `color-scheme` now says what's measured.
+  - `design-18.test.mjs` pins it: exactly one ring-colour rule, in the dark query, at 3:1 or better on every dark surface. It still forbids hiding or reshaping the ring.
+  - D-045 gains "Native controls, as measured", and the Colour bullet now reads "sets only its colour, only in dark".
+  - #71's row adds the dark ring in the real Windows app, and Linux's unselected radios in dark: WebKitGTK keeps their white fill, a known limitation.
+  - **Checks (macOS arm64):** `npm run build`; `npm test` 663 passed / 0 failed / 13 skipped (no new test; the existing focus test grew).
+- **`codex-qa review` of the ring fix: PASS WITH NOTES**, no findings (`qa/reports/20261110-201331-review-4U2u.md`); 23/23 design tests. Its notes are native: rendered ring visibility in Windows dark, live theme switching, WKWebView and WebKitGTK focus at scroll edges. These are for this PR's frames and the hand checks.
+- **The ring fix is committed** (pre-approved; exactly 5 paths). It isn't pushed: one push after the merge from `main`.
+- **Next bounded action (done up to the push; see the newest section):** `git merge origin/main` once #154 is in, the full checks including `cargo test`, one push, then PR A's squash request with the ring measured in pixels.
 
 ## 2026-11-10 (evening): #21 merged; #103
 - **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.

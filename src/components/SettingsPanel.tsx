@@ -68,39 +68,39 @@ export default function SettingsPanel({ folder, downloading, onClose, namingStat
           type="button"
           onClick={onClose}
           aria-label="Close settings"
-          className="rounded-md px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          className="rounded-md px-2 py-1 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
         >
           ✕
         </button>
       </div>
       <section aria-labelledby="settings-downloads" className="mt-4">
-        <h3 id="settings-downloads" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        <h3 id="settings-downloads" className="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
           Downloads
         </h3>
         <div className="mt-2 flex">
           <FolderPicker state={folder} label="Download folder" />
         </div>
         {downloading && (
-          <p data-role="folder-note" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          <p data-role="folder-note" className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
             Downloads in progress keep the folder they started in.
           </p>
         )}
         <YtdlpUpdates />
       </section>
       <section aria-labelledby="settings-format" className="mt-6">
-        <h3 id="settings-format" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        <h3 id="settings-format" className="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
           Format
         </h3>
         <FormatPicker />
       </section>
       <section aria-labelledby="settings-naming" className="mt-6">
-        <h3 id="settings-naming" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        <h3 id="settings-naming" className="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
           File names
         </h3>
         <TemplatePicker />
       </section>
       <section aria-labelledby="settings-ai" className="mt-6">
-        <h3 id="settings-ai" className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        <h3 id="settings-ai" className="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
           AI naming
         </h3>
         <ProviderPicker status={namingStatus} onStatus={onNamingStatus} models={models} onModels={onModels} />

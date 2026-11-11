@@ -67,19 +67,19 @@ export default function ProviderPicker({
           />
           <span>
             <span className="text-neutral-900 dark:text-neutral-100">{p.label}</span>
-            <span className="block text-xs text-neutral-500 dark:text-neutral-400">{p.detail}</span>
+            <span className="block text-xs text-neutral-600 dark:text-neutral-400">{p.detail}</span>
             {provider === "api" && p.value === "api" && status?.unavailable === "not_set_up" && (
-              <span data-role="provider-note" className="block text-xs text-amber-700 dark:text-amber-400">
+              <span data-role="provider-note" className="block text-xs text-amber-800 dark:text-amber-400">
                 Not set up yet. Names come from the rules until it is.
               </span>
             )}
             {provider === "api" && p.value === "api" && status?.unavailable === "store_unreachable" && (
-              <span data-role="provider-note" className="block text-xs text-amber-700 dark:text-amber-400">
+              <span data-role="provider-note" className="block text-xs text-amber-800 dark:text-amber-400">
                 Couldn't reach your system's credential store. Names come from the rules for now.
               </span>
             )}
             {provider === "api" && p.value === "api" && status?.unavailable === null && status.store_unreachable && (
-              <span data-role="provider-note" className="block text-xs text-amber-700 dark:text-amber-400">
+              <span data-role="provider-note" className="block text-xs text-amber-800 dark:text-amber-400">
                 Couldn't reach your system's credential store, so the service is asked without a key.
               </span>
             )}
@@ -89,7 +89,7 @@ export default function ProviderPicker({
       {provider === "api" && <ApiSetup onStatus={onStatus} />}
       {provider === "local" && onModels && <ModelManager status={models ?? null} track={onModels} />}
       {error && (
-        <p role="alert" data-role="provider-error" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" data-role="provider-error" className="text-xs text-red-700 dark:text-red-400">
           {error}
         </p>
       )}

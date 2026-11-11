@@ -60,7 +60,7 @@ export default function UrlBar({ onAdd, onAddMany, handle }: Props) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onPaste={paste}
-        className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+        className="min-w-0 flex-1 rounded-md border border-neutral-500 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-600 dark:border-neutral-500 dark:placeholder:text-neutral-400 dark:bg-neutral-800 dark:text-neutral-100"
       />
       <button
         type="submit"

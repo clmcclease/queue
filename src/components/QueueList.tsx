@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { REMOVE_SHORTCUT, SHOW_FILE } from "../platform";
+import { DOWNLOAD_ALL_SHORTCUT, REMOVE_SHORTCUT, SHOW_FILE } from "../platform";
 import { formatDuration, progressText, type QueueItem } from "../queue";
 
 interface Props {
@@ -34,34 +34,59 @@ function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
+/**
+ * The one animation Queue adds (PRD §5's spinner, D-045): a small neutral ring on Fetching and
+ * Processing rows, beside the status text, which says the same. Hidden from screen readers, and
+ * still under `prefers-reduced-motion`.
+ */
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      data-role="spinner"
+      className="mr-1.5 inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-neutral-600 border-t-transparent align-[-1px] motion-reduce:animate-none dark:border-neutral-400 dark:border-t-transparent"
+    />
+  );
+}
+
 function StatusLabel({ item }: { item: QueueItem }) {
   const { status } = item;
   switch (status.state) {
     case "fetching":
-      return <span className="text-neutral-500 dark:text-neutral-400">Fetching info…</span>;
+      return (
+        <span className="text-neutral-600 dark:text-neutral-400">
+          <Spinner />
+          Fetching info…
+        </span>
+      );
     case "queued":
       // E.g. a download cut off when Queue closed (#12); it waits for Download.
       return item.notice ? (
-        <span data-role="notice" className="block whitespace-normal text-amber-700 dark:text-amber-400">
+        <span data-role="notice" className="block whitespace-normal text-amber-800 dark:text-amber-400">
           {item.notice}
         </span>
       ) : null;
     case "downloading":
       return (
-        <span className="text-neutral-500 dark:text-neutral-400">
+        <span className="text-neutral-600 dark:text-neutral-400">
           {progressText(item.progress, item.attempt)}
         </span>
       );
     case "processing":
-      return <span className="text-neutral-500 dark:text-neutral-400">Processing…</span>;
+      return (
+        <span className="text-neutral-600 dark:text-neutral-400">
+          <Spinner />
+          Processing…
+        </span>
+      );
     case "done":
       return (
         <>
-          <span className="text-green-700 dark:text-green-400" title={status.path}>
+          <span className="text-neutral-700 dark:text-neutral-300" title={status.path}>
             ✓ {fileName(status.path)}
           </span>
           {item.notice && (
-            <span data-role="notice" className="block whitespace-normal text-amber-700 dark:text-amber-400">
+            <span data-role="notice" className="block whitespace-normal text-amber-800 dark:text-amber-400">
               {item.notice}
             </span>
           )}
@@ -69,7 +94,7 @@ function StatusLabel({ item }: { item: QueueItem }) {
       );
     case "failed":
       return (
-        <span role="status" className="text-red-600 dark:text-red-400" title={status.reason}>
+        <span role="status" className="text-red-700 dark:text-red-400" title={status.reason}>
           Failed: {status.reason}
         </span>
       );
@@ -121,7 +146,7 @@ function NameField({ item, onRename }: { item: QueueItem; onRename: (id: number,
             e.currentTarget.blur();
           }
         }}
-        className="mt-0.5 w-full rounded border border-neutral-300 bg-white px-1 py-0.5 text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+        className="mt-0.5 w-full rounded border border-neutral-500 bg-white px-1 py-0.5 text-xs text-neutral-900 dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 placeholder:text-neutral-600 dark:placeholder:text-neutral-400"
       />
     );
   }
@@ -129,14 +154,14 @@ function NameField({ item, onRename }: { item: QueueItem; onRename: (id: number,
   // N4 (#25): "AI" when the AI named it; "rules" only when it was asked and didn't answer.
   const tag =
     item.name_source === "ai" ? (
-      <span data-role="name-tag" className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+      <span data-role="name-tag" className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
         AI
       </span>
     ) : item.name_source === "fallback" ? (
       <span
         data-role="name-tag"
         title="AI naming didn't give a usable name, so the rules named this."
-        className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
+        className="ml-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
       >
         rules
       </span>
@@ -165,9 +190,21 @@ function NameField({ item, onRename }: { item: QueueItem; onRename: (id: number,
 
 /** 16:9 thumbnail from the site's CDN; a neutral box while fetching or when there is none. */
 function Thumbnail({ src }: { src: string | null }) {
+  // A CDN link that fails (signed thumbnail links in a restored queue expire) falls back to the
+  // neutral box, never a broken-image icon (D-045).
+  const [failed, setFailed] = useState<string | null>(null);
   return (
     <div className="h-9 w-16 shrink-0 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-800">
-      {src && <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />}
+      {src && failed !== src && (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(src)}
+          className="h-full w-full object-cover"
+        />
+      )}
     </div>
   );
 }
@@ -191,10 +228,17 @@ export default function QueueList({
   // or it would fall to the page when that row goes (#19 QA).
   const leaving = useRef(new Set<number>());
   if (items.length === 0) {
-    return <p className="mt-16 text-center text-sm text-neutral-500 dark:text-neutral-400">Queue is empty.</p>;
+    return (
+      <div className="mt-16 text-center text-sm text-neutral-600 dark:text-neutral-400">
+        <p>Queue is empty.</p>
+        <p data-role="empty-hint" className="mt-1 text-xs">
+          Add links above, then press Download all ({DOWNLOAD_ALL_SHORTCUT}).
+        </p>
+      </div>
+    );
   }
   return (
-    <ul aria-label="Queue" className="mt-4 divide-y divide-neutral-200 dark:divide-neutral-800">
+    <ul aria-label="Queue" className="mt-4 divide-y divide-neutral-200 px-1 pb-1 dark:divide-neutral-800">
       {items.map((item) => (
         <li
           key={item.id}
@@ -238,7 +282,7 @@ export default function QueueList({
           }}
           data-state={item.status.state}
           data-highlight={item.id === highlight ? "" : undefined}
-          className={`flex items-center gap-3 rounded py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-neutral-400 ${item.id === highlight ? "bg-amber-100 dark:bg-amber-900/40" : ""}`}
+          className={`flex scroll-my-1 items-center gap-3 rounded py-2 text-sm transition-colors motion-reduce:transition-none ${item.id === highlight ? "bg-neutral-200 dark:bg-neutral-800" : ""}`}
         >
           <Thumbnail src={item.meta?.thumbnail ?? null} />
           <div className="min-w-0 flex-1">
@@ -249,13 +293,13 @@ export default function QueueList({
             )}
             <NameField item={item} onRename={onRename} />
             {(item.meta?.channel || item.meta?.duration != null) && (
-              <div data-role="byline" className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+              <div data-role="byline" className="truncate text-xs text-neutral-600 dark:text-neutral-400">
                 {[item.meta?.channel, formatDuration(item.meta?.duration)].filter(Boolean).join(" · ")}
               </div>
             )}
             <div
               data-role="url"
-              className={`truncate font-mono text-neutral-800 dark:text-neutral-200 ${item.meta?.title ? "text-xs opacity-60" : ""}`}
+              className={`truncate font-mono ${item.meta?.title ? "text-xs text-neutral-600 dark:text-neutral-400" : "text-neutral-800 dark:text-neutral-200"}`}
               title={item.url}
             >
               {item.url}
@@ -272,7 +316,7 @@ export default function QueueList({
                 aria-valuenow={Math.floor(item.progress.percent)}
                 className="mt-1 h-1 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-800"
               >
-                <div className="h-full bg-neutral-900 transition-[width] dark:bg-neutral-100" style={{ width: `${item.progress.percent}%` }} />
+                <div className="h-full bg-neutral-900 transition-[width] motion-reduce:transition-none dark:bg-neutral-100" style={{ width: `${item.progress.percent}%` }} />
               </div>
             )}
           </div>
@@ -323,7 +367,7 @@ export default function QueueList({
               onClick={() => onRemove(item.id)}
               aria-label="Remove"
               title={`Remove from queue (${REMOVE_SHORTCUT})`}
-              className="shrink-0 rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              className="shrink-0 rounded-md px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             >
               ✕
             </button>

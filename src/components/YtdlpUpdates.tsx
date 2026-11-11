@@ -65,19 +65,19 @@ export default function YtdlpUpdates() {
         />
         <span>
           <span className="text-neutral-900 dark:text-neutral-100">Keep yt-dlp up to date</span>
-          <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+          <span className="block text-xs text-neutral-600 dark:text-neutral-400">
             Checks GitHub at most once a day and uses a new version only after verifying its signature.
           </span>
         </span>
       </label>
       {shown && (
-        <p data-role="ytdlp-status" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p data-role="ytdlp-status" className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
           yt-dlp {shown.version} ({shown.updated ? "updated" : "came with Queue"})
           {checked && ` · Last check ${checked}${shown.lastResult ? `: ${shown.lastResult}` : ""}`}
         </p>
       )}
       {error && (
-        <p role="alert" data-role="ytdlp-error" className="mt-1 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" data-role="ytdlp-error" className="mt-1 text-xs text-red-700 dark:text-red-400">
           {error}
         </p>
       )}
