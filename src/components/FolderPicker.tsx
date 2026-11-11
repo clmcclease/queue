@@ -14,7 +14,7 @@ export default function FolderPicker({ state, label = "Saving to" }: Props) {
   const problem = error ?? folder?.error ?? null;
   return (
     <div className="flex min-w-0 flex-1 flex-col text-xs">
-      <div className="flex min-w-0 items-center gap-2 text-neutral-500 dark:text-neutral-400">
+      <div className="flex min-w-0 items-center gap-2 text-neutral-600 dark:text-neutral-400">
         <span className="shrink-0">{label}</span>
         <span data-role="folder" className="truncate font-mono text-neutral-800 dark:text-neutral-200" title={folder?.path}>
           {folder?.path ?? "…"}
@@ -29,7 +29,7 @@ export default function FolderPicker({ state, label = "Saving to" }: Props) {
         </button>
       </div>
       {problem && (
-        <p role="alert" data-role="folder-error" className="text-red-600 dark:text-red-400">
+        <p role="alert" data-role="folder-error" className="text-red-700 dark:text-red-400">
           {problem}
         </p>
       )}

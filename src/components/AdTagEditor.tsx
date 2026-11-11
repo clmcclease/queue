@@ -144,7 +144,7 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
       <summary className="cursor-pointer text-neutral-900 dark:text-neutral-100">
         Advertising removed from AI names{rows ? ` (${rows.length})` : ""}
       </summary>
-      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
         A phrase is removed only when it fills a whole bracket, like “(Official Video)” or “[4K]”, in any letter case. Press
         Enter or ✓ to save an edit.
       </p>
@@ -161,7 +161,7 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
                 disabled={disabled}
                 onChange={(e) => draft(phrase, e.target.value)}
                 onKeyDown={(e) => onKey(phrase, e)}
-                className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+                className="min-w-0 flex-1 rounded-md border border-neutral-500 bg-transparent px-2 py-1 text-sm dark:border-neutral-500 placeholder:text-neutral-600 dark:placeholder:text-neutral-400"
               />
               {edit !== undefined && (
                 <button
@@ -170,7 +170,7 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
                   data-role="ad-tag-save"
                   disabled={disabled}
                   onClick={() => void save(phrase)}
-                  className="rounded-md px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  className="rounded-md px-2 py-1 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 >
                   ✓
                 </button>
@@ -180,7 +180,7 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
                 aria-label={`Remove ${phrase}`}
                 disabled={disabled}
                 onClick={() => void run(() => removeAdTag(phrase))}
-                className="rounded-md px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                className="rounded-md px-2 py-1 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               >
                 ✕
               </button>
@@ -189,7 +189,7 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
         })}
       </ul>
       {rows?.length === 0 && (
-        <p data-role="ad-tags-empty" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <p data-role="ad-tags-empty" className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
           No phrases: AI names are kept as they are.
         </p>
       )}
@@ -208,7 +208,7 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
           maxLength={AD_TAG_MAX_CHARS}
           disabled={disabled}
           onChange={(e) => setAdding(e.target.value)}
-          className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+          className="min-w-0 flex-1 rounded-md border border-neutral-500 bg-transparent px-2 py-1 text-sm dark:border-neutral-500 placeholder:text-neutral-600 dark:placeholder:text-neutral-400"
         />
         <button
           type="submit"
@@ -223,12 +223,12 @@ export default function AdTagEditor({ list: shared, onList }: Props) {
         data-role="ad-tags-reset"
         disabled={disabled}
         onClick={() => void reset()}
-        className="mt-2 text-xs text-neutral-500 underline hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:text-neutral-100"
+        className="mt-2 text-xs text-neutral-600 underline hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:text-neutral-100"
       >
         Reset to the default list
       </button>
       {error && (
-        <p role="alert" data-role="ad-tags-error" className="mt-1 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" data-role="ad-tags-error" className="mt-1 text-xs text-red-700 dark:text-red-400">
           {error}
         </p>
       )}

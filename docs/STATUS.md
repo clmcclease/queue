@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR B on `infra/18-screenshots`, then A), the last item in D-037's order; #147 after it unless the owner moves it
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR B merged; PR A on `ui/18-design`), the last item in D-037's order; #147 after it unless the owner moves it
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
@@ -116,9 +116,59 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     | Windows | 20,821 / 21,018 | 35,258 / 35,717 | 38,560 / 38,905 |
 
   - **All four settings frames opened:** each shows the template previews ("Me at the zoo", "jawed - Me at the zoo", "2005-04-23 Me at the zoo") and the ticked "Keep yt-dlp up to date" box with its status line ("yt-dlp 2026.10.26 (updated)"). Linux still shows #152's folder error.
-  - **A note for PR A:** in Linux dark, GTK draws unselected radio buttons as solid white dots. That's the OS's own control rendering under `color-scheme`.
+  - **A note for PR A (corrected by the architect):** in dark, native controls (radios, the scrollbar) are drawn in their light scheme on both OSes, because Queue didn't declare `color-scheme` yet. PR A adds it (D-045), and A's dark frames must show it.
   - **`webdriver` job durations:** Linux 239 s and Windows 141 s, against 168 s and 112 s on `main`'s run 42920549944. That's about +71 s and +29 s for two app sessions per theme.
-- **Next bounded action:** once this handoff's CI is green, refresh PR #151's body and send PR B's squash request to the architect; then PR A's brief items (the surfaces no frame shows).
+- **Architect's PR #151 squash ruling (D-028, 2026-11-10):** approved, pinned to 4a17059, after four PR-body edits (`npm test` 640; the final-head run 42931547839; the radios line; the approval line). The architect read the 12 measurement lines in runs 42929571270 and 42931547839, opened the frames, and ran `npm test` (640 / 0 / 13) and the screenshot tests (15/15) on macOS arm64. D-046's self-service re-run doesn't apply to `main`'s run on this squash, because it changes `build.yml`. Correction: `color-scheme` isn't declared yet, so the light-scheme radios and scrollbar in dark are A's to fix, not OS rendering. A's "before" set is `main`'s push-run artifacts. A's brief gains the `⚙` colour emoji on Windows.
+- **PR B merged** as 9c70174 (PR #151); #18 stays open.
+- **`main`'s run 42934342176 on 9c70174:** green on every job on the first attempt, the four bundles included. Both `webdriver` jobs saved 6 frames each, with no "DARK NOT CAPTURED".
+- **PR A's "before" set** is that run's artifacts: `screenshots-linux` (artifact 13818336412) and `screenshots-windows` (artifact 13818126563). The scratchpad copies are session-only.
+- **PR A in progress (`ui/18-design`, "Part of #18", no `ci:bundle`):**
+  - **Colour (D-045's table):**
+    - `text-neutral-500` → `neutral-600`, `text-red-600` → `red-700` and `text-amber-700` → `amber-800`; the dark shades stay.
+    - Green is gone: Done's "✓ name" and Test connection's pass are neutral. A pass adds an `aria-hidden` ✓ beside the unchanged message.
+    - The duplicate highlight is `neutral-200` / `neutral-800`.
+    - The URL line's `opacity-60` and the AI/rules chip's `neutral-500` are now `neutral-600` / `neutral-400`.
+  - **Focus:** `outline-none`, `focus:border-neutral-500`, `focus-visible:ring-2` and `ring-neutral-400` are removed, so the OS's ring shows. The queue list has `px-1 pb-1` and each row `scroll-my-1`, so the scroll area doesn't clip a focused row's ring on any side.
+  - **Fields:** the URL bar, the API fields, the rename field and the ad-tag fields have `border-neutral-500` in both themes and explicit placeholder colours (`neutral-600` / `neutral-400`).
+  - **Type and controls:** `@theme { --font-sans: system-ui, … }` keeps Tailwind's emoji tail, and `:root { color-scheme: light dark; }`.
+  - **Motion:** one `aria-hidden` spinner on Fetching and Processing rows. It and the two existing transitions stop under `motion-reduce`.
+  - **Empty state:** `<p>Queue is empty.</p>` is unchanged, plus a hint, "Add links above, then press Download all (shortcut).", with `DOWNLOAD_ALL_SHORTCUT`.
+  - **Thumbnails:** a failed thumbnail falls back to the neutral box.
+  - **The ⚙:** a drawn SVG gear in `currentColor` (WebView2 showed a colour emoji).
+  - **Surfaces no CI frame shows**, and how each is covered:
+    - Settings below the fold: the AI naming section (provider, the API setup and Test connection, the model manager, the ad-tag editor);
+    - the AI/rules chip;
+    - the Downloading and Processing rows and the progress bar;
+    - the toast;
+    - the duplicate highlight;
+    - the rename field.
+    - All of them fall under the contrast test (every colour class in `src/` against the table) and the owner's macOS hand check in light and dark.
+  - **Tests:**
+    - `qa/tests/design-18.test.mjs` (9): contrast computed from the pinned `theme.css` (text 4.5:1 across every text surface in each theme, the inverted pair, field borders and the progress fill 3:1); every colour class known; only the exact red and amber status classes; no alpha or opacity except `disabled:`; no focus-ring overrides or `accent-color`; every field's border and placeholder; motion with `motion-reduce`; the spinner's rows; the font, `color-scheme` and no `@font-face`; no `⚙`.
+    - `qa/tests/design-18-ui.test.mjs` (5): the empty hint, the thumbnail fallback, the spinner rows, Done neutral with ✓, Test connection's ✓.
+    - No existing test changed.
+  - **Checks (macOS arm64):** `npm run build`, `npm test` 654 passed / 0 failed / 13 skipped. No Rust changed.
+- **`codex-qa test "#18"`: PASS WITH NOTES**, no functional bugs (`qa/reports/20261110-181949-test-TOG1.md`).
+  - Its one hygiene finding, a blank line at the end of `design-18-ui.test.mjs`, is fixed.
+  - Codex's `qa/tests/design-18-qa.test.mjs` (9 tests) is added, without its STATUS edit. It covers hostile and Unicode text, collision basenames, thumbnail isolation, state transitions, missing progress, badges, notices, focus, and the API timeout's presentation.
+  - Codex also ran `cargo test` (684 / 0 / 33), clippy and fmt on macOS arm64.
+  - Its untested items are native rendering on all three OSes (this PR's CI frames, and the owner's macOS check).
+- **Checks after adding them (macOS arm64):** `npm test` 663 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 1: PASS WITH NOTES**, no findings (`qa/reports/20261110-182913-review-93qa.md`). Codex ran 282 selected tests.
+  - Its remaining checks are native, for this PR's CI frames and the owner's macOS hand check:
+    - focus visible and unclipped on rows and fields in both themes;
+    - dark native controls and live theme switching;
+    - reduced motion stopping the spinner and both transitions;
+    - the surfaces no frame shows.
+- **Architect's PR A commit ruling (D-028, 2026-11-10):** approved after two fixes and a fresh review. Pre-approved on PASS with no findings, as exactly 20 paths (the 19 plus `docs/DECISIONS.md`); 663 / 0 / 13 expected.
+  - **Fix 1, the focus ring:** `pb-1` on the list and `scroll-my-1` on rows. `px-1` only protected the sides, so the scroll area clipped a focused row's ring top and bottom (the last row, and Up/Down past the fold in WebView2).
+  - **Fix 2, the hint:** it now reads "Add links above…", because a single pasted link still needs Enter or +.
+  - Both are tested inside existing tests, and D-045 gains "Build, refined (PR A)".
+  - **The squash request needs:** the 12 after frames beside the before set, with dark per OS, calling out dark native controls, the one-colour gear, neutral Done, Linux's font and the hint; and whether the URL bar's ring shows.
+- **Checks after the fixes (macOS arm64):** `npm run build`, `npm test` 663 passed / 0 failed / 13 skipped, `git diff --check`.
+- **`codex-qa review` round 2: PASS WITH NOTES**, no findings (`qa/reports/20261110-183946-review-tasB.md`). Its notes are native checks: first and last rows past the scroll edge, live theme switching, reduced motion, and the unseen surfaces.
+- **Committed and pushed** under the architect's pre-approval: exactly 20 paths.
+- **Next bounded action:** PR A's draft PR, CI with the "after" frames compared with the "before" set (artifacts 13818336412 and 13818126563), then the squash request.
 
 ## 2026-11-10 (evening): #21 merged; #103
 - **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.

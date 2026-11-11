@@ -409,9 +409,14 @@ export default function App() {
             onClick={openSettings}
             aria-label="Settings"
             title={`Settings (${SETTINGS_SHORTCUT})`}
-            className="shrink-0 rounded-md px-2 text-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="shrink-0 rounded-md px-2 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
-            ⚙
+            {/* A drawn gear in the text colour, not "⚙", which WebView2 shows as a colour emoji (D-045). */}
+            <svg aria-hidden="true" data-role="settings-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="6.5" />
+              <circle cx="12" cy="12" r="2.5" />
+              <path d="M18.50 12.00L21.50 12.00M16.60 16.60L18.72 18.72M12.00 18.50L12.00 21.50M7.40 16.60L5.28 18.72M5.50 12.00L2.50 12.00M7.40 7.40L5.28 5.28M12.00 5.50L12.00 2.50M16.60 7.40L18.72 5.28" />
+            </svg>
           </button>
         </div>
         <div className="mt-2 flex items-start gap-3">
@@ -435,12 +440,12 @@ export default function App() {
           </button>
         </div>
         {unsaved && (
-          <p role="alert" data-role="unsaved" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" data-role="unsaved" className="mt-2 text-sm text-red-700 dark:text-red-400">
             {unsaved}
           </p>
         )}
         {disconnected && (
-          <p role="alert" data-role="disconnected" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" data-role="disconnected" className="mt-2 text-sm text-red-700 dark:text-red-400">
             Can't receive download updates ({disconnected}). Restart Queue to download.
           </p>
         )}
@@ -449,7 +454,7 @@ export default function App() {
             <ModelBanner status={models} track={trackModels} onSettings={openSettings} />
           )}
         {error && (
-          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-400">
             {error}
           </p>
         )}

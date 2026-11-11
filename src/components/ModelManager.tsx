@@ -57,7 +57,7 @@ export default function ModelManager({
   }
 
   if (!status || !m) {
-    return error ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p> : null;
+    return error ? <p role="alert" className="text-xs text-red-700 dark:text-red-400">{error}</p> : null;
   }
   const sep = status.dir.includes("\\") ? "\\" : "/";
   const other = status.models.find((x) => x.id !== m.id && x.downloading);
@@ -65,7 +65,7 @@ export default function ModelManager({
   return (
     <div data-role="model-manager" className="mt-2 flex flex-col gap-2 border-l-2 border-neutral-200 pl-3 text-xs dark:border-neutral-700">
       {noRecommendation(status) && (
-        <p data-role="model-note" className="text-neutral-500 dark:text-neutral-400">
+        <p data-role="model-note" className="text-neutral-600 dark:text-neutral-400">
           Local naming may be slow on this computer. The API or Off choices above may suit it better.
         </p>
       )}
@@ -85,11 +85,11 @@ export default function ModelManager({
               <span className="text-neutral-900 dark:text-neutral-100">
                 {x.name}, {gb(x.size)}
               </span>
-              <span data-role="model-quality" className="block text-neutral-500 dark:text-neutral-400">
+              <span data-role="model-quality" className="block text-neutral-600 dark:text-neutral-400">
                 {MODEL_NOTES[x.id]}
               </span>
               {status.suggested === x.id && (
-                <span data-role="model-suggested" className="block text-neutral-500 dark:text-neutral-400">
+                <span data-role="model-suggested" className="block text-neutral-600 dark:text-neutral-400">
                   Recommended for this computer.
                 </span>
               )}
@@ -100,7 +100,7 @@ export default function ModelManager({
       <p data-role="model-state" className="text-neutral-700 dark:text-neutral-300">
         {m.error ?? describe(m)}
       </p>
-      <p className="text-neutral-500 dark:text-neutral-400">
+      <p className="text-neutral-600 dark:text-neutral-400">
         Saved in <span data-role="model-path" className="break-all font-mono">{`${status.dir}${sep}${m.file}`}</span>
         <br />
         From <span data-role="model-source">{m.source}</span>
@@ -138,7 +138,7 @@ export default function ModelManager({
           ))}
       </div>
       {error && (
-        <p role="alert" data-role="model-error" className="text-red-600 dark:text-red-400">
+        <p role="alert" data-role="model-error" className="text-red-700 dark:text-red-400">
           {error}
         </p>
       )}

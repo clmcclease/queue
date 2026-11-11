@@ -88,7 +88,7 @@ export default function ModelBanner({
       <span data-role="model-banner-text">{text}</span>
       {actions}
       {error && (
-        <span role="alert" data-role="model-error" className="ml-2 text-red-600 dark:text-red-400">
+        <span role="alert" data-role="model-error" className="ml-2 text-red-700 dark:text-red-400">
           {error}
         </span>
       )}

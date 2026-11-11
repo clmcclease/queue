@@ -58,16 +58,16 @@ export default function TemplatePicker() {
           <span>
             <span className="text-neutral-900 dark:text-neutral-100">{t.label}</span>
             {previews[t.value] && (
-              <span data-role="preview" className="block font-mono text-xs text-neutral-500 dark:text-neutral-400">
+              <span data-role="preview" className="block font-mono text-xs text-neutral-600 dark:text-neutral-400">
                 {previews[t.value]}
               </span>
             )}
           </span>
         </label>
       ))}
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">Names you've edited by hand stay as they are.</p>
+      <p className="text-xs text-neutral-600 dark:text-neutral-400">Names you've edited by hand stay as they are.</p>
       {error && (
-        <p role="alert" data-role="template-error" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" data-role="template-error" className="text-xs text-red-700 dark:text-red-400">
           {error}
         </p>
       )}

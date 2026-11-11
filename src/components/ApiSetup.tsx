@@ -14,7 +14,7 @@ import {
 } from "../settings";
 
 const field =
-  "w-full rounded border border-neutral-300 bg-white px-1.5 py-1 text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100";
+  "w-full rounded border border-neutral-500 bg-white px-1.5 py-1 text-xs text-neutral-900 dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 placeholder:text-neutral-600 dark:placeholder:text-neutral-400";
 const button =
   "shrink-0 rounded-md border border-neutral-300 px-3 py-1 text-xs text-neutral-800 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-200";
 
@@ -191,7 +191,7 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
           onChange={(e) => setKey(e.target.value)}
         />
       </label>
-      <p data-role="api-key-destination" className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p data-role="api-key-destination" className="text-xs text-neutral-600 dark:text-neutral-400">
         {setup === null
           ? ""
           : unsaved
@@ -219,7 +219,7 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
         >
           Remove key
         </button>
-        <span data-role="api-key-status" className="text-xs text-neutral-500 dark:text-neutral-400">
+        <span data-role="api-key-status" className="text-xs text-neutral-600 dark:text-neutral-400">
           {setup === null ? "" : setup.storeError ?? (setup.keySet ? "Key saved" : "No key")}
         </span>
       </div>
@@ -233,22 +233,29 @@ export default function ApiSetup({ onStatus }: { onStatus?: (status: NamingStatu
         >
           Test connection
         </button>
+        {/* A pass differs from a failure by more than colour (D-045): a check mark, hidden from
+            screen readers, which already hear "Connected.". */}
+        {tested?.ok && (
+          <span aria-hidden="true" data-role="api-test-ok" className="text-xs text-neutral-700 dark:text-neutral-300">
+            ✓
+          </span>
+        )}
         {tested && (
           <span
             data-role="api-test-result"
             role="status"
-            className={`text-xs ${tested.ok ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+            className={`text-xs ${tested.ok ? "text-neutral-700 dark:text-neutral-300" : "text-red-700 dark:text-red-400"}`}
           >
             {tested.message}
           </span>
         )}
       </div>
       {error && (
-        <p role="alert" data-role="api-error" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" data-role="api-error" className="text-xs text-red-700 dark:text-red-400">
           {error}
         </p>
       )}
-      <div data-role="api-sent" className="text-xs text-neutral-500 dark:text-neutral-400">
+      <div data-role="api-sent" className="text-xs text-neutral-600 dark:text-neutral-400">
         What is sent for each item:
         <ul className="ml-4 list-disc">
           {SENT.map((f) => (

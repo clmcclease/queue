@@ -1,5 +1,21 @@
 @import "tailwindcss" source("../src");
 
+/* Native-minimal (#18, D-045): each OS's own UI font first, through Tailwind's --font-sans (no
+   bundled font), keeping Tailwind's emoji fallbacks. Linux gets the desktop's font through
+   system-ui instead of Roboto or Arial. */
+@theme {
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell,
+    "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+    "Noto Color Emoji";
+}
+
+/* Controls the OS draws (radios, checkboxes, selects, scrollbars, the focus ring) follow the
+   light or dark theme, in the OS's own colours; Queue sets no accent-color (D-045). */
+:root {
+  color-scheme: light dark;
+}
+
 /* The page behind the panels, so overscroll never shows a white gap in dark mode. */
 body {
   background: var(--color-white);
