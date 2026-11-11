@@ -105,7 +105,20 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Final review of the follow-up: PASS WITH NOTES**, no findings (`qa/reports/20261110-171125-review-b3Pb.md`). Its missing tests are those D-045 already records as not built. It ran 14 of the 15 tests (the seed test hits EPERM in its sandbox); the `requireDark` case sits inside an existing test.
 - **Checks:** `npm test` 640 passed / 0 failed / 13 skipped, the screenshot tests 15/15, `git diff --check`.
 - **Committed and pushed** under the architect's pre-approval: exactly seven paths.
-- **Next bounded action:** watch run 2 on PR #151, open all four settings frames, refresh the PR body, then PR B's squash request to the architect.
+- **The follow-up was committed** as e302b26.
+- **Run 2: 42929571270 on e302b26**, green on every job on the first attempt (`bundle` skipped).
+  - **All 12 frames were saved**, with dark required and measured on both OSes. Every dark frame read `oklch(0.205 0 none)` and every light frame white.
+  - **Sizes** (bytes, light / dark):
+
+    | OS | empty | settings | rows |
+    |---|---|---|---|
+    | Linux | 27,146 / 27,122 | 54,096 / 54,167 | 49,528 / 49,185 |
+    | Windows | 20,821 / 21,018 | 35,258 / 35,717 | 38,560 / 38,905 |
+
+  - **All four settings frames opened:** each shows the template previews ("Me at the zoo", "jawed - Me at the zoo", "2005-04-23 Me at the zoo") and the ticked "Keep yt-dlp up to date" box with its status line ("yt-dlp 2026.10.26 (updated)"). Linux still shows #152's folder error.
+  - **A note for PR A:** in Linux dark, GTK draws unselected radio buttons as solid white dots. That's the OS's own control rendering under `color-scheme`.
+  - **`webdriver` job durations:** Linux 239 s and Windows 141 s, against 168 s and 112 s on `main`'s run 42920549944. That's about +71 s and +29 s for two app sessions per theme.
+- **Next bounded action:** once this handoff's CI is green, refresh PR #151's body and send PR B's squash request to the architect; then PR A's brief items (the surfaces no frame shows).
 
 ## 2026-11-10 (evening): #21 merged; #103
 - **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.
