@@ -3,6 +3,9 @@
 //! except the one `#[ignore]` live test, run by hand.
 #[path = "support/accept.rs"]
 mod accept;
+#[cfg(unix)]
+#[path = "support/native.rs"]
+mod native;
 
 use pgp::composed::{
     ArmorOptions, DetachedSignature, KeyType, SecretKeyParamsBuilder, SignedPublicKey,
@@ -758,13 +761,20 @@ exit 0
     let started = std::time::Instant::now();
     let result = up::run_version(&path);
     let elapsed = started.elapsed();
-    let pid: i32 = fs::read_to_string(root.join("child.pid"))
+    let pid: u32 = fs::read_to_string(root.join("child.pid"))
         .unwrap()
         .parse()
         .unwrap();
-    let alive = unsafe { libc::kill(pid, 0) == 0 };
+    // #154 (D-047): a killed descendant can still answer signal 0 for a moment before it's
+    // reaped, so wait for it (up to 2 s) as every other descendant test does, rather than
+    // probing once.
+    let gone_by = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !native::process_has_exited(pid) && std::time::Instant::now() < gone_by {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let alive = !native::process_has_exited(pid);
     if alive {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
     }
     fs::remove_dir_all(root).unwrap();
     assert!(result.is_err());

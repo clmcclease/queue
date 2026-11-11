@@ -4,6 +4,49 @@
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
 
+## 2026-11-10 (night): PR A's macOS failures; #154 first
+- **PR A committed** as 2a1ed62. **Draft PR #153** ("Part of #18").
+- **Run 42940821285 on 2a1ed62:**
+  - **Attempt 1: red.** `test (macos)` (job 130262230055) failed in `qa21_real_version_timeout_terminates_a_descendant_holding_stdout` ("timing out must terminate descendants as well as the leader"). `cargo test` stopped at that binary, so the job's later steps didn't run. Every other job was green, and both `webdriver` jobs saved their 12 frames.
+  - **Architect's first ruling (D-028):** one re-run; #154 filed.
+  - **Attempt 2: red again.** `test (macos)` (job 130270304779) failed on the same test and assertion. Every other job was green.
+- **Architect's second ruling (D-028, 2026-11-10; D-047):**
+  - No further re-run, and the re-run allowance is withdrawn.
+  - **The rate is about 1 in 6, not rare.** All 13 macOS jobs used the same image (`macos-26-arm64` 20261102.0473.1). The unfixed test failed 4 of 24 runs on this Mac (the architect's soak).
+  - The first ruling's timing argument was wrong.
+  - **#154 comes first:** a test-only fix, then PR A takes `main` by a merge commit. A rebase is refused (it would need a force-push).
+- **PR A's frames (attempt 1) against the before set:**
+  - **Windows dark:** radios, the checkbox and the scrollbar are dark; the gear is one colour; Done is neutral.
+  - **Linux:** the URL bar's ring shows, and the hint is present. In dark, an unselected radio gains a dark rim but keeps its white fill (WebKitGTK's own drawing): a known limitation, on #71's list.
+  - **Regression found by the architect:** WebView2 draws its focus ring `#101010` in dark, 1.06:1 on `neutral-900`, covering the field border. PR A needs one dark-only `:focus-visible { outline-color: var(--color-neutral-100) }` before its squash (D-045 amended).
+- **#154 in progress (`infra/154-timeout-flake`, from `main` at 9c70174):**
+  - **The fix:** the test waits up to 2 s on `native::process_has_exited` (imported under `cfg(unix)`). The elapsed time is measured before the wait, and the cleanup and the other asserts are kept. Nothing under `src-tauri/src/` changes.
+  - **Fault run:** with `tree.terminate()` removed from `run_version`'s timeout arm, the fixed test failed on the descendant assertion ("timing out must terminate descendants as well as the leader", 62.01 s). `src/` was restored, and `git diff --stat -- src-tauri/src` is empty.
+  - **Soak (macOS arm64):** the fixed binary ran 48 times with `--exact`: two batches of 12 started together and two batches of 12 started 0.4 s apart. **48 passed, 0 failed**, with durations 60.01 s (×39) and 60.02 s (×9). Note that no run finished at 60.00 s, where all four unfixed failures fell, so the soak didn't hit that exact timing. The architect's 24 unfixed runs are the baseline.
+
+- **`codex-qa test "#154"`: FAIL** (`qa/reports/20261110-194202-test-n2Us.md`, macOS 27.2.1 arm64). Codex's own soak of the fixed test was 32/32. Two findings:
+  1. **The shared exit helper misread a macOS zombie.** `tests/support/native.rs`'s `process_has_exited`: signal 0 succeeds for an unreaped zombie, while `proc_pidinfo(PROC_PIDTBSDINFO)` returns 0 with `ESRCH`, so the `SZOMB` check never ran. Codex's deterministic test `exit_probe_accepts_a_zombie_before_its_parent_reaps_it` failed 0 of 1, three times.
+  2. **`local_n6_30b::a_server_that_never_gets_healthy_is_stopped`** saw two fixture launches instead of one under soak load. It isn't caused by #154.
+- **Architect's ruling on the FAIL (D-028, 2026-11-10; D-047 amended):**
+  - Finding 1 is accepted, and the helper fix is approved: on macOS, signal 0 finds the process and `proc_pidinfo` fails with `ESRCH`, so it has exited. Linux and Windows are unchanged.
+  - Codex's `timeout_154_qa.rs` (3 tests) is added, unmodified, without its STATUS edit.
+  - `review` only on the final diff, as after every earlier `test` FAIL.
+  - Finding 2 is filed now as **#155** (`[NFR] Flaky local-server lifecycle tests under load (#30(b))`, P3, after #150), the second sighting in that class.
+  - Commit and draft PR are pre-approved on a clean review, as exactly six paths. The squash is a separate request, with no re-runs.
+- **The helper fix:** two lines in the macOS branch (errno read straight after `proc_pidinfo`), and comments corrected (the doc comment now says Linux and macOS). Codex's zombie test, which failed before, passes after.
+- **Checks on the final diff (macOS arm64):**
+  - `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`.
+  - `cargo test --locked --no-fail-fast`: **687 passed / 0 failed / 33 ignored**.
+  - `git diff --check`; `git diff --stat -- src-tauri/src` empty; no workflow, script or lock change.
+  - `npm test` wasn't re-run (no JS changed).
+  - `timeout_154_qa`: 3/3.
+- **Soak (all started together):** the fixed `ytdlp_update_21` test ×16, 16 passed; the whole `timeout_154_qa` binary ×16, 16 passed; every run 60.01 s; 0 failures.
+- **Not measured:** the optional `local_n6_30b` loop for #155. I ran the test binary directly, without Cargo's environment, so every run failed at once on a missing fixture (`local_n6_30b.rs:31`). It's no measurement, and no count went on #155.
+- **Linux:** `scripts/test-linux.sh` wasn't run. `chrisbeast` (192.168.4.83) still times out over SSH, so CI's `test (linux)` is the first Linux run of Codex's tests.
+- **`codex-qa review` of #154's final diff: PASS WITH NOTES**, no findings and no missing tests (`qa/reports/20261110-200834-review-2aBA.md`).
+- **Committed and pushed** under the architect's pre-approval (exactly six paths), with a draft PR "Closes #154".
+- **Next bounded action:** #154's CI (every job green on the first attempt; no re-runs), then the squash request to the architect; then PR A's ring fix and its merge from `main`.
+
 ## 2026-11-10 (late): #103 merged; #18
 - **Architect's PR #148 ruling (D-028, 2026-11-10):** the squash was approved pinned to 1fed203, after refreshing the PR body (the tidy commit landed, review round 2, the final run, the squash approval). #18 could start with a design brief first.
 - **#103 merged** as 4ea41f4 (PR #148). #103 is closed.
