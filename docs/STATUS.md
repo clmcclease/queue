@@ -168,7 +168,16 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Checks after the fixes (macOS arm64):** `npm run build`, `npm test` 663 passed / 0 failed / 13 skipped, `git diff --check`.
 - **`codex-qa review` round 2: PASS WITH NOTES**, no findings (`qa/reports/20261110-183946-review-tasB.md`). Its notes are native checks: first and last rows past the scroll edge, live theme switching, reduced motion, and the unseen surfaces.
 - **Committed and pushed** under the architect's pre-approval: exactly 20 paths.
-- **Next bounded action:** PR A's draft PR, CI with the "after" frames compared with the "before" set (artifacts 13818336412 and 13818126563), then the squash request.
+- **PR A committed** as 2a1ed62, with draft PR #153. Its run 42940821285 failed on macOS twice, in #21's timeout test. That's fixed first in #154 (see the 2026-11-10 (night) section, which arrives with the merge from `main`).
+- **PR A's ring fix (the architect, D-028, 2026-11-10; D-045 amended):**
+  - In Windows dark, WebView2's focus ring is `#101010`, 1.06:1 on `neutral-900`, covering a field's border: a regression from removing Queue's ring overrides. `index.css`'s dark media query gains `:focus-visible { outline-color: var(--color-neutral-100); }`: colour only, nothing in light, no style, width or offset. The comment above `color-scheme` now says what's measured.
+  - `design-18.test.mjs` pins it: exactly one ring-colour rule, in the dark query, at 3:1 or better on every dark surface. It still forbids hiding or reshaping the ring.
+  - D-045 gains "Native controls, as measured", and the Colour bullet now reads "sets only its colour, only in dark".
+  - #71's row adds the dark ring in the real Windows app, and Linux's unselected radios in dark: WebKitGTK keeps their white fill, a known limitation.
+  - **Checks (macOS arm64):** `npm run build`; `npm test` 663 passed / 0 failed / 13 skipped (no new test; the existing focus test grew).
+- **`codex-qa review` of the ring fix: PASS WITH NOTES**, no findings (`qa/reports/20261110-201331-review-4U2u.md`); 23/23 design tests. Its notes are native: rendered ring visibility in Windows dark, live theme switching, WKWebView and WebKitGTK focus at scroll edges. These are for this PR's frames and the hand checks.
+- **The ring fix is committed** (pre-approved; exactly 5 paths). It isn't pushed: one push after the merge from `main`.
+- **Next bounded action:** `git merge origin/main` once #154 is in, the full checks including `cargo test`, one push, then PR A's squash request with the ring measured in pixels.
 
 ## 2026-11-10 (evening): #21 merged; #103
 - **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.

@@ -10,8 +10,11 @@
     "Noto Color Emoji";
 }
 
-/* Controls the OS draws (radios, checkboxes, selects, scrollbars, the focus ring) follow the
-   light or dark theme, in the OS's own colours; Queue sets no accent-color (D-045). */
+/* Controls the OS draws (radios, checkboxes, selects, scrollbars) follow the light or dark
+   theme in the OS's own colours, where the engine supports it: WebView2 draws them dark;
+   WebKitGTK darkens the scrollbar but keeps a white fill in unselected radios (D-045). Queue sets
+   no accent-color and never hides the focus ring; it sets only the ring's colour, only in dark
+   (below). */
 :root {
   color-scheme: light dark;
 }
@@ -23,5 +26,10 @@ body {
 @media (prefers-color-scheme: dark) {
   body {
     background: var(--color-neutral-900);
+  }
+  /* WebView2 draws its focus ring #101010 in dark: 1.06:1 on neutral-900, covering a field's
+     border. Its colour only, in dark only; style and width stay the engine's (D-045). */
+  :focus-visible {
+    outline-color: var(--color-neutral-100);
   }
 }

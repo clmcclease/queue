@@ -164,7 +164,16 @@ test("#18: no text is dimmed with opacity, and the OS's focus ring is never hidd
   assert.match(queue, /<ul aria-label="Queue" className="[^"]*\bpx-1\b[^"]*\bpb-1\b/, "the list keeps room for the ring at its sides and bottom");
   assert.match(queue, /className=\{`flex scroll-my-1\b/, "a focused row scrolls into view with room for its ring");
   const css = read("src/index.css").replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.doesNotMatch(css, /accent-color|outline:\s*(none|0)/, "index.css sets no accent-color and hides no outline");
+  assert.doesNotMatch(css, /accent-color|outline:\s*(none|0)|outline-(style|width|offset)\s*:/, "index.css sets no accent-color and hides or reshapes no outline");
+  // The one exception (D-045, amended): the ring's colour, in dark only, at 3:1 on every dark
+  // surface, because WebView2 draws it #101010 there.
+  const rings = [...css.matchAll(/outline-color\s*:\s*var\(--color-([a-z]+-\d+)\)/g)];
+  assert.equal(rings.length, 1, "exactly one ring colour rule");
+  const dark = css.match(/@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(dark && /:focus-visible\s*\{\s*outline-color\s*:\s*var\(--color-neutral-100\);\s*\}/.test(dark[1]), "it sits in the dark media query, on :focus-visible");
+  for (const bg of SURFACES.dark) {
+    assert.ok(contrast(rings[0][1], bg) >= 3, `the dark ring on ${bg} is ${contrast(rings[0][1], bg).toFixed(2)}:1`);
+  }
   assert.deepEqual(problems, []);
 });
 
