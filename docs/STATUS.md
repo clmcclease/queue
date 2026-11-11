@@ -12,7 +12,14 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **PR A's merge from `main`:** `git merge origin/main` as a merge commit; no conflicts (the three docs files auto-merged).
   - **Non-doc diff unchanged:** `git diff 9c70174 063a263 -- . ':(exclude)docs'` and `git diff origin/main HEAD -- . ':(exclude)docs'` are byte-identical (`cmp`; both SHA-256 `aa985a17…7f40`). So no fresh `codex-qa review` (D-047's merge-from-`main` rule).
   - **Checks on the merge (macOS arm64):** `cargo fmt --check`; `cargo clippy --locked --all-targets -- -D warnings`; `cargo test --locked --no-fail-fast` **687 passed / 0 failed / 33 ignored**; `npm run build`; `npm test` 663 passed / 0 failed / 13 skipped; `git diff --check`.
-- **Next bounded action:** push PR A once (`ui/18-design`), its CI green on every job on attempt 1 (no re-runs, D-047), then PR A's squash request to the architect: the 12 after frames beside the before set (dark per OS), the ring measured in pixels in the Windows and Linux dark frames (≥3:1 on the adjacent surface), light frames unchanged, every changed test named, and Codex's three native checks from `4U2u` added to #71.
+- **Pushed once** (0a48944). **PR A's run 42955958197:** attempt 1, every job green (`bundle` skipped). Artifacts `screenshots-linux` 13827092752, `screenshots-windows` 13826917980.
+- **The ring, measured in pixels (URL bar; Close button in settings):**
+  - **Windows dark:** 1 px `#101010` edge, then 2 px `#f5f5f5`: 16.44:1 on `#171717`, 13.88:1 on the field `#262626`. Same on Settings' Close button. The fix works on WebView2.
+  - **Windows light:** 2 px `#101010` on white (19.03:1). `empty` and `rows` light frames are pixel-identical to run 42940821285; `settings` differs only at the yt-dlp "Last check" line.
+  - **Linux dark:** 2 px `#164783`: 1.93:1 on `#171717`, 1.63:1 on the field. **Linux light:** 2 px `#5d9de9`, 2.81:1 on white. The Linux `empty` and `rows` frames are byte-identical to run 42940821285, so WebKitGTK ignores the dark ring rule and draws the GTK theme's colour.
+- **Architect's ruling (D-028, 2026-11-10; D-045 amended):** option (a), keep WebKitGTK's own ring, recorded as a measured limitation, not a pass. `outline-style: solid` refused. A Linux-only ring of Queue's own is the owner's choice: **#157** (P2, `area:ui`, `accessibility`, M5; after #152, before #150). The 3:1 squash condition is corrected to bind the colour Queue sets. Cost: the queue rows on Linux dark go from Queue's ~7:1 ring to the theme's 1.93:1. One docs-only commit and its push pre-approved.
+- **#71** gains #18's hand checks: Tab-through on Linux (light and dark, recording the theme and ring) and Windows dark, a theme switch while focused, and Linux's dark radios. These include Codex's native checks from `4U2u`.
+- **Next bounded action:** this docs-only commit's run green on every job at attempt 1 (D-047 no re-runs; D-046 for downloads), PR #153's body refreshed, then PR A's squash request to the architect pinned to the new head.
 
 ## 2026-11-10 (night): PR A's macOS failures; #154 first
 - **PR A committed** as 2a1ed62. **Draft PR #153** ("Part of #18").
