@@ -1,8 +1,35 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR B merged; PR A on `ui/18-design`, merged with `main` after #154), the last item in D-037's order; #147 after it unless the owner moves it
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR A and PR B merged; open for the owner's macOS hand check), the last item in D-037's order; #147 next unless the owner moves it
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-10 (night, last): #18's PR A merged
+- **Architect's PR #153 squash ruling (D-028, 2026-11-10):** approved pinned to b1cf069 after the approval line in the PR body was replaced. This docs-only handoff PR is pre-approved (commit, draft PR and squash), with no `codex-qa review`, on a green run at attempt 1. D-045 gains "PR A merged".
+  - It checked: heads, scope and MERGEABLE/CLEAN. Run 42958540560 was attempt 1, all eight jobs green. Counts from the logs: `cargo test` macOS 687 / 0 / 33, Linux 688 / 0 / 33, Windows 582 / 0 / 27; `npm test` 676 on each OS, 0 failed (Windows skips 70, as on `main`). All 23 design tests ran on all three. All four QA reports (`TOG1`, `93qa`, `tasB`, `4U2u`) are PASS WITH NOTES with no findings. No closing keyword for #18.
+- **#18 PR A merged** as 5a68995 (PR #153). `git diff b1cf069 5a68995` is empty. #18 and #157 are open; the remote branch is deleted; local `main` was fast-forwarded.
+- **`main`'s run 42960644725 on 5a68995:** attempt 1, every job green, including all four bundles (`test (macos)` job 130326378171, `test (linux)` 130326378147, `test (windows)` 130326378187).
+- **Before that, on PR A (see the section below):** Linux's ring was measured at 2.81:1 light and 1.93:1 dark with Adwaita, recorded in D-045 and filed as #157 (the owner's choice). #71 gains #18's Tab-through checks.
+- **The owner's morning list:**
+  - **macOS hand check, light and dark (closes #18):**
+    - Tab through the URL bar, buttons, queue rows and Settings; the ring is visible and unclipped, including the last row past the fold.
+    - In dark, note whether the ring is your accent colour or near-white.
+    - Native controls are dark in dark, and the theme switches live.
+    - Reduce Motion stops the spinner and both transitions.
+    - Check the surfaces no frame shows: lower Settings, the AI/rules chip, progress, the toast, the duplicate highlight and the rename field. Also the gear's look, the 4 px inset and the hint's glyphs.
+  - **#157:** choose Linux's focus ring (the theme's, or a neutral one of Queue's own) before the release.
+  - **Not yet seen by you:** D-041 to D-047. That includes D-045 with its amendments, D-046, D-047 with the merge-from-`main` review rule, and the architect's corrected 3:1 condition (it binds the colours Queue sets).
+  - **#71:** the Windows and Linux hand checks are still open. The Linux box (`chrisbeast`, 192.168.4.83) is still down.
+  - **#149:** the icon gates the release and needs your artwork.
+  - **#147:** decide release gating for the seven advisories.
+  - **Other open items:**
+    - Hand checks for #104, #21 (the first launch downloads about 37 MB) and #103.
+    - Dependabot alert dismissals (a repo setting).
+    - A `P3` label, if you want one.
+    - Optionally, editing the Codex QA prompt to use `process_has_exited`.
+    - Old QA worktrees under `/var/folders/9n/d_r0cy3d3wd4gx1c3brwl7t00000gn/T/` (queue-qa-*), then `git worktree prune`.
+  - **The QA reports are local and gitignored.** They exist only on this Mac.
+- **Next bounded action:** the owner's morning list above; then #147, with a brief to the architect before any lock change.
 
 ## 2026-11-10 (night, later): #154 merged; PR A takes `main`
 - **Architect's PR #156 squash ruling (D-028, 2026-11-10):** approved pinned to d21726b after a PR-body refresh; merge commit and single push for PR A pre-approved on docs-only conflicts, identical non-doc diff and green local checks. D-047 gains the merge record and the merge-from-`main` review rule.
@@ -19,7 +46,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **Linux dark:** 2 px `#164783`: 1.93:1 on `#171717`, 1.63:1 on the field. **Linux light:** 2 px `#5d9de9`, 2.81:1 on white. The Linux `empty` and `rows` frames are byte-identical to run 42940821285, so WebKitGTK ignores the dark ring rule and draws the GTK theme's colour.
 - **Architect's ruling (D-028, 2026-11-10; D-045 amended):** option (a), keep WebKitGTK's own ring, recorded as a measured limitation, not a pass. `outline-style: solid` refused. A Linux-only ring of Queue's own is the owner's choice: **#157** (P2, `area:ui`, `accessibility`, M5; after #152, before #150). The 3:1 squash condition is corrected to bind the colour Queue sets. Cost: the queue rows on Linux dark go from Queue's ~7:1 ring to the theme's 1.93:1. One docs-only commit and its push pre-approved.
 - **#71** gains #18's hand checks: Tab-through on Linux (light and dark, recording the theme and ring) and Windows dark, a theme switch while focused, and Linux's dark radios. These include Codex's native checks from `4U2u`.
-- **Next bounded action:** this docs-only commit's run green on every job at attempt 1 (D-047 no re-runs; D-046 for downloads), PR #153's body refreshed, then PR A's squash request to the architect pinned to the new head.
+- **Next bounded action (done; see the newest section):** this docs-only commit's run, PR #153's body, then PR A's squash request.
 
 ## 2026-11-10 (night): PR A's macOS failures; #154 first
 - **PR A committed** as 2a1ed62. **Draft PR #153** ("Part of #18").
