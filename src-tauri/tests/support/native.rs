@@ -34,7 +34,7 @@ pub fn executable() -> &'static PathBuf {
     })
 }
 
-/// Whether `pid` is gone (or, on Linux, an unreaped zombie, which has exited too).
+/// Whether `pid` is gone (or, on Linux and macOS, an unreaped zombie, which has exited too).
 pub fn process_has_exited(pid: u32) -> bool {
     #[cfg(unix)]
     {
@@ -57,7 +57,10 @@ pub fn process_has_exited(pid: u32) -> bool {
         }
         #[cfg(target_os = "macos")]
         {
-            // Likewise until launchd reaps it (#67: a killed orphan is briefly a zombie).
+            // Likewise until its parent (or launchd) reaps it (#67: a killed orphan is briefly a
+            // zombie). A zombie has no BSD info here: signal 0 still finds it, but proc_pidinfo
+            // fails with ESRCH (#154 QA, D-047). ESRCH also covers a reap between the two calls;
+            // either way the process has exited. Any other failure still means "not exited".
             // SAFETY: a correctly sized output struct for PROC_PIDTBSDINFO.
             unsafe {
                 let mut info: libc::proc_bsdinfo = std::mem::zeroed();
@@ -69,8 +72,12 @@ pub fn process_has_exited(pid: u32) -> bool {
                     (&raw mut info).cast(),
                     size,
                 );
+                let errno = std::io::Error::last_os_error().raw_os_error();
                 if got == size {
                     return info.pbi_status == libc::SZOMB;
+                }
+                if got <= 0 && errno == Some(libc::ESRCH) {
+                    return true;
                 }
             }
         }
