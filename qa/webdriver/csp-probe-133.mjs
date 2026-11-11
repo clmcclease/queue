@@ -28,7 +28,7 @@ export const CHECKS = [
   "IPC invoke(queue_list)",
 ];
 
-const PORT = 4444; // tauri-driver's default; it runs the native driver on 4445.
+export const PORT = 4444; // tauri-driver's default; it runs the native driver on 4445.
 
 // The WebDriver "execute async" body: run the probe unchanged, capture the rows it hands to
 // console.table and the lines it logs, and return them with its PASS/FAIL verdict.
@@ -76,11 +76,11 @@ function parseArgs(argv) {
   return opts;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // One WebDriver request. Every request has a deadline, so a stalled driver can't hold the run
 // (or its cleanup) past it (Codex's test 20261109-095754-test-EjdQ).
-async function wd(method, path, body, ms = 30_000) {
+export async function wd(method, path, body, ms = 30_000) {
   const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method,
     headers: body ? { "content-type": "application/json" } : {},
@@ -96,7 +96,7 @@ async function wd(method, path, body, ms = 30_000) {
   return json.value;
 }
 
-async function until(what, ms, fn) {
+export async function until(what, ms, fn) {
   const end = Date.now() + ms;
   let last;
   while (Date.now() < end) {

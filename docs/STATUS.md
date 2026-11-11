@@ -1,8 +1,124 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #103 (branch `naming/103-model-picker`), then #18 (D-037)
+**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR B on `infra/18-screenshots`, then A), the last item in D-037's order; #147 after it unless the owner moves it
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-10 (late): #103 merged; #18
+- **Architect's PR #148 ruling (D-028, 2026-11-10):** the squash was approved pinned to 1fed203, after refreshing the PR body (the tidy commit landed, review round 2, the final run, the squash approval). #18 could start with a design brief first.
+- **#103 merged** as 4ea41f4 (PR #148). #103 is closed.
+- **`main`'s run 42920549944 on 4ea41f4:**
+  - **Attempt 1: red.** Every job passed except `bundle (macos-x64)` (job 130200084118). Its step "Install sidecars, check yt-dlp sees them and llama-server loads" failed with `fetch failed` / `read ETIMEDOUT`, 70 s after starting the pinned `yt-dlp_macos` download. `bundle (macos-arm64)` fetched the same asset on the same image 4 s earlier.
+  - #103 changed no workflow, script, manifest or lock file.
+  - **Architect's ruling (D-028, 2026-11-10; D-046):** one re-run with `gh run rerun 42920549944 --failed`. Nothing squashes into `main` until 4ea41f4 has all four bundles green. The second occurrence of this class (the first: deno HTTP 500, run 42667500335 attempt 1) gets an issue: **#150** (P3, after #147).
+  - **Attempt 2 (re-run of the failed job only): green.** `bundle (macos-x64)` passed as job 130207780937, so all four bundles on 4ea41f4 are green across the two attempts. The run's overall conclusion is success at attempt 2.
+- **Architect's #18 ruling (D-028, 2026-11-10; D-045):**
+  - **Approved:** the native-minimal proposal (red and amber stay as status, green drops, the highlight goes neutral once AA passes), the font stack via `--font-sans` with `color-scheme`, the screenshot evidence, the icon split into #149, and two PRs (B before A).
+  - **Refused:** a custom focus outline (the OS's ring stays; four existing overrides are removed) and "nothing new animates" (the PRD asks for a spinner).
+  - **Corrections to my brief:**
+    - Tailwind already sets a system font stack; only Linux misses the desktop font.
+    - Existing tests do change (`scaffold.test.mjs`, `webdriver-133.test.mjs`, `settings-folder-note-d030.test.mjs`).
+    - AA already fails on the placeholder, the URL line's `opacity-60` and the AI/rules chip.
+    - Native controls carry the OS's colour.
+  - **Conditions:** PR B and PR A each have their own list in the ruling. The squash of A needs the before and after PNGs, dark recorded per OS, and every changed test named.
+- **PR B in progress (`infra/18-screenshots`, "Part of #18", no `ci:bundle`):**
+  - `qa/webdriver/screenshots-18.mjs` reuses the probe's `wd`, `until`, `sleep` and `PORT`, which are now exported. The probe's behaviour, command lines and tests are unchanged.
+  - Frames: `empty` and `settings` from a fresh queue, then `rows` from the committed `qa/webdriver/queue-18.json` (Queued with a notice, Done, Failed; no thumbnail URL).
+  - The seed refuses to write unless `GITHUB_ACTIONS=true`.
+  - Each capture measures `prefers-color-scheme` and the body background and names the file by the scheme it measured. It checks the expected text, the PNG bytes and a minimum size.
+  - A light run that isn't light fails. A dark run that sees light saves nothing and writes "DARK NOT CAPTURED" to the step summary, unless `--require-dark` is given.
+  - **CI:** the `webdriver` job gets light screenshots, then the OS theme set to dark (`gtk-application-prefer-dark-theme=1` and `GTK_THEME=Adwaita:dark` on Linux; HKCU `AppsUseLightTheme=0` on Windows), then dark screenshots, then an upload of `screenshots-<os>` with the already-pinned `upload-artifact` SHA and `if: always()`. The new steps sit before the Windows diagnostics step, which stays last. No `continue-on-error`.
+  - **Tests:** `qa/tests/screenshots-18.test.mjs` (8: arguments, queue.json paths, the seed's refusal, the fixture, naming, the dark verdict, PNG checks, the workflow contract) and `src-tauri/tests/screenshots_fixture_18.rs` (the fixture loads through `Queue::from_json`).
+- **Filed:** #149 (`[NFR] App icon: a dodo with a list (D-036)`, P0, M5).
+- **Docs:** D-045; BACKLOG (#103 done, #18's design, #149's row).
+- **PR B checks (macOS arm64):** fmt, clippy `-D warnings`, `cargo test --no-fail-fast` 684 passed / 0 failed / 33 ignored, `npm run build`, `npm test` 633 passed / 0 failed / 13 skipped, actionlint (with shellcheck), `git diff --check`. The screenshots themselves run only in CI.
+- **`codex-qa review` round 1 of PR B: FAIL** (`qa/reports/20261110-162856-review-yjgW.md`), two medium findings, both fixed:
+  - the second tauri-driver could start before the first had released ports 4444/4445. Now one driver serves both sessions, and stopping it awaits its exit (10 s limit, `exited()`).
+  - a partly dark run could pass silently when only some frames reported light. Now `shoot()` collects every skipped frame and writes one "DARK NOT CAPTURED on <os> for <frames>" line.
+  - Also from its missing tests: the rows frame now waits for all three rows' text (the queued title and its notice, the finished title, the failure reason). The seeded queue.json is removed even when rows fails.
+  - Tests: `screenshots-18.test.mjs` +4 (12): the awaited exit, partial-dark reporting, `--require-dark` with cleanup, and the session/frame order with the rows text.
+- **`codex-qa review` round 2 of PR B: PASS WITH NOTES**, no findings (`qa/reports/20261110-163323-review-Cpic.md`).
+  - Its missing tests: the CLI end to end against mocked WebDriver responses (two sessions on one driver, seed cleanup, awaited shutdown); the real capture path rejecting a bad PNG and writing nothing for a skipped dark frame; and session create/delete failures. These are listed for the commit request.
+  - Codex counted 11 screenshot tests because its sandbox couldn't run the seed test (EPERM); there are 12, all passing here.
+- **Docs:** D-046; #150's BACKLOG row.
+- **PR B's conditions from the architect's #18 design ruling, verbatim, each checked against this diff:**
+  1. A separate script, e.g. `qa/webdriver/screenshots-18.mjs`, in separate steps after the CSP probe. The probe's verdict, its exact command lines and its tests stay unchanged; share the session helpers by exporting or extracting them. — *Met: four `export`s only; `webdriver-133` tests unchanged and passing.*
+  2. Frames per theme: `empty` and `settings` are required. `rows` is the target, from a committed `queue.json` fixture with one Queued row carrying a notice, one Done and one Failed. No Fetching row, and no real CDN thumbnail: use a `data:` image or none. Two CI attempts at most for `rows`; if it still fails, drop it and add rows to #71. — *Met (no thumbnail); the attempt limit applies in CI.*
+  3. The seed must never reach a real queue. The script refuses to write `queue.json` unless `GITHUB_ACTIONS=true`, and a unit test proves the refusal. — *Met.*
+  4. Dark is measured, never assumed. Before each capture, log `matchMedia('(prefers-color-scheme: dark)').matches` and the body's computed background, and name the file by the measured scheme. — *Met.*
+  5. Force dark only through the OS. Linux: `GTK_THEME=Adwaita:dark` and/or `gtk-application-prefer-dark-theme=1` in the runner's `~/.config/gtk-3.0/settings.ini`. Windows: HKCU `AppsUseLightTheme=0`. No override in Queue's code, and no CDP media emulation. Two CI attempts per OS. Where dark is proven, make it required with a flag; where it isn't, write an explicit "DARK NOT CAPTURED" line to the step summary and add that OS's dark look to #71. No `continue-on-error`. — *Met; `--require-dark` exists and is switched on per OS after run 1 (follow-up commit).*
+  6. A light capture that fails, fails the step. Before saving, assert the expected text is in the DOM, the PNG magic bytes, and a minimum size. — *Met; the settings text check is strengthened in the follow-up (the architect's commit ruling).*
+  7. Upload with the already-pinned `actions/upload-artifact` SHA, `if: always()`. — *Met.*
+  8. Tests: a CI contract test and unit tests for the pure parts. — *Met.*
+  9. Docs in this PR: the PR #148 merge record and `main`'s run 42920549944 result, D-045, the BACKLOG rows and #18's issue body. — *Met; the run finished green on attempt 2 (attempt 1 red, D-046).*
+  10. Gate: the usual local checks plus actionlint, then `codex-qa review`. `test "#18"` runs once, on A. — *Met.*
+- **Architect's PR B commit ruling (D-028, 2026-11-10):**
+  - **Approved:** one commit of exactly these 9 paths and a draft PR ("Part of #18", no label).
+  - **Run 42920549944:** red on attempt 1, green on attempt 2 (D-046).
+  - **`npm test` after the fix:** 637 passed / 0 failed / 13 skipped.
+  - **Before the squash request,** one follow-up commit with its own `codex-qa review` and approval:
+    - settled frames: `settings` waits on `[data-role="settings"]` and text from its loaded sections, read with `textContent` and not the page behind; `empty` and `rows` wait for the banner's final sentence;
+    - `capture`'s own test with an injected `wd`;
+    - `--require-dark` per OS where run 1 shows all three dark frames, otherwise #71;
+    - `MIN_PNG_BYTES` not lowered without measured sizes;
+    - first-run fixes in the same commit;
+    - D-045's "Evidence, refined" bullet.
+  - **Accepted as not built:** the CLI end to end against a mocked WebDriver (the `webdriver` job is that on every PR), and session create/delete failure tests.
+- **PR B committed** as 9aa9535 (the 9 paths). **Draft PR #151** ("Part of #18", no label).
+- **Run 1: 42925870201 on 9aa9535**, green on every job on the first attempt (`bundle` skipped).
+  - Dark took on both OSes: every dark frame measured `prefers-color-scheme` dark with the body at `oklch(0.205 0 none)`; light frames measured white.
+  - Sizes, in bytes:
+
+    | OS | empty light / dark | settings light / dark | rows light / dark |
+    |---|---|---|---|
+    | Linux | 27,146 / 27,122 | 54,014 / 54,044 | 49,528 / 49,185 |
+    | Windows | 20,821 / 21,018 | 35,338 / 35,779 | 38,560 / 38,905 |
+
+  - What the images show:
+    - The naming banner, with its "…from huggingface.co…" sentence and the D-044 caveat, is present on CI.
+    - On Linux the folder line reads "Couldn't find your Downloads folder: unknown path": the runner has no XDG Downloads folder. That's an environment quirk, not this PR.
+    - **Settings shows "yt-dlp 2026.10.26 (updated)" on both Linux and Windows:** #21's updater adopted a verified update on both runners during the job, in a debug unbundled build. No download was made with the updated copy and it isn't from an installer, so #71's #21 check stands; this is partial evidence only (corrected by the architect: Linux shows it too).
+- **The follow-up commit (uncommitted):**
+  - `FRAMES` gives each frame a selector and texts, read with `textContent`:
+    - `settings` waits inside `[data-role="settings"]` on "Keep yt-dlp up to date", the template preview "jawed - Me at the zoo" (over IPC) and the model manager's "Saved in";
+    - `empty` and `rows` also wait for "from huggingface.co".
+  - `capture` takes injectable `wd`, `write`, `report` and `platform`.
+  - `--require-dark` is on both OSes' dark steps.
+  - D-045 gains "Evidence, refined".
+  - README's CI paragraph covers the artifacts and dark.
+  - `MIN_PNG_BYTES` is unchanged (smallest frame 20,821 bytes).
+  - Tests: `screenshots-18.test.mjs` +3 (15): the settings text can't come from the page behind; `capture` skips dark without writing and throws on a light mismatch; a bad PNG writes nothing and a good one is named by the measured scheme. The contract now requires `--require-dark` on both dark steps.
+- **Checks on the follow-up (macOS arm64):** `npm test` 640 passed / 0 failed / 13 skipped, `npm run build`, actionlint with shellcheck, `git diff --check`. No Rust changed (684 / 0 / 33 stands).
+- **`codex-qa review` of the follow-up: PASS WITH NOTES**, no findings (`qa/reports/20261110-170117-review-gb7w.md`).
+  - Its missing tests, listed for the commit request:
+    - text behind an absent or incomplete panel can't trigger a capture;
+    - a content-wait timeout takes no screenshot and writes nothing;
+    - `capture` with `requireDark` on a light page rejects without a screenshot.
+  - It ran 14 of the 15 tests; its sandbox can't create the seed test's temp folder.
+- **Architect's follow-up ruling (D-028, 2026-11-10):**
+  - **The commit:** approved after one more test and a fresh review, then pre-approved as exactly seven paths: the six plus `docs/BACKLOG.md`.
+  - **Tests:** the `requireDark` rejection inside the real `capture` is added (in the "capture writes nothing…" test). The absent-panel and content-wait-timeout cases are recorded as not built (D-045).
+  - **#152 filed** (`[D1] Linux without XDG user dirs: use ~/Downloads instead of an error`, P2, after #147 and before #150). It's a real defect: Tauri's `download_dir()` reads only `user-dirs.dirs` on Linux, and downloads refuse without it.
+  - **#71:** gets a comment with the CI adoption as partial evidence.
+  - **The diff before this change was +156 / −39.**
+  - **For PR A:** name the changed surfaces no frame shows (the lower half of Settings, the AI/rules chip), and give them the contrast test and hand checks, or a frame in A's first commit.
+- **Final review of the follow-up: PASS WITH NOTES**, no findings (`qa/reports/20261110-171125-review-b3Pb.md`). Its missing tests are those D-045 already records as not built. It ran 14 of the 15 tests (the seed test hits EPERM in its sandbox); the `requireDark` case sits inside an existing test.
+- **Checks:** `npm test` 640 passed / 0 failed / 13 skipped, the screenshot tests 15/15, `git diff --check`.
+- **Committed and pushed** under the architect's pre-approval: exactly seven paths.
+- **The follow-up was committed** as e302b26.
+- **Run 2: 42929571270 on e302b26**, green on every job on the first attempt (`bundle` skipped).
+  - **All 12 frames were saved**, with dark required and measured on both OSes. Every dark frame read `oklch(0.205 0 none)` and every light frame white.
+  - **Sizes** (bytes, light / dark):
+
+    | OS | empty | settings | rows |
+    |---|---|---|---|
+    | Linux | 27,146 / 27,122 | 54,096 / 54,167 | 49,528 / 49,185 |
+    | Windows | 20,821 / 21,018 | 35,258 / 35,717 | 38,560 / 38,905 |
+
+  - **All four settings frames opened:** each shows the template previews ("Me at the zoo", "jawed - Me at the zoo", "2005-04-23 Me at the zoo") and the ticked "Keep yt-dlp up to date" box with its status line ("yt-dlp 2026.10.26 (updated)"). Linux still shows #152's folder error.
+  - **A note for PR A:** in Linux dark, GTK draws unselected radio buttons as solid white dots. That's the OS's own control rendering under `color-scheme`.
+  - **`webdriver` job durations:** Linux 239 s and Windows 141 s, against 168 s and 112 s on `main`'s run 42920549944. That's about +71 s and +29 s for two app sessions per theme.
+- **Next bounded action:** once this handoff's CI is green, refresh PR #151's body and send PR B's squash request to the architect; then PR A's brief items (the surfaces no frame shows).
 
 ## 2026-11-10 (evening): #21 merged; #103
 - **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.
