@@ -64,7 +64,48 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
     - first-run fixes in the same commit;
     - D-045's "Evidence, refined" bullet.
   - **Accepted as not built:** the CLI end to end against a mocked WebDriver (the `webdriver` job is that on every PR), and session create/delete failure tests.
-- **Next bounded action:** commit and push PR B, open its draft PR, and watch run 1; then the follow-up commit.
+- **PR B committed** as 9aa9535 (the 9 paths). **Draft PR #151** ("Part of #18", no label).
+- **Run 1: 42925870201 on 9aa9535**, green on every job on the first attempt (`bundle` skipped).
+  - Dark took on both OSes: every dark frame measured `prefers-color-scheme` dark with the body at `oklch(0.205 0 none)`; light frames measured white.
+  - Sizes, in bytes:
+
+    | OS | empty light / dark | settings light / dark | rows light / dark |
+    |---|---|---|---|
+    | Linux | 27,146 / 27,122 | 54,014 / 54,044 | 49,528 / 49,185 |
+    | Windows | 20,821 / 21,018 | 35,338 / 35,779 | 38,560 / 38,905 |
+
+  - What the images show:
+    - The naming banner, with its "…from huggingface.co…" sentence and the D-044 caveat, is present on CI.
+    - On Linux the folder line reads "Couldn't find your Downloads folder: unknown path": the runner has no XDG Downloads folder. That's an environment quirk, not this PR.
+    - **Settings shows "yt-dlp 2026.10.26 (updated)" on both Linux and Windows:** #21's updater adopted a verified update on both runners during the job, in a debug unbundled build. No download was made with the updated copy and it isn't from an installer, so #71's #21 check stands; this is partial evidence only (corrected by the architect: Linux shows it too).
+- **The follow-up commit (uncommitted):**
+  - `FRAMES` gives each frame a selector and texts, read with `textContent`:
+    - `settings` waits inside `[data-role="settings"]` on "Keep yt-dlp up to date", the template preview "jawed - Me at the zoo" (over IPC) and the model manager's "Saved in";
+    - `empty` and `rows` also wait for "from huggingface.co".
+  - `capture` takes injectable `wd`, `write`, `report` and `platform`.
+  - `--require-dark` is on both OSes' dark steps.
+  - D-045 gains "Evidence, refined".
+  - README's CI paragraph covers the artifacts and dark.
+  - `MIN_PNG_BYTES` is unchanged (smallest frame 20,821 bytes).
+  - Tests: `screenshots-18.test.mjs` +3 (15): the settings text can't come from the page behind; `capture` skips dark without writing and throws on a light mismatch; a bad PNG writes nothing and a good one is named by the measured scheme. The contract now requires `--require-dark` on both dark steps.
+- **Checks on the follow-up (macOS arm64):** `npm test` 640 passed / 0 failed / 13 skipped, `npm run build`, actionlint with shellcheck, `git diff --check`. No Rust changed (684 / 0 / 33 stands).
+- **`codex-qa review` of the follow-up: PASS WITH NOTES**, no findings (`qa/reports/20261110-170117-review-gb7w.md`).
+  - Its missing tests, listed for the commit request:
+    - text behind an absent or incomplete panel can't trigger a capture;
+    - a content-wait timeout takes no screenshot and writes nothing;
+    - `capture` with `requireDark` on a light page rejects without a screenshot.
+  - It ran 14 of the 15 tests; its sandbox can't create the seed test's temp folder.
+- **Architect's follow-up ruling (D-028, 2026-11-10):**
+  - **The commit:** approved after one more test and a fresh review, then pre-approved as exactly seven paths: the six plus `docs/BACKLOG.md`.
+  - **Tests:** the `requireDark` rejection inside the real `capture` is added (in the "capture writes nothing…" test). The absent-panel and content-wait-timeout cases are recorded as not built (D-045).
+  - **#152 filed** (`[D1] Linux without XDG user dirs: use ~/Downloads instead of an error`, P2, after #147 and before #150). It's a real defect: Tauri's `download_dir()` reads only `user-dirs.dirs` on Linux, and downloads refuse without it.
+  - **#71:** gets a comment with the CI adoption as partial evidence.
+  - **The diff before this change was +156 / −39.**
+  - **For PR A:** name the changed surfaces no frame shows (the lower half of Settings, the AI/rules chip), and give them the contrast test and hand checks, or a frame in A's first commit.
+- **Final review of the follow-up: PASS WITH NOTES**, no findings (`qa/reports/20261110-171125-review-b3Pb.md`). Its missing tests are those D-045 already records as not built. It ran 14 of the 15 tests (the seed test hits EPERM in its sandbox); the `requireDark` case sits inside an existing test.
+- **Checks:** `npm test` 640 passed / 0 failed / 13 skipped, the screenshot tests 15/15, `git diff --check`.
+- **Committed and pushed** under the architect's pre-approval: exactly seven paths.
+- **Next bounded action:** watch run 2 on PR #151, open all four settings frames, refresh the PR body, then PR B's squash request to the architect.
 
 ## 2026-11-10 (evening): #21 merged; #103
 - **#21 merged** as b5173f9 (PR #146, pinned to d50e024; that STATUS-only correction's run 42906268739 was green on every job). #21 is closed; #145 and #147 are open.

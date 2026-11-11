@@ -8,8 +8,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { EventEmitter } from "node:events";
 import {
-  FRAME_TEXT,
+  FRAMES,
   IDENTIFIER,
+  capture,
   MIN_PNG_BYTES,
   exited,
   frameName,
@@ -121,8 +122,11 @@ test("#18: the webdriver job takes light and dark screenshots after the probe an
   const dark = at("--theme dark");
   const upload = at("- name: Upload the screenshots");
   assert.ok(probe < light && light < darkSetLinux && darkSetLinux < dark && darkSetWindows < dark && dark < upload, "probe, light, dark theme, dark, upload");
-  assert.equal(job.match(/screenshots-18\.mjs --app src-tauri\/target\/debug\/queue --theme (light|dark) --out "\$RUNNER_TEMP\/screenshots"/g)?.length, 2, "Linux light and dark");
-  assert.equal(job.match(/screenshots-18\.mjs --app src-tauri\/target\/debug\/queue\.exe --native-driver "\$RUNNER_TEMP\/msedgedriver\/msedgedriver\.exe" --theme (light|dark) --out "\$RUNNER_TEMP\/screenshots"/g)?.length, 2, "Windows light and dark");
+  assert.equal(job.match(/screenshots-18\.mjs --app src-tauri\/target\/debug\/queue (--theme light|--theme dark --require-dark) --out "\$RUNNER_TEMP\/screenshots"/g)?.length, 2, "Linux light and dark");
+  assert.equal(job.match(/screenshots-18\.mjs --app src-tauri\/target\/debug\/queue\.exe --native-driver "\$RUNNER_TEMP\/msedgedriver\/msedgedriver\.exe" (--theme light|--theme dark --require-dark) --out "\$RUNNER_TEMP\/screenshots"/g)?.length, 2, "Windows light and dark");
+  // Run 42925870201 showed all three dark frames on both OSes, so dark is required (D-045).
+  assert.equal(job.match(/--theme dark --require-dark/g)?.length, 2, "dark is required on Linux and Windows");
+  assert.doesNotMatch(job, /--theme dark --out/, "no dark step without --require-dark");
   assert.equal(job.match(/xvfb-run -a node qa\/webdriver\/screenshots-18\.mjs/g)?.length, 2, "Linux runs under xvfb");
   assert.match(job, /GTK_THEME: Adwaita:dark/);
   const uploadStep = job.slice(upload, job.indexOf("\n      - ", upload + 1) === -1 ? undefined : job.indexOf("\n      - ", upload + 1));
@@ -165,8 +169,8 @@ async function fakeRun(dark, { requireDark = false, theme = "dark" } = {}) {
       calls.push("session");
       return fn("s");
     },
-    capture: async (_s, frame, texts) => {
-      calls.push(`${frame}:${texts.join("|")}`);
+    capture: async (_s, frame, spec) => {
+      calls.push(`${frame}:${spec.texts.join("|")}`);
       const scheme = dark.includes(frame) ? "dark" : "light";
       if (scheme === theme) return true;
       if (theme === "light" || requireDark) throw new Error(`${frame}: asked for ${theme}, the page reports ${scheme}`);
@@ -223,17 +227,90 @@ test("#18 review: two sessions, settings opened between frames, and the rows fra
   const run = await fakeRun(["empty", "settings", "rows"]);
   assert.deepEqual(run.calls, [
     "session",
-    `empty:${FRAME_TEXT.empty.join("|")}`,
+    `empty:${FRAMES.empty.texts.join("|")}`,
     "open settings",
-    `settings:${FRAME_TEXT.settings.join("|")}`,
+    `settings:${FRAMES.settings.texts.join("|")}`,
     "session",
-    `rows:${FRAME_TEXT.rows.join("|")}`,
+    `rows:${FRAMES.rows.texts.join("|")}`,
   ]);
   assert.equal(run.seeded && run.cleaned, true);
   const fixture = JSON.parse(readFileSync(new URL("qa/webdriver/queue-18.json", root), "utf8"));
-  assert.ok(FRAME_TEXT.rows.includes(fixture.items[0].meta.title));
-  assert.ok(FRAME_TEXT.rows.some((t) => fixture.items[0].notice.startsWith(t)), "the queued row's notice");
-  assert.ok(FRAME_TEXT.rows.includes(fixture.items[1].meta.title), "the finished row");
-  assert.ok(FRAME_TEXT.rows.includes(fixture.items[2].status.reason), "the failure reason");
+  assert.ok(FRAMES.rows.texts.includes(fixture.items[0].meta.title));
+  assert.ok(FRAMES.rows.texts.some((t) => fixture.items[0].notice.startsWith(t)), "the queued row's notice");
+  assert.ok(FRAMES.rows.texts.includes(fixture.items[1].meta.title), "the finished row");
+  assert.ok(FRAMES.rows.texts.includes(fixture.items[2].status.reason), "the failure reason");
+});
+
+// #18 PR B commit ruling: settled frames, and capture's own test.
+
+test("#18 review: the settings frame waits inside the panel, on text the page behind can't show", () => {
+  assert.equal(FRAMES.settings.selector, '[data-role="settings"]');
+  const behind = ["src/App.tsx", "src/components/ModelBanner.tsx", "src/components/UrlBar.tsx", "src/components/QueueList.tsx"]
+    .map((f) => readFileSync(new URL(f, root), "utf8"))
+    .join("\n");
+  const panel = readFileSync(new URL("src/components/SettingsPanel.tsx", root), "utf8");
+  assert.match(panel, /data-role="settings"/, "the panel carries the selector");
+  for (const text of FRAMES.settings.texts) {
+    assert.ok(!behind.includes(text), `"${text}" can't come from the page behind`);
+    assert.notEqual(text, "Settings", "never the bare word the banner's button shows");
+  }
+  // The template preview comes over IPC from the backend's sample: a sign the sections loaded.
+  assert.ok(readFileSync(new URL("src-tauri/src/naming.rs", root), "utf8").includes('title: Some("Me at the zoo'));
+  for (const frame of ["empty", "rows"]) {
+    assert.ok(FRAMES[frame].texts.includes("from huggingface.co"), `${frame} waits for the banner's final sentence`);
+  }
+  assert.ok(readFileSync(new URL("src/components/ModelBanner.tsx", root), "utf8").includes("from huggingface.co"));
+});
+
+/** A fake WebDriver for `capture`: `dark` for the measurement and the screenshot's bytes. */
+function fakeWd({ dark, png }) {
+  const calls = [];
+  const call = async (method, path, body) => {
+    calls.push(`${method} ${path.replace(/^\/session\/s/, "")}`);
+    if (path.endsWith("/screenshot")) return png.toString("base64");
+    if (body?.script?.includes("prefers-color-scheme")) return { dark, background: dark ? "oklch(0.205 0 none)" : "rgb(255, 255, 255)" };
+    return true; // the settled-state wait
+  };
+  return { call, calls };
+}
+
+const goodPng = () => {
+  const png = Buffer.alloc(MIN_PNG_BYTES);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
+  return png;
+};
+
+test("#18 review: capture writes nothing for a skipped dark frame, and throws on a light mismatch or a required dark frame that reports light", async () => {
+  const writes = [];
+  const deps = (dark) => ({ ...fakeWd({ dark, png: goodPng() }), write: (f) => writes.push(f), report: () => {}, platform: "linux" });
+  const skipped = deps(false);
+  assert.equal(await capture("s", { theme: "dark", requireDark: false, out: "o" }, "empty", FRAMES.empty, { ...skipped, wd: skipped.call }), false);
+  assert.deepEqual(writes, [], "nothing written");
+  assert.ok(!skipped.calls.some((c) => c.endsWith("/screenshot")), "not even a screenshot taken");
+  const light = deps(true);
+  await assert.rejects(capture("s", { theme: "light", out: "o" }, "empty", FRAMES.empty, { ...light, wd: light.call }), /asked for light, the page reports dark/);
+  assert.deepEqual(writes, []);
+  // The architect's follow-up ruling: --require-dark is exercised inside the real capture, so
+  // dropping it can't quietly turn a required dark frame into a skip that exits 0.
+  const required = deps(false);
+  await assert.rejects(
+    capture("s", { theme: "dark", requireDark: true, out: "o" }, "empty", FRAMES.empty, { ...required, wd: required.call }),
+    /asked for dark, the page reports light/,
+  );
+  assert.deepEqual(writes, [], "nothing written when a required dark frame reports light");
+  assert.ok(!required.calls.some((c) => c.endsWith("/screenshot")), "and no screenshot taken");
+});
+
+test("#18 review: a bad PNG throws and writes nothing; a good one is saved under the measured scheme", async () => {
+  const writes = [];
+  const run = (png, theme, dark) => {
+    const f = fakeWd({ dark, png });
+    return capture("s", { theme, requireDark: true, out: "out" }, "rows", FRAMES.rows, { wd: f.call, write: (file, bytes) => writes.push([file, bytes.length]), report: () => {}, platform: "win32" });
+  };
+  await assert.rejects(run(Buffer.from("not a png at all"), "light", false), /rows: not a PNG/);
+  await assert.rejects(run(goodPng().subarray(0, 100), "light", false), /only 100 bytes/);
+  assert.deepEqual(writes, [], "nothing written for a bad PNG");
+  assert.equal(await run(goodPng(), "dark", true), true);
+  assert.deepEqual(writes, [[join("out", "windows-rows-dark.png"), MIN_PNG_BYTES]], "named by the measured scheme");
 });
 

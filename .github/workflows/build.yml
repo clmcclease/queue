@@ -254,8 +254,8 @@ jobs:
         run: node qa/webdriver/csp-probe-133.mjs --app src-tauri/target/debug/queue.exe --native-driver "$RUNNER_TEMP/msedgedriver/msedgedriver.exe"
       # #18 (D-045): screenshots of the real app, light then dark, as rendered evidence for the design
       # pass. The theme is set only through the OS (GTK on Linux, the registry on Windows); the script
-      # measures what the page reports and names each file by it. Where dark doesn't take, the step
-      # summary says "DARK NOT CAPTURED" and that OS's dark look is a #71 hand check.
+      # measures what the page reports and names each file by it. Dark is required on both: PR #151's
+      # first run (42925870201) showed all three dark frames on Linux and on Windows (D-045).
       - name: Screenshots, light
         if: runner.os == 'Linux'
         run: xvfb-run -a node qa/webdriver/screenshots-18.mjs --app src-tauri/target/debug/queue --theme light --out "$RUNNER_TEMP/screenshots"
@@ -278,13 +278,13 @@ jobs:
         if: runner.os == 'Linux'
         env:
           GTK_THEME: Adwaita:dark
-        run: xvfb-run -a node qa/webdriver/screenshots-18.mjs --app src-tauri/target/debug/queue --theme dark --out "$RUNNER_TEMP/screenshots"
+        run: xvfb-run -a node qa/webdriver/screenshots-18.mjs --app src-tauri/target/debug/queue --theme dark --require-dark --out "$RUNNER_TEMP/screenshots"
       - name: Screenshots, dark
         if: runner.os == 'Windows'
         shell: bash
         env:
           MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"
-        run: node qa/webdriver/screenshots-18.mjs --app src-tauri/target/debug/queue.exe --native-driver "$RUNNER_TEMP/msedgedriver/msedgedriver.exe" --theme dark --out "$RUNNER_TEMP/screenshots"
+        run: node qa/webdriver/screenshots-18.mjs --app src-tauri/target/debug/queue.exe --native-driver "$RUNNER_TEMP/msedgedriver/msedgedriver.exe" --theme dark --require-dark --out "$RUNNER_TEMP/screenshots"
       - name: Upload the screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

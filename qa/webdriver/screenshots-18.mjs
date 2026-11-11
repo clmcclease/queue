@@ -158,39 +158,56 @@ async function withSession(opts, fn) {
   }
 }
 
-/** Waits until the page shows every one of `texts`. */
-const showing = (session, texts) =>
-  until(`${texts.map((t) => `"${t}"`).join(", ")} on the page`, 30_000, (left) =>
-    wd("POST", `/session/${session}/execute/sync`, {
-      script: "const text = document.body.innerText; return arguments[0].every((t) => text.includes(t));",
-      args: [texts],
+/**
+ * Waits until the element `selector` exists and its `textContent` holds every one of `texts`.
+ * `textContent`, not `innerText`: Settings' section headings are CSS-uppercased, which `innerText`
+ * would return transformed.
+ */
+const showing = (wdCall, session, { selector, texts }) =>
+  until(`${texts.map((t) => `"${t}"`).join(", ")} in ${selector}`, 30_000, (left) =>
+    wdCall("POST", `/session/${session}/execute/sync`, {
+      script: "const el = document.querySelector(arguments[0]); return !!el && arguments[1].every((t) => el.textContent.includes(t));",
+      args: [selector, texts],
     }, left));
 
 /**
- * Measures the scheme, then (if it's the one wanted) checks every expected text is on the page,
- * takes the screenshot, checks it and saves it. Returns false when a dark frame is skipped.
+ * Measures the scheme, then (if it's the one wanted) waits for the frame's settled state, takes
+ * the screenshot, checks it and saves it under the measured scheme's name. Returns false when a
+ * dark frame is skipped; nothing is written then, nor when the PNG is bad. `deps` (`wd`,
+ * `write`, `report`, `platform`) let tests run it without a driver (#18 review).
  */
-async function capture(session, opts, frame, texts) {
-  const measured = await wd("POST", `/session/${session}/execute/sync`, { script: MEASURE, args: [] });
+export async function capture(session, opts, frame, spec, deps = {}) {
+  const { wd: call = wd, write = writeFileSync, report = summary, platform = process.platform } = deps;
+  const measured = await call("POST", `/session/${session}/execute/sync`, { script: MEASURE, args: [] });
   const scheme = schemeOf(measured);
   console.log(`${frame}: prefers-color-scheme ${scheme}, body background ${measured?.background}`);
   const verdict = themeVerdict(opts.theme, scheme, opts.requireDark);
   if (verdict === "fail") throw new Error(`${frame}: asked for ${opts.theme}, the page reports ${scheme} (body background ${measured?.background})`);
   if (verdict === "skip") return false;
-  await showing(session, texts);
-  const png = Buffer.from(await wd("GET", `/session/${session}/screenshot`), "base64");
+  await showing(call, session, spec);
+  const png = Buffer.from(await call("GET", `/session/${session}/screenshot`), "base64");
   const problems = pngProblems(png);
   if (problems.length) throw new Error(`${frame}: ${problems.join("; ")}`);
-  writeFileSync(join(opts.out, frameName(process.platform, frame, scheme)), png);
-  summary(`- ${frameName(process.platform, frame, scheme)}: ${png.length} bytes, body background ${measured?.background}`);
+  const name = frameName(platform, frame, scheme);
+  write(join(opts.out, name), png);
+  report(`- ${name}: ${png.length} bytes, body background ${measured?.background}`);
   return true;
 }
 
-/** What each frame must show before it's captured. The rows frame shows all three seeded rows. */
-export const FRAME_TEXT = {
-  empty: ["Queue is empty."],
-  settings: ["Settings"],
-  rows: ["A queued video", "Interrupted when Queue closed", "A finished video", "Unsupported URL"],
+/**
+ * Each frame's settled state: the element to read and the text it must hold (#18 review).
+ * `empty` and `rows` wait for the naming banner's final sentence, which arrives over IPC with the
+ * model status. `settings` waits inside the panel for text only its loaded sections have (the
+ * template previews and the model manager), never text the page behind can show, such as the
+ * banner's "Settings…" button. The yt-dlp status line varies, so it isn't waited on.
+ */
+export const FRAMES = {
+  empty: { selector: "body", texts: ["Queue is empty.", "from huggingface.co"] },
+  settings: { selector: '[data-role="settings"]', texts: ["Keep yt-dlp up to date", "jawed - Me at the zoo", "Saved in"] },
+  rows: {
+    selector: "body",
+    texts: ["A queued video", "Interrupted when Queue closed", "A finished video", "Unsupported URL", "from huggingface.co"],
+  },
 };
 
 /** The summary line for dark frames that weren't captured, or null when none are missing. */
@@ -209,7 +226,7 @@ export async function shoot(opts, deps) {
   const { withSession: session, capture: take, seed, report, platform } = deps;
   const missing = [];
   const take1 = async (s, frame) => {
-    if (!(await take(s, frame, FRAME_TEXT[frame]))) missing.push(frame);
+    if (!(await take(s, frame, FRAMES[frame]))) missing.push(frame);
   };
   await session(async (s) => {
     await take1(s, "empty");
@@ -236,7 +253,7 @@ async function main() {
     await shoot(opts, {
       platform: process.platform,
       withSession: (fn) => withSession(opts, fn),
-      capture: (session, frame, texts) => capture(session, opts, frame, texts),
+      capture: (session, frame, spec) => capture(session, opts, frame, spec),
       openSettings: (session) =>
         wd("POST", `/session/${session}/execute/sync`, { script: "document.querySelector('button[aria-label=\"Settings\"]').click(); return true;", args: [] }),
       seed: () => {
