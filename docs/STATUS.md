@@ -1,8 +1,16 @@
 # Status
 
-**Updated:** 2026-11-10 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #18 (PR A and PR B merged; open for the owner's macOS hand check), the last item in D-037's order; #147 next unless the owner moves it
+**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #147 (#18 closed by the owner's macOS hand check, the last item in D-037's order)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-18: the owner's macOS hand check closes #18
+- **Pickup:** local `main` was 8 commits behind; fast-forwarded. Handoff PR #158 squashed as ea26120 with the owner's OK (run 42964864061, attempt 1, green). An old, superseded #133 draft in the working tree (`qa/webview/`, `qa/tests/webview-133.test.mjs`, an edit to `qa/manual/csp-probe-43.js`) was deleted at the owner's request.
+- **The owner's hand check (macOS, `npm run tauri dev` on ea26120, light and dark via System Settings):** pass. "Everything in the app looks really good. The focused outline is staying visible." Whether the dark ring is the accent colour or near-white was hard to tell, so it isn't recorded. Queue has no theme or motion setting of its own (D-036); both follow the OS.
+- **#18 closed** with the result posted on the issue. #157 (Linux's ring), #149 (icon) and #71 (Windows and Linux hand checks) stay open.
+- **Checks run:** none beyond the dev build; this is docs only.
+- **Still on the owner's list (from 2026-11-10):** #157's choice, D-041 to D-047, #149's artwork, #147's release gating, hand checks for #104, #21 and #103, Dependabot dismissals, old QA worktrees.
+- **Next bounded action:** #147, starting with a brief to the architect before any lock change.
 
 ## 2026-11-10 (night, last): #18's PR A merged
 - **Architect's PR #153 squash ruling (D-028, 2026-11-10):** approved pinned to b1cf069 after the approval line in the PR body was replaced. This docs-only handoff PR is pre-approved (commit, draft PR and squash), with no `codex-qa review`, on a green run at attempt 1. D-045 gains "PR A merged".
