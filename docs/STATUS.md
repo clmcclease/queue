@@ -1,8 +1,30 @@
 # Status
 
-**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #147 (#18 closed by the owner's macOS hand check, the last item in D-037's order)
+**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #147 on `infra/147-advisories` (#18 closed by the owner's macOS hand check, the last item in D-037's order)
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-18 (later): #147, the `Cargo.lock` advisories
+- **Architect's ruling (D-028, 2026-11-18; D-048):** the plan is approved, with `rustix` added to the scope. The order is `test "#147"` and then `review` on the final diff. The commit, the draft PR (`ci:bundle`, `Closes #147`) and the squash are pre-approved on attempt-1 green including the bundles. (d) is filed as **#160** (P3, after #150, not a release gate).
+- **Triage (OSV, the whole lock at 4fadc40):** D-043's seven are confirmed. There are two more, already on `main`: `rustix` 1.1.5 (RUSTSEC-2026-0486) and `chrono` 0.4.45 (RUSTSEC-2026-0543; in the lock, not compiled). The table is on #147.
+- **Lock:** `ctutils` 0.4.4, `tokio` 1.53.3 and `rustix` 1.1.6, as exactly 12 lines (a version and a checksum pair each).
+  - `cargo update -p tokio` and `-p rustix` also rewired `windows-sys` and `syn` edges in 12 unrelated entries, though no requirement forced it.
+  - The lock was therefore edited by hand to `main`'s plus the three pairs, with cargo's checksums. It's verified by `cargo metadata --locked`, by `cargo tree --locked --target all -e all` and by `cmp`. The architect approved the method, and D-048 gains the rule for next time.
+  - **Post-bump OSV:** 618 entries (617 from crates.io plus `queue`); exactly the eight expected hits; none for `ctutils`, `tokio` or `rustix`.
+- **Docs:** SECURITY.md's "Known advisories (checked 2026-11-18)"; D-048 and one line in D-043; BACKLOG #147 and #160; #147's body and a triage comment.
+- **Checks (macOS arm64):**
+  - `cargo fmt --check`; `cargo clippy --locked --all-targets -- -D warnings`.
+  - `cargo test --locked --no-fail-fast`: **687 passed / 0 failed / 33 ignored**.
+  - `npm run build`; `npm test`: 676 tests, 663 passed / 0 failed / 13 skipped.
+  - `git diff --check`.
+- **`codex-qa test "#147"`: PASS WITH NOTES** (`qa/reports/20261118-122539-test-2tLn.md`).
+  - Its own OSV re-check agrees: 11 affected packages before, 8 after, none new.
+  - One P3 docs finding is fixed: D-048 said "identical requirements". Only the rewired edges' requirements are unchanged; `rustix` 1.1.6 raises `bitflags` and `libc` minimums, which the locked versions meet.
+  - Its optional real-sidecar tests failed in its sandbox (`semctl: Operation not permitted` in yt-dlp's launcher): an environment limit, not a regression.
+  - **No tests added.** Its patch held only its STATUS edit, which isn't brought in.
+- **Not tested:** Windows and Linux locally. CI's `--locked` jobs are the proof, and Windows matters most, because only Windows compiles the `windows-sys` edges.
+- **`codex-qa review` of the final diff: PASS WITH NOTES**, no findings and no missing tests (`qa/reports/20261118-123458-review-dhKr.md`). It independently checked the 12-line lock diff, the checksums against the registry archives, `cargo metadata --locked`, and `chrono`'s missing build path.
+- **Next bounded action:** the pre-approved commit, then the draft PR with `ci:bundle`, then the squash on attempt-1 green including the bundles.
 
 ## 2026-11-18: the owner's macOS hand check closes #18
 - **Pickup:** local `main` was 8 commits behind; fast-forwarded. Handoff PR #158 squashed as ea26120 with the owner's OK (run 42964864061, attempt 1, green). An old, superseded #133 draft in the working tree (`qa/webview/`, `qa/tests/webview-133.test.mjs`, an edit to `qa/manual/csp-probe-43.js`) was deleted at the owner's request.
@@ -10,7 +32,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **#18 closed** with the result posted on the issue. #157 (Linux's ring), #149 (icon) and #71 (Windows and Linux hand checks) stay open.
 - **Checks run:** none beyond the dev build; this is docs only.
 - **Still on the owner's list (from 2026-11-10):** #157's choice, D-041 to D-047, #149's artwork, #147's release gating, hand checks for #104, #21 and #103, Dependabot dismissals, old QA worktrees.
-- **Next bounded action:** #147, starting with a brief to the architect before any lock change.
+- **Next bounded action (done; see the section above):** #147's brief to the architect.
 
 ## 2026-11-10 (night, last): #18's PR A merged
 - **Architect's PR #153 squash ruling (D-028, 2026-11-10):** approved pinned to b1cf069 after the approval line in the PR body was replaced. This docs-only handoff PR is pre-approved (commit, draft PR and squash), with no `codex-qa review`, on a green run at attempt 1. D-045 gains "PR A merged".

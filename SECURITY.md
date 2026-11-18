@@ -29,3 +29,22 @@ dependency tree includes `rsa` 0.9.10 (RUSTSEC-2023-0071) and `crypto-bigint` 0.
 (RUSTSEC-2026-0387). Both advisories are timing leaks of secret data, a private key or secret
 integers. Queue only verifies a public signature over public data, so neither applies. Audit
 tools still flag them.
+
+## Known advisories (checked 2026-11-18)
+
+Audit tools flag these in `src-tauri/Cargo.lock`. None has a fix that Queue can take today:
+- `glib` 0.18.5, RUSTSEC-2024-0429: a string iterator in glib's Variant API is unsound and can
+  crash on a NULL pointer. The fix is only in glib 0.20, which Tauri's GTK3 stack doesn't use
+  yet. Linux only. Queue never calls glib's Variant API, and the bug is a crash, not a leak.
+- `proc-macro-error` 1.0.4, RUSTSEC-2024-0370: unmaintained. It runs only at build time, through
+  `glib-macros` and `gtk3-macros`.
+- `zbus_names` 4.3.4, `zvariant` 5.15.0 and `zvariant_derive` 5.15.0, RUSTSEC-2026-0371, -0370
+  and -0372: unmaintained, because they were folded into zbus 6. Queue reaches them through
+  `zbus` 5.19.0, from `secret-service` and two Tauri plugins. They go away once those move to
+  zbus 6.
+- `chrono` 0.4.45, RUSTSEC-2026-0543: unmaintained. It's in the lock only as an optional
+  dependency of `serde_with` and isn't compiled into Queue:
+  `cargo tree --target all -e all -i chrono` prints nothing.
+
+These are re-checked whenever the lock changes (D-043, D-048). The `rsa` and `crypto-bigint`
+paragraph above still stands.

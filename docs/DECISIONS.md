@@ -394,6 +394,7 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
   - `zvariant` 5.15.0 (RUSTSEC-2026-0370)
   - `zvariant_derive` 5.15.0 (RUSTSEC-2026-0372)
 - **Standing rule:** a PR that changes `src-tauri/Cargo.lock` brings an advisory check of that real lock file, not of a throwaway project's tree, in its commit or squash request. It states the tool, the commit checked and the package count, and lists hits new with the PR separately from those already on `main`. A new hit not accepted here goes to the architect before the request.
+- **Triaged (D-048, 2026-11-18):** `ctutils`, `tokio` and `rustix` bumped; the rest recorded in SECURITY.md.
 - **Not decided:** whether CI runs an advisory check (#147(d)), whether the release waits on #147, and dismissing Dependabot alerts (a repo setting, the owner's).
 
 ## D-044 #103: which machines get a recommended local model, and what Settings says — decided by the architect under D-028 (2026-11-10); not yet seen by the owner
@@ -455,3 +456,44 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
 - **Merged (the architect under D-028, 2026-11-10; not yet seen by the owner):** PR #156's squash was approved pinned to d21726b on run 42951012690, attempt 1, every job green (`bundle` skipped). It was the first Linux run of Codex's tests: `test (linux)` job 130295335584 and `test (macos)` job 130295335671 (image `macos-26-arm64` 20261102.0473.1, the image the unfixed test failed on) passed all three `timeout_154_qa` tests and the fixed `qa21…` test. `cargo test --locked` in CI: macOS 687 / 0 / 33, Linux 688 / 0 / 33, Windows 582 / 0 / 27 (`timeout_154_qa` is `cfg(unix)`). The `ESRCH` behaviour is now seen on macOS 26.7.2 and 27.2. Squashed as 5cb4da8, whose tree is identical to d21726b's.
 - **What a green run proves:** not the flake fix, since the unfixed test passes about 5 runs in 6. The proof is the deterministic zombie test plus the soaks. The no-re-run rule for `ytdlp_update_21`, `timeout_154_qa` and `local_n6_30b*` stays, on `main` and on PRs.
 - **Merge-from-`main` commits:** a merge commit whose conflicts are only in `docs/*.md`, and which leaves the branch's non-doc diff against `main` byte-identical to the reviewed one (shown by a recorded command), needs no fresh `codex-qa review`. The full local checks and CI still run. Any non-doc conflict or difference gets a fresh review, as in D-029's #91 rule. Decided by the architect under D-028.
+
+## D-048 #147: the `Cargo.lock` advisories triaged — three lock-only bumps, the rest recorded — decided by the architect under D-028 (2026-11-18); not yet seen by the owner
+- **Triage (OSV, 2026-11-18, the whole lock at 4fadc40: 618 entries, 617 from crates.io plus `queue`):** D-043's seven are confirmed at the same versions. Two more were already on `main` at 74e5c24, missed by the first read:
+  - `rustix` 1.1.5, RUSTSEC-2026-0486 (published 2026-10-27): unsound xattr functions on a zero-length buffer; fixed in 1.1.6.
+  - `chrono` 0.4.45, RUSTSEC-2026-0543 (published 2026-09-14): unmaintained, no fix.
+  - D-043's 618 and the 617 counted that day are the same lock.
+- **Bumped, lock only, one entry each:** `ctutils` 0.4.4, `tokio` 1.53.3, `rustix` 1.1.6. `Cargo.toml` is unchanged.
+  - **Reachability:** a grep of the vendored sources finds no crate in the tree calling `rustix`'s xattr functions or `tokio`'s `AsyncFd` constructors, and Queue's own code uses neither crate. Those two bumps are hygiene.
+  - **`ctutils`** is under `secret-service` (digest ← hmac/sha2), the Linux API-key path. Its 0.4.3 branches are in `Choice` mask generation and 32-bit u128 compares, and Queue ships no 32-bit target. Bumped anyway.
+- **How the lock was edited:**
+  - `cargo update -p tokio` (or `-p rustix`) with `--precise` also rewired dependency edges inside 12 unrelated entries. `cssparser-macros` went from `syn` 3 to 2. `dirs-sys`, `errno`, `muda`, `rustix`, `socket2`, `tempfile`, `tray-icon`, `uds_windows`, `winapi-util`, `window-vibrancy` and `winreg` went from `windows-sys` 0.61.2 to 0.60.2 or 0.52.0. No package was added or removed. `-p ctutils` alone was clean.
+  - On the crates.io index, the requirements on the rewired crates are unchanged: `rustix` 1.1.5 and 1.1.6 both ask for `windows-sys` `>=0.52, <0.62`; `tokio` 1.53.2 and 1.53.3 both ask for `windows-sys` `^0.61` and `tokio-macros` `~2.7.0`. So the resolver chose the rewiring, and nothing forced it. Other requirements did change (for example, `rustix` 1.1.6 raises `bitflags` from `^2.4.0` to `^2.9.2`, noted by Codex in `20261118-122539-test-2tLn`), and the existing locked versions meet them.
+  - Instead, only the three entries' `version` and `checksum` were changed, with cargo's own checksums. `cargo metadata --locked` and `cargo tree --locked --target all -e all` accept the file and leave it byte-identical, and cargo verified the three downloads against it. CI's `--locked` builds on all three OSes are the remaining proof.
+  - The post-bump lock on OSV: 618 entries (617 from crates.io plus `queue`). Exactly the eight expected hits remain (`glib`, `proc-macro-error`, `zbus_names`, `zvariant`, `zvariant_derive`, `chrono`, `rsa`, `crypto-bigint`), and none for `ctutils`, `tokio` or `rustix`.
+  - **Rule for next time:** a lock edited by hand is acceptable only when all four hold:
+    1. the diff is the `version` and `checksum` of the named entries and nothing else;
+    2. the checksums come from cargo's own resolution of the same versions;
+    3. `cargo metadata --locked` and `cargo tree --locked --target all -e all` succeed and leave the file byte-identical;
+    4. `--locked` CI is green on all three OSes.
+
+    Otherwise, use cargo's own command. Report any unrelated motion and get a ruling on it before the commit; don't edit it away. Note that `cargo update -p <crate> --precise --dry-run` prints only "Updating" lines, so it doesn't show rewired edges. Inspect the real diff. Approved by the architect under D-028 (2026-11-18).
+- **Not bumpable; recorded in SECURITY.md's "Known advisories":**
+  - `glib` 0.18.5: the fix is only in 0.20, behind Tauri's GTK3 stack, Linux only. Queue calls no glib Variant API, and the bug is a NULL-deref crash, not a disclosure.
+  - `proc-macro-error` 1.0.4: unmaintained; build time only, via glib-macros and gtk3-macros.
+  - `zbus_names` 4.3.4, `zvariant` 5.15.0, `zvariant_derive` 5.15.0: unmaintained, folded into zbus 6; via `zbus` 5.19.0 ← secret-service, tauri-plugin-opener and tauri-plugin-single-instance.
+  - `chrono`: in the lock through `serde_with` 3.24.0's optional feature, and not compiled (`cargo tree --target all -e all -i chrono` prints nothing).
+  - `rsa` and `crypto-bigint`: D-042 and D-043 unchanged.
+- **SECURITY.md wording:** it states facts and status ("known", a check date, where the fix is), never "accepted". It's re-checked whenever the lock changes (D-043).
+  - The note is within D-028: PR #146's rsa/crypto-bigint paragraph set the precedent under D-028, every advisory is public, and no privacy stance or owner decision changes.
+  - The owner can pull or reword it before the release.
+- **Not built:**
+  - `Cargo.toml` pins for transitive crates.
+  - A test asserting lock versions: it duplicates `--locked` and the advisory check, and breaks on every legitimate bump.
+  - Swapping Tauri's plugins or `keyring` to drop zbus 5.
+  - The CI check itself.
+- **(d) is filed as #160** (P3, `area:infra`, M5, after #150 unless the owner moves it, not a release gate). It's a proposal for `cargo deny check advisories` with a committed, commented ignore list, run on lock-touching PRs plus a weekly schedule. D-043's manual rule stands until it lands.
+- **Gates and approvals:**
+  - `test "#147"`, then `review` on the final diff.
+  - The commit, the draft PR (`ci:bundle`, `Closes #147`) and the squash are pre-approved on attempt-1 green, bundles included, with D-043's check of the post-bump lock in the request.
+  - Any FAIL, P1/P2 finding, red job or re-run goes back to the architect.
+- **Open for the owner:** whether the upstream-blocked advisories gate the M5 release; the SECURITY.md wording; dismissing the Dependabot alerts.
