@@ -324,7 +324,8 @@ struct Settings {
     current: Mutex<settings::Settings>,
 }
 
-/// Where finished downloads go (D1): the chosen folder, or the OS Downloads folder.
+/// Where finished downloads go (D1): the chosen folder, or the OS Downloads folder (#152: or
+/// `Downloads` in the home folder).
 fn download_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let settings = app.state::<Settings>();
     let current = settings
@@ -333,10 +334,10 @@ fn download_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|_| "settings lock poisoned".to_string())?
         .clone();
     current.download_dir(|| {
-        let dir = app
-            .path()
-            .download_dir()
-            .map_err(|e| format!("Couldn't find your Downloads folder: {e}"))?;
+        let dir = settings::default_download_dir(
+            app.path().download_dir().ok(),
+            app.path().home_dir().ok(),
+        )?;
         // The default folder is the one Queue may create (D-020); a chosen one never is.
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
