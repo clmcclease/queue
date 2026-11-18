@@ -1,8 +1,26 @@
 # Status
 
-**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #147 on `infra/147-advisories` (#18 closed by the owner's macOS hand check, the last item in D-037's order)
+**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** none; #147 merged. Next unless the owner moves it: #152, then #157 (the owner's choice), #150, #160
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-18 (evening): #147 merged; the owner rules on release gating
+- **PR #161's CI:** run 44371795277 on b36b8cd, attempt 1, every job green, including all four bundles (`bundle (windows-x64)` job 135075928362).
+  - Run 44371793562 was cancelled before any job ran. Opening the PR and adding `ci:bundle` started two runs at once, and the workflow's `concurrency` rule kept one. This isn't a re-run.
+  - **`cargo test --locked`:** macOS 687 / 0 / 33 (job 135067460872), Linux 688 / 0 / 33 (135067460831), Windows 582 / 0 / 27 (135067460744). Separate steps passed too: real-sidecar loopback 19 and the llama-server lifecycle 1 (on macOS).
+  - **`npm test`:** 676 on each OS, 0 failed (Windows skips 70, as on `main`).
+- **#147 merged** as e383d30 (PR #161), squashed under the architect's pre-approval with `--match-head-commit b36b8cd`. `git diff b36b8cd e383d30` is empty. #147 is closed and the remote branch is deleted.
+- **`main`'s run 44385511679 on e383d30:** attempt 1, every job green, including all four bundles.
+- **The owner's ruling (2026-11-18):** the six remaining advisories (`glib`, `proc-macro-error`, `zbus_names`, `zvariant`, `zvariant_derive`, `chrono`) **don't block the M5 release**. Recorded in D-048.
+- **Still on the owner's list:**
+  - SECURITY.md's "Known advisories" wording;
+  - Dependabot dismissals for the eight remaining alerts (the `ctutils`, `tokio` and `rustix` alerts should clear on their own);
+  - D-041 to D-048;
+  - #157's choice;
+  - #149's artwork;
+  - hand checks for #104, #21 and #103;
+  - old QA worktrees, including `/var/folders/th/52pb8qb15rl2cjj_5r2m1hfm0000gn/T/queue-qa-QSVj` from today (its reports are already in `qa/reports/`).
+- **Next bounded action:** #152 (Linux without XDG user dirs), unless the owner moves it.
 
 ## 2026-11-18 (later): #147, the `Cargo.lock` advisories
 - **Architect's ruling (D-028, 2026-11-18; D-048):** the plan is approved, with `rustix` added to the scope. The order is `test "#147"` and then `review` on the final diff. The commit, the draft PR (`ci:bundle`, `Closes #147`) and the squash are pre-approved on attempt-1 green including the bundles. (d) is filed as **#160** (P3, after #150, not a release gate).
@@ -24,7 +42,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - **No tests added.** Its patch held only its STATUS edit, which isn't brought in.
 - **Not tested:** Windows and Linux locally. CI's `--locked` jobs are the proof, and Windows matters most, because only Windows compiles the `windows-sys` edges.
 - **`codex-qa review` of the final diff: PASS WITH NOTES**, no findings and no missing tests (`qa/reports/20261118-123458-review-dhKr.md`). It independently checked the 12-line lock diff, the checksums against the registry archives, `cargo metadata --locked`, and `chrono`'s missing build path.
-- **Next bounded action:** the pre-approved commit, then the draft PR with `ci:bundle`, then the squash on attempt-1 green including the bundles.
+- **Next bounded action (done; see the section above):** the commit, the PR and the squash.
 
 ## 2026-11-18: the owner's macOS hand check closes #18
 - **Pickup:** local `main` was 8 commits behind; fast-forwarded. Handoff PR #158 squashed as ea26120 with the owner's OK (run 42964864061, attempt 1, green). An old, superseded #133 draft in the working tree (`qa/webview/`, `qa/tests/webview-133.test.mjs`, an edit to `qa/manual/csp-probe-43.js`) was deleted at the owner's request.

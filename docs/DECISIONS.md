@@ -457,7 +457,7 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
 - **What a green run proves:** not the flake fix, since the unfixed test passes about 5 runs in 6. The proof is the deterministic zombie test plus the soaks. The no-re-run rule for `ytdlp_update_21`, `timeout_154_qa` and `local_n6_30b*` stays, on `main` and on PRs.
 - **Merge-from-`main` commits:** a merge commit whose conflicts are only in `docs/*.md`, and which leaves the branch's non-doc diff against `main` byte-identical to the reviewed one (shown by a recorded command), needs no fresh `codex-qa review`. The full local checks and CI still run. Any non-doc conflict or difference gets a fresh review, as in D-029's #91 rule. Decided by the architect under D-028.
 
-## D-048 #147: the `Cargo.lock` advisories triaged — three lock-only bumps, the rest recorded — decided by the architect under D-028 (2026-11-18); not yet seen by the owner
+## D-048 #147: the `Cargo.lock` advisories triaged — three lock-only bumps, the rest recorded — decided by the architect under D-028 (2026-11-18); release gating confirmed by the owner (2026-11-18)
 - **Triage (OSV, 2026-11-18, the whole lock at 4fadc40: 618 entries, 617 from crates.io plus `queue`):** D-043's seven are confirmed at the same versions. Two more were already on `main` at 74e5c24, missed by the first read:
   - `rustix` 1.1.5, RUSTSEC-2026-0486 (published 2026-10-27): unsound xattr functions on a zero-length buffer; fixed in 1.1.6.
   - `chrono` 0.4.45, RUSTSEC-2026-0543 (published 2026-09-14): unmaintained, no fix.
@@ -496,4 +496,5 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
   - `test "#147"`, then `review` on the final diff.
   - The commit, the draft PR (`ci:bundle`, `Closes #147`) and the squash are pre-approved on attempt-1 green, bundles included, with D-043's check of the post-bump lock in the request.
   - Any FAIL, P1/P2 finding, red job or re-run goes back to the architect.
-- **Open for the owner:** whether the upstream-blocked advisories gate the M5 release; the SECURITY.md wording; dismissing the Dependabot alerts.
+- **Release gating, confirmed by the owner (2026-11-18):** the six remaining advisories (`glib`, `proc-macro-error`, `zbus_names`, `zvariant`, `zvariant_derive`, `chrono`) don't block the M5 release.
+- **Open for the owner:** the SECURITY.md wording; dismissing the Dependabot alerts.
