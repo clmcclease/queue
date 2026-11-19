@@ -498,3 +498,11 @@ Before #100 part 3 one credential-store entry (`dev.mcclease.queue` / `api-key`)
   - Any FAIL, P1/P2 finding, red job or re-run goes back to the architect.
 - **Release gating, confirmed by the owner (2026-11-18):** the six remaining advisories (`glib`, `proc-macro-error`, `zbus_names`, `zvariant`, `zvariant_derive`, `chrono`) don't block the M5 release.
 - **Open for the owner:** the SECURITY.md wording; dismissing the Dependabot alerts.
+
+## D-049 #152: the default download folder falls back to `Downloads` in the home folder — decided by the architect under D-028 (2026-11-18); folder default confirmed by the owner (2026-11-18)
+- `settings::default_download_dir(os, home)` resolves the default folder in order: the OS Downloads folder, then `<home>/Downloads`, then the error "Couldn't find a Downloads folder or your home folder. Choose a folder with Change…." Tauri's "unknown path" never reaches the UI. The caller still creates the default folder (D-020) and never creates a chosen one.
+- The fallback isn't Linux-only in code. macOS and Windows always resolve an OS folder, so only Linux without `user-dirs.dirs` reaches it; a per-OS branch would add code without changing behaviour.
+- **Not built:** writing `user-dirs.dirs`; a new setting; a test for `create_dir_all` failing on a regular file at `<home>/Downloads` (a pre-existing error path, unchanged).
+- **Acceptance:** the unit test plus Codex's five tests (`default_download_dir_152_qa.rs`), and the PR's Linux CI frames showing a path instead of the error.
+- **Review scope, clarified (extends D-047):** after a `codex-qa review` PASS, an edit confined to `docs/*.md` that records that verdict needs no fresh review, provided the non-doc diff is byte-identical to the one reviewed. Any non-doc change does (D-029, D-032). The owner can revisit this reading.
+- **Gates and approvals:** the commit, the draft PR (`ci:bundle`, `Closes #152`) and the squash are approved, the squash pinned to the head CI ran on, at attempt 1, every job green including the four bundles, and only if the `screenshots-linux` frames, light and dark, show a path with no "unknown path" or "Couldn't find". Anything else goes back to the architect.

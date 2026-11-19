@@ -1,8 +1,21 @@
 # Status
 
-**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** none; #147 merged. Next unless the owner moves it: #152, then #157 (the owner's choice), #150, #160
+**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #152 (D1), awaiting commit approval. Next: #157 (the owner's choice), #150, #160
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-18 (night): #152, the Downloads fallback (D1)
+- **The owner's ruling (2026-11-18):** the default folder stays Downloads; on Linux without `user-dirs.dirs` that means `Downloads` in the home folder.
+- **Changes:**
+  - `settings::default_download_dir(os, home)`: the OS Downloads folder, else `<home>/Downloads`, else a plain-words error ("Couldn't find a Downloads folder or your home folder. Choose a folder with Change….") instead of Tauri's "unknown path".
+  - `lib.rs` `download_dir` uses it; the default folder is still created per D-020, and a chosen folder never is.
+  - A unit test in `settings.rs`.
+- **QA:** `codex-qa test "#152"` gave PASS WITH NOTES, no bugs (`qa/reports/20261118-151917-test-oXTG.md`). Its 5 tests were added as `src-tauri/tests/default_download_dir_152_qa.rs` (without its STATUS edit); 5 of 5 pass.
+- **Checks (macOS only):** `cargo fmt --check`, clippy clean, `cargo test` 693 / 0 / 33 (688 plus Codex's 5), npm build OK, `npm test` 676 (663 pass, 13 skipped), `git diff --check` clean.
+- **Review:** `codex-qa review` gave PASS WITH NOTES, no defects (`qa/reports/20261118-163108-review-OYWT.md`). Its missing tests: the real Linux command with no `user-dirs.dirs` (that is the CI frames below), and a regular file at `<home>/Downloads` making `create_dir_all` fail. That error path is unchanged by #152 and already returns "Couldn't create …"; not added.
+- **Open:** the Linux acceptance (CI screenshot frames showing a path, not "unknown path") is only checkable in the PR's CI.
+- **Architect's ruling (D-028), recorded as D-049:** commit, draft PR and squash approved, the squash on attempt-1 green (bundles included) with the `screenshots-linux` frames, light and dark, showing a path and no "unknown path". This docs-only edit after the review needs no fresh review (D-049 extends D-047). For the owner: the fallback applies on every OS, not only Linux (no change on macOS or Windows); say if you'd rather it be Linux-only.
+- **Next bounded action:** the PR's CI and the Linux frames, then the squash and the post-merge handoff (run id, attempt, head, squash SHA, frames checked, path seen).
 
 ## 2026-11-18 (evening): #147 merged; the owner rules on release gating
 - **PR #161's CI:** run 44371795277 on b36b8cd, attempt 1, every job green, including all four bundles (`bundle (windows-x64)` job 135075928362).
@@ -20,7 +33,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
   - #149's artwork;
   - hand checks for #104, #21 and #103;
   - old QA worktrees, including `/var/folders/th/52pb8qb15rl2cjj_5r2m1hfm0000gn/T/queue-qa-QSVj` from today (its reports are already in `qa/reports/`).
-- **Next bounded action:** #152 (Linux without XDG user dirs), unless the owner moves it.
+- **Next bounded action (done; see the section above):** #152 (Linux without XDG user dirs).
 
 ## 2026-11-18 (later): #147, the `Cargo.lock` advisories
 - **Architect's ruling (D-028, 2026-11-18; D-048):** the plan is approved, with `rustix` added to the scope. The order is `test "#147"` and then `review` on the final diff. The commit, the draft PR (`ci:bundle`, `Closes #147`) and the squash are pre-approved on attempt-1 green including the bundles. (d) is filed as **#160** (P3, after #150, not a release gate).

@@ -130,6 +130,16 @@ pub fn unavailable(dir: &Path) -> String {
     )
 }
 
+/// The default download folder (D1, #152): the OS Downloads folder, or `Downloads` in the home
+/// folder when the OS names none (Linux without `user-dirs.dirs`). The caller creates it (D-020).
+pub fn default_download_dir(os: Option<PathBuf>, home: Option<PathBuf>) -> Result<PathBuf, String> {
+    os.or_else(|| home.map(|home| home.join("Downloads")))
+        .ok_or_else(|| {
+            "Couldn't find a Downloads folder or your home folder. Choose a folder with Change…."
+                .into()
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,5 +478,22 @@ mod tests {
                 .unwrap_err(),
             "no Downloads"
         );
+    }
+
+    #[test]
+    fn the_default_falls_back_to_downloads_in_the_home_folder() {
+        let os = PathBuf::from("/os/Downloads");
+        let home = PathBuf::from("/home/me");
+        assert_eq!(
+            default_download_dir(Some(os.clone()), Some(home.clone())).unwrap(),
+            os
+        );
+        assert_eq!(
+            default_download_dir(None, Some(home)).unwrap(),
+            PathBuf::from("/home/me").join("Downloads")
+        );
+        let err = default_download_dir(None, None).unwrap_err();
+        assert!(err.contains("Choose a folder"), "{err}");
+        assert!(!err.contains("unknown path"), "{err}");
     }
 }
