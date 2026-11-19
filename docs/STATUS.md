@@ -1,8 +1,20 @@
 # Status
 
-**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** #152 (D1), awaiting commit approval. Next: #157 (the owner's choice), #150, #160
+**Updated:** 2026-11-18 · **Milestone:** M1–M4 done · M5 (polish & release) in progress · **Active:** none; #152 merged. Next unless the owner moves it: #157 (the owner's choice), #150, #160
 
 This is a current-state handoff. Per-item history lives in git, the PRs (#34, #35, #38, #40), and `qa/reports/`.
+
+## 2026-11-18 (late night): #152 merged
+- **PR #163's CI:** run 44413041371 on ae71005, attempt 1, every job green, including all four bundles. Run 44413041338 was cancelled by `concurrency` when the PR opened with `ci:bundle`; that isn't a re-run.
+- **Linux acceptance (D-049), checked by eye in `screenshots-linux`:**
+  - `linux-empty-light.png`, `linux-empty-dark.png`, `linux-rows-light.png` and `linux-rows-dark.png` show "Saving to /home/runner/Downloads".
+  - `linux-settings-light.png` and `linux-settings-dark.png` show "Download folder /home/runner/Downloads".
+  - No frame shows "unknown path" or "Couldn't find".
+  - In `screenshots-windows`, `windows-empty-light.png` still shows `C:\Users\runneradmin\Downloads`.
+- **Merged** as 6abd58a: squashed with `--match-head-commit ae71005` under the architect's approval (D-049). `git diff ae71005 6abd58a` is empty, #152 closed via `Closes`, and the remote branch is deleted.
+- **`main`'s run** 44429527177 on 6abd58a: attempt 1, every job green, including all four bundles.
+- **For the owner:** the fallback applies on every OS (no change on macOS or Windows), and D-049's reading of D-032 (a docs-only edit that records a verdict needs no re-review). Both are open to revisit. The rest of the list is unchanged; see the evening section below.
+- **Next bounded action:** #157 needs the owner's choice of Linux focus ring; until then, #150.
 
 ## 2026-11-18 (night): #152, the Downloads fallback (D1)
 - **The owner's ruling (2026-11-18):** the default folder stays Downloads; on Linux without `user-dirs.dirs` that means `Downloads` in the home folder.
@@ -15,7 +27,7 @@ This is a current-state handoff. Per-item history lives in git, the PRs (#34, #3
 - **Review:** `codex-qa review` gave PASS WITH NOTES, no defects (`qa/reports/20261118-163108-review-OYWT.md`). Its missing tests: the real Linux command with no `user-dirs.dirs` (that is the CI frames below), and a regular file at `<home>/Downloads` making `create_dir_all` fail. That error path is unchanged by #152 and already returns "Couldn't create …"; not added.
 - **Open:** the Linux acceptance (CI screenshot frames showing a path, not "unknown path") is only checkable in the PR's CI.
 - **Architect's ruling (D-028), recorded as D-049:** commit, draft PR and squash approved, the squash on attempt-1 green (bundles included) with the `screenshots-linux` frames, light and dark, showing a path and no "unknown path". This docs-only edit after the review needs no fresh review (D-049 extends D-047). For the owner: the fallback applies on every OS, not only Linux (no change on macOS or Windows); say if you'd rather it be Linux-only.
-- **Next bounded action:** the PR's CI and the Linux frames, then the squash and the post-merge handoff (run id, attempt, head, squash SHA, frames checked, path seen).
+- **Next bounded action (done; see the section above):** the PR's CI, the Linux frames, the squash and this handoff.
 
 ## 2026-11-18 (evening): #147 merged; the owner rules on release gating
 - **PR #161's CI:** run 44371795277 on b36b8cd, attempt 1, every job green, including all four bundles (`bundle (windows-x64)` job 135075928362).
